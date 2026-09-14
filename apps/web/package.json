@@ -15,6 +15,7 @@
     "@base-ui/react": "^1.7.0",
     "@bookswap/shared": "workspace:*",
     "@hookform/resolvers": "^5.9.1",
+    "@tanstack/react-query": "^5.102.8",
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "class-variance-authority": "^0.7.1",

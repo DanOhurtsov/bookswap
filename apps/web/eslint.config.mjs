@@ -5,7 +5,7 @@ import { buildFeatureBoundaryConfig } from './eslint-feature-boundaries.mjs'
 // TD-01: features that currently exist under `features/`, one path per feature relative to
 // this file's directory (apps/web). A feature earns an entry here once it exists — this list
 // is not a place to pre-declare features that don't exist yet.
-const KNOWN_FEATURES = ['features/catalog/add-book']
+const KNOWN_FEATURES = ['features/catalog/add-book', 'features/catalog/correction']
 
 export default [
   ...base,

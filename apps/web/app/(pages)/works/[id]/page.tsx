@@ -10,17 +10,33 @@ import {
   copyResponseSchema,
   type Condition,
   type Edition,
+  type EditionPatchRequest,
   type Translation,
+  type TranslationPatchRequest,
   type Visibility,
+  type Work,
+  type WorkAuthor,
+  type WorkPatchRequest,
 } from '@bookswap/shared'
 import { AuthorLine, Chip, EditionLine } from '@/components/BookParts'
 import { HistoryEntryLine } from '@/components/HistoryEntryLine'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { WishlistButton } from '@/components/WishList/WishListButton'
+import {
+  EditionCorrectionForm,
+  TranslationCorrectionForm,
+  WorkCorrectionForm,
+  patchEdition,
+  patchTranslation,
+  patchWork,
+  useCatalogCorrection,
+  type CatalogCorrection,
+  type WorkCorrectionEntity,
+} from '@/features/catalog/correction/index.client'
 import { ApiRequestError, apiRequest, describeError } from '../../../lib/api'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '../../../lib/labels'
-import { useWork } from '../../../lib/use-catalog'
+import { useWork, type WorkReloadOutcome } from '../../../lib/use-catalog'
 import { useWorkHistory } from '../../../lib/use-history'
 import { useSession } from '../../../lib/use-session'
 import { useWishlist } from '../../../lib/use-wishlist'
@@ -43,6 +59,20 @@ export default function WorkPage() {
   const workId = parameters.id
   const { state, reload, canonicalWorkId } = useWork(workId)
   const wishlist = useWishlist()
+
+  // Owned here — not inside the (closable) correction form — so the header
+  // and author line below keep showing a confirmed save through a failed
+  // refresh or after the form closes (8e-3 follow-up, "overlay lifted to
+  // where title/authors/cards read it"). Called unconditionally, before any
+  // early return, per the Rules of Hooks: `state.detail` may not exist yet.
+  const knownWorkId = state.status === 'ready' ? state.detail.work.id : workId
+  const workCorrection = useCatalogCorrection<WorkPatchRequest, WorkCorrectionEntity>({
+    mutationKey: ['work-patch', knownWorkId],
+    mutationFn: (body) => patchWork(knownWorkId, body),
+    reload,
+    revisionOf: (entity) => entity.work.revision,
+    entityId: knownWorkId,
+  })
 
   useEffect(() => {
     if (session.status === 'guest') router.replace('/login')
@@ -105,7 +135,12 @@ export default function WorkPage() {
     )
   }
 
-  const { work, authors, translations, editions } = state.detail
+  const { translations, editions, viewerCapabilities } = state.detail
+  const { work, authors } = workCorrection.resolve({
+    work: state.detail.work,
+    authors: state.detail.authors,
+  })
+  const canEditWork = viewerCapabilities?.canEditWork === true
 
   return (
     <main className="page">
@@ -115,6 +150,15 @@ export default function WorkPage() {
       </p>
 
       <WishlistButton work={work} authors={authors} wishlist={wishlist} />
+
+      {canEditWork && (
+        <WorkCorrectionSection
+          work={work}
+          authors={authors}
+          correction={workCorrection}
+          reload={reload}
+        />
+      )}
 
       <dl className="facts">
         <dt>Мова оригіналу</dt>
@@ -136,7 +180,14 @@ export default function WorkPage() {
         ) : (
           <ul className="books">
             {translations.map((translation) => (
-              <TranslationCard key={translation.id} translation={translation} />
+              <TranslationCard
+                key={translation.id}
+                translation={translation}
+                canEdit={
+                  viewerCapabilities?.editableTranslationIds.includes(translation.id) === true
+                }
+                reload={reload}
+              />
             ))}
           </ul>
         )}
@@ -149,7 +200,14 @@ export default function WorkPage() {
         ) : (
           <ul className="books">
             {editions.map((edition) => (
-              <EditionCard key={edition.id} edition={edition} onAdded={reload} />
+              <EditionCard
+                key={edition.id}
+                edition={edition}
+                translations={translations}
+                canEdit={viewerCapabilities?.editableEditionIds.includes(edition.id) === true}
+                onAdded={reload}
+                reload={reload}
+              />
             ))}
           </ul>
         )}
@@ -216,6 +274,46 @@ function WorkHistorySection({ workId }: { workId: string }) {
   )
 }
 
+/**
+ * 8e-3: correction UI for `viewerCapabilities.canEditWork` (R8/R10). Collapsed
+ * by default — most viewers never see this at all, and API stays the actual
+ * permission boundary regardless of what this button shows. `correction` is
+ * owned by `WorkPage`, not here, so it survives this section toggling closed.
+ */
+function WorkCorrectionSection({
+  work,
+  authors,
+  correction,
+  reload,
+}: {
+  work: Work
+  authors: WorkAuthor[]
+  correction: CatalogCorrection<WorkPatchRequest, WorkCorrectionEntity>
+  reload: () => Promise<WorkReloadOutcome>
+}) {
+  const [open, setOpen] = useState(false)
+
+  if (!open) {
+    return (
+      <p className="form__aside">
+        <button type="button" className="button--ghost" onClick={() => setOpen(true)}>
+          Виправити метадані твору
+        </button>
+      </p>
+    )
+  }
+
+  return (
+    <WorkCorrectionForm
+      work={work}
+      authors={authors}
+      correction={correction}
+      reload={reload}
+      onClose={() => setOpen(false)}
+    />
+  )
+}
+
 function Shell({ children }: { children: ReactNode }) {
   return (
     <main className="page">
@@ -229,8 +327,30 @@ function Shell({ children }: { children: ReactNode }) {
  * §10.3, cold start: числового рангу немає й показувати нема чого, тож видно
  * структуровані ознаки — факти, а не думки. Це навмисно: «краще не показати
  * нічого, ніж показати 5.0 від однієї людини».
+ *
+ * Owns its own `useCatalogCorrection` instance (not the form) so a confirmed
+ * save for THIS translation keeps showing — in the read view below AND after
+ * the form closes — even through a failed background refresh.
  */
-function TranslationCard({ translation }: { translation: Translation }) {
+function TranslationCard({
+  translation: freshTranslation,
+  canEdit,
+  reload,
+}: {
+  translation: Translation
+  canEdit: boolean
+  reload: () => Promise<WorkReloadOutcome>
+}) {
+  const correction = useCatalogCorrection<TranslationPatchRequest, Translation>({
+    mutationKey: ['translation-patch', freshTranslation.id],
+    mutationFn: (body) => patchTranslation(freshTranslation.id, body),
+    reload,
+    revisionOf: (entity) => entity.revision,
+    entityId: freshTranslation.id,
+  })
+  const translation = correction.resolve(freshTranslation)
+  const [editing, setEditing] = useState(false)
+
   return (
     <li className="book">
       <span className="book__title">{translation.translator}</span>
@@ -248,12 +368,54 @@ function TranslationCard({ translation }: { translation: Translation }) {
         </Chip>
       </div>
       {translation.notes !== null && <p className="book__meta">{translation.notes}</p>}
+
+      {canEdit &&
+        (editing ? (
+          <TranslationCorrectionForm
+            translation={translation}
+            correction={correction}
+            reload={reload}
+            onClose={() => setEditing(false)}
+          />
+        ) : (
+          <div className="person__actions">
+            <button type="button" className="button--ghost" onClick={() => setEditing(true)}>
+              Виправити переклад
+            </button>
+          </div>
+        ))}
     </li>
   )
 }
 
-function EditionCard({ edition, onAdded }: { edition: Edition; onAdded: () => void }) {
+/**
+ * Owns its own `useCatalogCorrection` instance for the SAME reason as
+ * `TranslationCard` — separate from the "Це моє видання" add-copy flow below,
+ * which is unrelated catalog-vs-library state.
+ */
+function EditionCard({
+  edition: freshEdition,
+  translations,
+  canEdit,
+  onAdded,
+  reload,
+}: {
+  edition: Edition
+  translations: Translation[]
+  canEdit: boolean
+  onAdded: () => void
+  reload: () => Promise<WorkReloadOutcome>
+}) {
+  const correction = useCatalogCorrection<EditionPatchRequest, Edition>({
+    mutationKey: ['edition-patch', freshEdition.id],
+    mutationFn: (body) => patchEdition(freshEdition.id, body),
+    reload,
+    revisionOf: (entity) => entity.revision,
+    entityId: freshEdition.id,
+  })
+  const edition = correction.resolve(freshEdition)
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [condition, setCondition] = useState<Condition>('GOOD')
   const [visibility, setVisibility] = useState<Visibility>('FRIENDS')
   const [note, setNote] = useState('')
@@ -389,6 +551,23 @@ function EditionCard({ edition, onAdded }: { edition: Edition; onAdded: () => vo
           </button>
         </div>
       )}
+
+      {canEdit &&
+        (editing ? (
+          <EditionCorrectionForm
+            edition={edition}
+            translations={translations}
+            correction={correction}
+            reload={reload}
+            onClose={() => setEditing(false)}
+          />
+        ) : (
+          <div className="person__actions">
+            <button type="button" className="button--ghost" onClick={() => setEditing(true)}>
+              Виправити видання
+            </button>
+          </div>
+        ))}
     </li>
   )
 }
