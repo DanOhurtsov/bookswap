@@ -9,6 +9,7 @@ import type {
   WorkDetailResponse,
   WorkHistoryResponse,
 } from '@bookswap/shared'
+import { withQueryClient } from '@/app/lib/test-query-client'
 import WorkPage from './page'
 
 /**
@@ -93,7 +94,7 @@ describe('Сторінка твору: канонічний URL', () => {
       redirected: true,
     })
 
-    render(<WorkPage />)
+    render(withQueryClient(<WorkPage />))
 
     await waitFor(() => {
       expect(replace).toHaveBeenCalledWith('/works/work-new')
@@ -110,7 +111,7 @@ describe('Сторінка твору: канонічний URL', () => {
       redirected: false,
     })
 
-    render(<WorkPage />)
+    render(withQueryClient(<WorkPage />))
 
     expect(await screen.findByRole('heading', { name: 'Канонічний' })).toBeInTheDocument()
     expect(replace).not.toHaveBeenCalled()

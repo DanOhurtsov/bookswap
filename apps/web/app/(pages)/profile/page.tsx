@@ -26,7 +26,7 @@ const VISIBILITY_LABELS: Record<Visibility, string> = {
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { state, setUser } = useSession()
+  const { state, setUser, setGuest } = useSession()
 
   // Захист сторінки: гостя відправляємо на логін, щойно це стало відомо.
   useEffect(() => {
@@ -60,10 +60,18 @@ export default function ProfilePage() {
     )
   }
 
-  return <ProfileForm user={state.user} onUpdated={setUser} />
+  return <ProfileForm user={state.user} onUpdated={setUser} onLoggedOut={setGuest} />
 }
 
-function ProfileForm({ user, onUpdated }: { user: Me; onUpdated: (user: Me) => void }) {
+function ProfileForm({
+  user,
+  onUpdated,
+  onLoggedOut,
+}: {
+  user: Me
+  onUpdated: (user: Me) => void
+  onLoggedOut: () => void
+}) {
   const router = useRouter()
   const [fields, setFields] = useState({
     displayName: user.displayName,
@@ -133,11 +141,25 @@ function ProfileForm({ user, onUpdated }: { user: Me; onUpdated: (user: Me) => v
   }
 
   async function logout(): Promise<void> {
+    setFailure(undefined)
+
     try {
       await apiRequest('/auth/logout', { method: 'POST' })
-    } finally {
-      router.replace('/login')
+    } catch (error) {
+      // A failed logout must not be mistaken for a confirmed one — the user
+      // is still signed in, and this page (and everything else reading the
+      // shared session) has to keep saying so, not silently redirect them to
+      // `/login` while their cookie is still valid.
+      setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
+      return
     }
+
+    // Shared session (§8e-3 follow-up): sets `guest` directly through the
+    // SAME context every other mounted component reads — `NavBar` and
+    // anything else on screen drop the old identity immediately, without
+    // waiting on (or depending on the outcome of) a fresh `/auth/session` GET.
+    onLoggedOut()
+    router.replace('/login')
   }
 
   return (

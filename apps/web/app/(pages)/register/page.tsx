@@ -7,10 +7,12 @@ import { PASSWORD_LIMITS, registerRequestSchema, sessionResponseSchema } from '@
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
+import { useSession } from '../../lib/use-session'
 import { validate, type FieldErrors } from '../../lib/validation'
 
 export default function RegisterPage() {
   const router = useRouter()
+  const session = useSession()
   const [fields, setFields] = useState({ displayName: '', email: '', password: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<unknown>()
@@ -31,12 +33,16 @@ export default function RegisterPage() {
     setPending(true)
 
     try {
-      await apiRequest('/auth/register', {
+      const { user } = await apiRequest('/auth/register', {
         method: 'POST',
         body: result.data,
         schema: sessionResponseSchema,
       })
 
+      // Shared session (§8e-3 follow-up) — same reasoning as LoginPage:
+      // every other mounted consumer (`NavBar` included) sees the new
+      // identity through the same context, without a fetch of its own.
+      session.setUser(user)
       router.push('/profile')
     } catch (error) {
       // Зайнята адреса — це помилка конкретного поля, а не форми загалом.

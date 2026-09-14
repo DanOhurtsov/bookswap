@@ -7,10 +7,12 @@ import { loginRequestSchema, sessionResponseSchema } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
+import { useSession } from '../../lib/use-session'
 import { validate, type FieldErrors } from '../../lib/validation'
 
 export default function LoginPage() {
   const router = useRouter()
+  const session = useSession()
   const [fields, setFields] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<unknown>()
@@ -31,12 +33,16 @@ export default function LoginPage() {
     setPending(true)
 
     try {
-      await apiRequest('/auth/login', {
+      const { user } = await apiRequest('/auth/login', {
         method: 'POST',
         body: result.data,
         schema: sessionResponseSchema,
       })
 
+      // The shared session (§8e-3 follow-up) — not just this page's own
+      // state: `NavBar` and every other mounted consumer must see the new
+      // identity too, without waiting for a fetch of their own.
+      session.setUser(user)
       router.push('/profile')
     } catch (error) {
       // INVALID_CREDENTIALS показується як помилка форми, а не поля: сервер
