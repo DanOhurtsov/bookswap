@@ -115,6 +115,20 @@ export const API_ERROR_CODES = {
    */
   CATALOG_LOOKUP_TIMEOUT: 'CATALOG_LOOKUP_TIMEOUT',
 
+  // --- CSV library import (docs/plan/stage-8-inventory.md, R4–R6, §4) ---------
+  /**
+   * The file exceeds a whole-file cap. `details: { limit, max, actual }`
+   * (`libraryImportTooLargeDetailsSchema`): `BYTES` — 48 KiB as received,
+   * checked before parsing; `ROWS` — 200 data rows; `COPIES` — 500 in total.
+   */
+  IMPORT_TOO_LARGE: 'IMPORT_TOO_LARGE',
+  /**
+   * The file is not a CSV v1 import at all — encoding, delimiter, header or
+   * record structure — so there are no rows to report errors on.
+   * `details.reason` (`libraryImportInvalidCsvDetailsSchema`) says which.
+   */
+  IMPORT_INVALID_CSV: 'IMPORT_INVALID_CSV',
+
   // --- Позичання (§5, §8) ----------------------------------------------------
   /** Запит на позичання власного примірника (HTTP 400). Інваріант §5.3.4. */
   LOAN_SELF: 'LOAN_SELF',
