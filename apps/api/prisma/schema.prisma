@@ -68,6 +68,7 @@ model User {
   notificationPrefs  NotificationPreference[]
   productEvents      ProductEvent[]
   catalogRevisions   CatalogRevision[]
+  libraryImports     LibraryImport[]
 
   @@index([displayName])
 }
@@ -708,4 +709,66 @@ model ProductEvent {
 
   @@index([type, occurredAt])
   @@index([subjectUserId, type])
+}
+
+// ---------------------------------------------------------------------------
+// Stage 8f-1: CSV library import drafts (docs/plan/stage-8-inventory.md, R5/R6, §5)
+// ---------------------------------------------------------------------------
+
+/// One uploaded file per owner and content. The raw file is never stored: only
+/// the opaque `sourceHash`, status, counts and timestamps, plus per-row payload
+/// in `LibraryImportRow` while the import is a draft.
+model LibraryImport {
+  id      String @id @default(cuid())
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  /// R6: SHA-256 (hex) of the received UTF-8 bytes minus one leading BOM.
+  /// A pseudonymous equality key, not anonymization.
+  sourceHash String
+  status     LibraryImportStatus @default(DRAFT)
+
+  rowCount         Int
+  copyCount        Int
+  /// Idempotency summary of a committed import — written by the commit (8g).
+  createdCopyCount Int?
+
+  /// Draft TTL (24 h). Only meaningful while `status = DRAFT`; expiry is lazy.
+  expiresAt   DateTime
+  committedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  rows LibraryImportRow[]
+
+  @@unique([ownerId, sourceHash])
+  @@index([ownerId, status])
+  @@index([expiresAt])
+}
+
+enum LibraryImportStatus {
+  DRAFT
+  EXPIRED
+  COMMITTED
+}
+
+model LibraryImportRow {
+  importId  String
+  import    LibraryImport          @relation(fields: [importId], references: [id], onDelete: Cascade)
+  rowNumber Int
+  status    LibraryImportRowStatus
+
+  /// `libraryImportRowPayloadSchema` (packages/shared), validated on every
+  /// write and read. Holds the private `note`, so it is deleted on expiry.
+  payload Json
+
+  @@id([importId, rowNumber])
+}
+
+enum LibraryImportRowStatus {
+  READY_EXISTING_EDITION
+  READY_CREATE_CHAIN
+  NEEDS_REVIEW
+  INVALID
+  SKIPPED
 }

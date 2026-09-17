@@ -28,6 +28,15 @@
       "dependsOn": ["^build", "generate"],
       "outputs": []
     },
+    // Stage 8f-1: the API contract test reads the web app's CSV import template
+    // with the API parser (library-import-template.spec.ts). The asset lives
+    // outside this package, so it is added to the default inputs explicitly —
+    // otherwise editing only the template would replay a stale cached result.
+    "@bookswap/api#test": {
+      "dependsOn": ["^build", "generate"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/web/public/library-import-template.csv"],
+      "outputs": []
+    },
     // Потребує запущеної PostgreSQL, тож кешувати нічого: результат залежить від
     // стану бази, а не лише від вмісту репозиторію.
     "test:db": {

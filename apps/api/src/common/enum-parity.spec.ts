@@ -10,6 +10,8 @@ import {
   EXCLUSIVE_LOAN_STATUS,
   FRIENDSHIP_STATUS,
   IMMEDIATE_NOTIFICATION_TYPE,
+  LIBRARY_IMPORT_ROW_STATUS,
+  LIBRARY_IMPORT_STATUS,
   LOAN_STATUS,
   NOTIFICATION_TYPE,
   OPEN_LOAN_STATUS,
@@ -26,6 +28,8 @@ import type {
   DeliveryStatus as SharedDeliveryStatus,
   EditionFormat as SharedEditionFormat,
   FriendshipStatus as SharedFriendshipStatus,
+  LibraryImportRowStatus as SharedLibraryImportRowStatus,
+  LibraryImportStatus as SharedLibraryImportStatus,
   LoanStatus as SharedLoanStatus,
   NotificationType as SharedNotificationType,
   Visibility as SharedVisibility,
@@ -39,6 +43,8 @@ import {
   DeliveryStatus as PrismaDeliveryStatus,
   EditionFormat as PrismaEditionFormat,
   FriendshipStatus as PrismaFriendshipStatus,
+  LibraryImportRowStatus as PrismaLibraryImportRowStatus,
+  LibraryImportStatus as PrismaLibraryImportStatus,
   LoanStatus as PrismaLoanStatus,
   NotificationType as PrismaNotificationType,
   Visibility as PrismaVisibility,
@@ -52,6 +58,8 @@ import type {
   DeliveryStatus as PrismaDeliveryStatusType,
   EditionFormat as PrismaEditionFormatType,
   FriendshipStatus as PrismaFriendshipStatusType,
+  LibraryImportRowStatus as PrismaLibraryImportRowStatusType,
+  LibraryImportStatus as PrismaLibraryImportStatusType,
   LoanStatus as PrismaLoanStatusType,
   NotificationType as PrismaNotificationTypeType,
   Visibility as PrismaVisibilityType,
@@ -76,6 +84,12 @@ const _notificationTypeMatches: Equal<SharedNotificationType, PrismaNotification
 const _channelMatches: Equal<SharedChannel, PrismaChannelType> = true
 const _deliveryStatusMatches: Equal<SharedDeliveryStatus, PrismaDeliveryStatusType> = true
 const _catalogEntityTypeMatches: Equal<SharedCatalogEntityType, PrismaCatalogEntityTypeType> = true
+const _libraryImportStatusMatches: Equal<SharedLibraryImportStatus, PrismaLibraryImportStatusType> =
+  true
+const _libraryImportRowStatusMatches: Equal<
+  SharedLibraryImportRowStatus,
+  PrismaLibraryImportRowStatusType
+> = true
 
 describe('Visibility: shared ↔ Prisma', () => {
   it('містить ті самі значення', () => {
@@ -318,6 +332,40 @@ describe('CatalogEntityType: shared ↔ Prisma', () => {
 
   it('відповідає ланцюгу §3: Work, Translation, Edition', () => {
     expect([...CATALOG_ENTITY_TYPE].sort()).toEqual(['EDITION', 'TRANSLATION', 'WORK'])
+  })
+})
+
+describe('LibraryImportStatus: shared ↔ Prisma (Stage 8f-1, R6)', () => {
+  it('has the same values', () => {
+    expect([...LIBRARY_IMPORT_STATUS].sort()).toEqual(
+      Object.values(PrismaLibraryImportStatus).sort(),
+    )
+  })
+
+  it('types are mutually assignable', () => {
+    expect(_libraryImportStatusMatches).toBe(true)
+  })
+})
+
+describe('LibraryImportRowStatus: shared ↔ Prisma (Stage 8f-1, R5)', () => {
+  it('has the same values', () => {
+    expect([...LIBRARY_IMPORT_ROW_STATUS].sort()).toEqual(
+      Object.values(PrismaLibraryImportRowStatus).sort(),
+    )
+  })
+
+  it('types are mutually assignable', () => {
+    expect(_libraryImportRowStatusMatches).toBe(true)
+  })
+
+  it('matches the five R5 statuses', () => {
+    expect([...LIBRARY_IMPORT_ROW_STATUS].sort()).toEqual([
+      'INVALID',
+      'NEEDS_REVIEW',
+      'READY_CREATE_CHAIN',
+      'READY_EXISTING_EDITION',
+      'SKIPPED',
+    ])
   })
 })
 

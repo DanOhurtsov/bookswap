@@ -166,6 +166,71 @@ best-effort моделлю Етапу 8a.
 або новий файл зі зміненим content. Кнопки «імпортувати ще раз попри той самий
 hash» у Stage 8 немає.
 
+#### R6a. Погоджені рішення 8f-1 (PO, 2026-09-17)
+
+Закривають питання, які R4–R6 і §4 залишали відкритими для parser і persistence.
+
+**Файл і синтаксис (R4/R5).**
+
+- Ліміт 48 KiB перевіряється за початковим розміром отриманого файла, включно з BOM,
+  до decode і parse.
+- Початковий UTF-8 BOM знімається рівно один раз, до decode; `csv-parse` отримує
+  `bom: false`. Другий BOM не зникає непомітно: header не збігається
+  (`HEADER_MISMATCH`). Невалідний UTF-8 — `INVALID_ENCODING`.
+- Header перевіряється раніше за порожнечу: файл лише з header (зокрема шаблон)
+  дає `EMPTY`, а не `HEADER_MISMATCH`. Шаблон `/library-import-template.csv`
+  містить лише header, без демонстраційної книги; приклад заповнення — у
+  документації, не в asset.
+- `max_record_size` дорівнює 48 KiB — суто захисне значення: запис не може мати
+  більше символів, ніж файл байтів, тож жоден дозволений R4 рядок ним не
+  відхиляється. Окремого продуктового ліміту на рядок і окремого reason немає.
+- Рядки розділяються `\r\n`, `\n` або `\r`, зокрема змішано в одному файлі;
+  порожні рядки пропускаються. `rowNumber` — порядковий номер data record
+  (1-based), а не фізичний рядок файла.
+- Клітинка рівно `''` означає «не задано» (для `quantity` — 1, для `format`,
+  `condition`, `visibility` — defaults R4). Будь-яке інше значення проходить
+  чинну shared-схему поля без додаткових перетворень. Integer — лише
+  `0|-?[1-9][0-9]*` без пробілів; boolean — лише `true`/`false`.
+
+**DUPLICATE_ROW (R4).** Ключ — усі нормалізовані значення рядка (після shared Zod,
+з defaults), крім `quantity`. Порядок авторів — частина ключа; автори за іменем не
+об'єднуються; жодної нормалізації тексту поза shared-схемами (Unicode NFC теж ні).
+Перше валідне входження лишається, наступні отримують `DUPLICATE_ROW` з
+`firstRowNumber`. Quantity дублікатів не підсумовується. Рядки з помилками полів у
+порівнянні не беруть участі. Правила «DUPLICATE_ROW можна лише пропустити» немає.
+
+**500 Copy на етапі parse.** Сумуються валідні `quantity` УСІХ рядків, включно з
+`DUPLICATE_ROW` і рядками з іншими помилками; порожнє `quantity` = 1. Невалідне
+`quantity` не замінюється одиницею: рядок отримує помилку, а його кількість у суму
+не входить. Проходження цього ліміту не доводить готовності до commit: після
+edit/resolve (8f-2) кількість перераховується, а перед commit (8g) максимум 500
+Copy повторно перевіряється за фактичними непропущеними валідними рядками.
+
+**sourceHash (R6).** SHA-256 від отриманих UTF-8 байтів після видалення лише
+початкового BOM. CRLF/CR, Unicode, пробіли й delimiter не нормалізуються: той самий
+вміст з іншими закінченнями рядків — інший `sourceHash`.
+
+**Expiration і повторний preview (R6).**
+
+- Статуси `LibraryImport`: `DRAFT`, `EXPIRED`, `COMMITTED`.
+- Прострочений draft стає `EXPIRED`: усі `LibraryImportRow` (payload із приватною
+  `note`) видаляються атомарно зі зміною статусу, metadata (hash, counts,
+  timestamps) лишається. Cleanup lazy і scoped до owner, без scheduler.
+- `EXPIRED` відновлюється лише з повторно наданого й перевіреного файла: нові rows
+  і новий TTL у тому самому записі. `COMMITTED` не відновлюється, не скидається й
+  не прострочується — завжди повертає попередній summary.
+- Два одночасні перші збереження того самого owner/hash: транзакція, що програла
+  на unique `(ownerId, sourceHash)`, повністю відкочується; повтор виконується
+  новою транзакцією вже після rollback. Результат — один import і один комплект rows.
+- HTTP-поведінка (`IMPORT_EXPIRED`, `404` для чужого id) — 8f-2.
+
+**Помилки рівня файла (§4).** Структурно зламаний CSV — `IMPORT_INVALID_CSV` з
+`details.reason`: `HEADER_MISMATCH` (`missingColumns`, `duplicateColumns`,
+`unknownColumnPositions` — лише позиції, без тексту файла, `orderMismatch`),
+`AMBIGUOUS_DELIMITER`, `COLUMN_COUNT` і `MALFORMED_CSV` (з `line`),
+`INVALID_ENCODING`, `EMPTY`. Перевищення лімітів — `IMPORT_TOO_LARGE` з
+`details: { limit: BYTES | ROWS | COPIES, max, actual }`.
+
 ### R7. Batched catalog resolution
 
 Preview спочатку одним запитом отримує всі локальні Edition за ISBN. Cache hits
@@ -461,8 +526,8 @@ parity tests. Import draft завжди scoped до owner; чужий id пов�
 
 Стабільні row errors: `INVALID_ISBN`, `INVALID_FIELD`, `DUPLICATE_ROW`,
 `LOOKUP_UNAVAILABLE`, `LOOKUP_NOT_FOUND`, `MISSING_CATALOG_DATA`,
-`AMBIGUOUS_CATALOG_MATCH`. Import errors: `IMPORT_TOO_LARGE`, `IMPORT_EXPIRED`,
-`IMPORT_NOT_READY`. Текст локалізує web; API повертає code і structured details.
+`AMBIGUOUS_CATALOG_MATCH`. Import errors: `IMPORT_TOO_LARGE`, `IMPORT_INVALID_CSV`
+(R6a), `IMPORT_EXPIRED`, `IMPORT_NOT_READY`. Текст локалізує web; API повертає code і structured details.
 
 ## 5. Data model і migration safety
 
