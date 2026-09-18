@@ -42,26 +42,70 @@ describe('OpenLibraryLookupProvider', () => {
   }
 
   it('запитує bibkey ISBN:<isbn> у форматі jscmd=data', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({}))
+    fetchMock.mockResolvedValue(jsonResponse({ [`ISBN:${ISBN}`]: { title: 'Т' } }))
 
     await lookup()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url] = fetchMock.mock.calls[0] as [string]
 
+    expect(url.startsWith('https://openlibrary.org/api/books.json?')).toBe(true)
     expect(url).toContain('bibkeys=ISBN:9783161484100')
     expect(url).toContain('jscmd=data')
     expect(url).toContain('format=json')
   })
 
   it('передає AbortSignal у fetch', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({}))
+    fetchMock.mockResolvedValue(jsonResponse({ [`ISBN:${ISBN}`]: { title: 'Т' } }))
     const controller = new AbortController()
 
     await provider.lookup(ISBN, controller.signal)
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.signal).toBe(controller.signal)
+  })
+
+  describe('lookupWork', () => {
+    it('повертає лише сильний збіг назви й автора', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          docs: [
+            { key: '/works/OL111W', title: "Hallowe'en Party", author_name: ['Інша авторка'] },
+            {
+              key: '/works/OL471832W',
+              title: "Hallowe'en Party",
+              author_name: ['Agatha Christie'],
+            },
+          ],
+        }),
+      )
+
+      await expect(
+        provider.lookupWork("Hallowe'en Party", ['Agatha Christie'], new AbortController().signal),
+      ).resolves.toBe('OL471832W')
+
+      const [url] = fetchMock.mock.calls[0] as [URL]
+      expect(url.origin + url.pathname).toBe('https://openlibrary.org/search.json')
+      expect(url.searchParams.get('title')).toBe("Hallowe'en Party")
+      expect(url.searchParams.get('author')).toBe('Agatha Christie')
+    })
+
+    it('title-only або слабкий авторський збіг не прив’язує Work', async () => {
+      await expect(
+        provider.lookupWork('Назва', [], new AbortController().signal),
+      ).resolves.toBeUndefined()
+      expect(fetchMock).not.toHaveBeenCalled()
+
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          docs: [{ key: '/works/OL111W', title: 'Назва', author_name: ['Тезка Інший'] }],
+        }),
+      )
+
+      await expect(
+        provider.lookupWork('Назва', ['Потрібний Автор'], new AbortController().signal),
+      ).resolves.toBeUndefined()
+    })
   })
 
   it('нормалізує title', async () => {
@@ -103,7 +147,7 @@ describe('OpenLibraryLookupProvider', () => {
   })
 
   it('запитує коректний bibkey для будь-якого ISBN, переданого в lookup()', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({}))
+    fetchMock.mockResolvedValue(jsonResponse({ 'ISBN:9780306406157': { title: 'Т' } }))
 
     await provider.lookup('9780306406157', new AbortController().signal)
 
@@ -212,6 +256,22 @@ describe('OpenLibraryLookupProvider', () => {
     expect(result?.coverUrl).toBe('https://example.com/m.jpg')
   })
 
+  it('нормалізує фізичні поля видання', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        [`ISBN:${ISBN}`]: {
+          title: 'Т',
+          number_of_pages: 304,
+          physical_format: 'Hardcover',
+        },
+      }),
+    )
+
+    const result = await lookup()
+
+    expect(result).toMatchObject({ pageCount: 304, format: 'HARDCOVER' })
+  })
+
   it('externalId — довідковий, похідний з key, і не є обов’язковим', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ [`ISBN:${ISBN}`]: { title: 'Т', key: '/books/OL123456M' } }),
@@ -302,12 +362,41 @@ describe('OpenLibraryLookupProvider', () => {
     })
   })
 
-  it('порожній bibkey (невідомий ISBN) — undefined, а не помилка', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({}))
+  it('порожній bibkey перевіряє точний ISBN через Search API', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({})).mockResolvedValueOnce(
+      jsonResponse({
+        docs: [
+          {
+            key: '/works/OL24348752W',
+            title: 'Influence, New and Expanded',
+            author_name: ['Robert B Cialdini PhD'],
+            isbn: ['0063136899', ISBN],
+          },
+        ],
+      }),
+    )
 
     const result = await lookup()
 
-    expect(result).toBeUndefined()
+    expect(result).toEqual({
+      title: 'Influence, New and Expanded',
+      authors: ['Robert B Cialdini PhD'],
+      workExternalId: 'OL24348752W',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [url] = fetchMock.mock.calls[1] as [URL]
+    expect(url.origin + url.pathname).toBe('https://openlibrary.org/search.json')
+    expect(url.searchParams.get('isbn')).toBe(ISBN)
+  })
+
+  it('пошук не приймає схожий запис без точного ISBN', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({})).mockResolvedValueOnce(
+      jsonResponse({
+        docs: [{ key: '/works/OL1W', title: 'Схожа книга', isbn: ['9780306406157'] }],
+      }),
+    )
+
+    await expect(lookup()).resolves.toBeUndefined()
   })
 
   it('запис без title — BookLookupProviderError', async () => {

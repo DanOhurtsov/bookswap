@@ -2,6 +2,7 @@ const DEFAULT_TIMEOUT_MS = 5_000
 
 /** R3: 30 днів — довше за це кешований запис вважається простроченим. */
 const DEFAULT_CACHE_TTL_MS = 30 * 24 * 60 * 60_000
+const DEFAULT_NEGATIVE_CACHE_TTL_MS = 24 * 60 * 60_000
 
 /**
  * `common/rate-limit.config.ts` читає `@Throttle`-значення лінькво через
@@ -26,4 +27,9 @@ export function lookupTimeoutMs(): number {
 /** R3: TTL кешу зовнішніх відповідей. */
 export function lookupCacheTtlMs(): number {
   return fromEnv('CATALOG_LOOKUP_CACHE_TTL_MS', DEFAULT_CACHE_TTL_MS)
+}
+
+/** Unknown ISBNs are cached briefly so a newly indexed edition is discovered soon. */
+export function lookupNegativeCacheTtlMs(): number {
+  return fromEnv('CATALOG_LOOKUP_NEGATIVE_CACHE_TTL_MS', DEFAULT_NEGATIVE_CACHE_TTL_MS)
 }

@@ -52,12 +52,14 @@ it('keeps lookup title and author order editable without treating the edition ye
     title: 'Назва з lookup',
     authors: ['Автор Один', 'Автор Два'],
     publishedYear: 2001,
+    description: 'Опис із зовнішнього каталогу',
   }
   const user = userEvent.setup()
   renderWork('ISBN query', lookup)
 
   expect(screen.getByLabelText('Назва твору')).toHaveValue('Назва з lookup')
   expect(screen.getByLabelText('Рік першого видання')).toHaveValue(null)
+  expect(screen.getByLabelText('Опис')).toHaveValue('Опис із зовнішнього каталогу')
   const authorNames = screen.getAllByLabelText('Імʼя')
   expect(authorNames).toHaveLength(2)
   expect(itemAt(authorNames, 0)).toHaveValue('Автор Один')

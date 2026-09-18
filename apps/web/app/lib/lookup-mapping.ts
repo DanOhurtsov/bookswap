@@ -1,4 +1,4 @@
-import type { BookLookupResult } from '@bookswap/shared'
+import type { BookLookupResult, EditionFormat } from '@bookswap/shared'
 
 /**
  * §6.3, ланцюг `Work → Translation → Edition → Copy`: `BookLookupResult`
@@ -30,13 +30,16 @@ import type { BookLookupResult } from '@bookswap/shared'
 export interface WorkDraftFromLookup {
   title: string
   authors: string[]
+  description: string
 }
 
 export interface EditionDraftFromLookup {
   publisher: string
   /** Порожній рядок, не `undefined`: керований `<input type="number">` не приймає undefined. */
   year: string
+  pageCount: string
   coverUrl: string
+  format: EditionFormat | undefined
 }
 
 export interface LookupWizardDraft {
@@ -51,11 +54,14 @@ export function mapLookupResultToDraft(lookup: BookLookupResult | undefined): Lo
     work: {
       title: lookup?.title ?? '',
       authors: lookup?.authors ?? [],
+      description: lookup?.description ?? '',
     },
     edition: {
       publisher: lookup?.publisher ?? '',
       year: lookup?.publishedYear === undefined ? '' : String(lookup.publishedYear),
+      pageCount: lookup?.pageCount === undefined ? '' : String(lookup.pageCount),
       coverUrl: lookup?.coverUrl ?? '',
+      format: lookup?.format,
     },
     translationLang: lookup?.language,
   }

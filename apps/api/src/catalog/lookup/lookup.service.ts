@@ -7,10 +7,24 @@ import {
   BookLookupProviderError,
   type BookLookupProvider,
 } from './book-lookup-provider'
-import { lookupCacheTtlMs, lookupTimeoutMs } from './lookup.config'
+import { lookupCacheTtlMs, lookupNegativeCacheTtlMs, lookupTimeoutMs } from './lookup.config'
 
 /** Внутрішній маркер: race програно таймауту, а не провайдеру. */
 class LookupTimeoutError extends Error {}
+
+const NEGATIVE_CACHE_PAYLOAD = { notFound: true } as const
+
+type CacheReadResult =
+  { kind: 'hit'; result: BookLookupResult } | { kind: 'not-found' } | { kind: 'miss' }
+
+function isNegativeCachePayload(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).notFound === true
+  )
+}
 
 /**
  * §6.3, крок 1 і R3: кеш + оркестрація зовнішнього провайдера.
@@ -30,9 +44,15 @@ export class LookupService {
 
   async lookup(isbn: string): Promise<BookLookupResult> {
     const cached = await this.readCache(isbn)
-    if (cached !== undefined) return cached
+    if (cached.kind === 'hit') return cached.result
+    if (cached.kind === 'not-found') this.throwNotFound(isbn)
 
     const result = await this.fetchFromProvider(isbn)
+
+    if (result === undefined) {
+      await this.writeNegativeCache(isbn)
+      this.throwNotFound(isbn)
+    }
 
     await this.writeCache(isbn, result)
 
@@ -54,11 +74,18 @@ export class LookupService {
    * підміняє поле (`.catch({})` тут навмисно не використовується — саме це
    * ховало б проблему, а не лікувало).
    */
-  private async readCache(isbn: string): Promise<BookLookupResult | undefined> {
+  private async readCache(isbn: string): Promise<CacheReadResult> {
     const row = await this.prisma.externalBookLookup.findUnique({ where: { isbn } })
 
-    if (row === null) return undefined
-    if (Date.now() - row.fetchedAt.getTime() > lookupCacheTtlMs()) return undefined
+    if (row === null) return { kind: 'miss' }
+
+    const age = Date.now() - row.fetchedAt.getTime()
+
+    if (isNegativeCachePayload(row.payload)) {
+      return age <= lookupNegativeCacheTtlMs() ? { kind: 'not-found' } : { kind: 'miss' }
+    }
+
+    if (age > lookupCacheTtlMs()) return { kind: 'miss' }
 
     const parsed = bookLookupResultSchema.safeParse(row.payload)
 
@@ -66,10 +93,10 @@ export class LookupService {
       this.logger.warn(
         `Кешований запис ExternalBookLookup(${isbn}) не пройшов схему — трактую як cache miss`,
       )
-      return undefined
+      return { kind: 'miss' }
     }
 
-    return parsed.data
+    return { kind: 'hit', result: parsed.data }
   }
 
   private async writeCache(isbn: string, payload: BookLookupResult): Promise<void> {
@@ -80,6 +107,22 @@ export class LookupService {
     })
   }
 
+  private async writeNegativeCache(isbn: string): Promise<void> {
+    await this.prisma.externalBookLookup.upsert({
+      where: { isbn },
+      create: { isbn, payload: NEGATIVE_CACHE_PAYLOAD },
+      update: { payload: NEGATIVE_CACHE_PAYLOAD, fetchedAt: new Date() },
+    })
+  }
+
+  private throwNotFound(isbn: string): never {
+    throw new ApiException(
+      API_ERROR_CODES.CATALOG_LOOKUP_NOT_FOUND,
+      `Зовнішні провайдери не знають ISBN ${isbn}`,
+      HttpStatus.NOT_FOUND,
+    )
+  }
+
   /**
    * Таймаут рахується тут, а не всередині провайдера: незалежно від того, чи
    * реалізація поважає `AbortSignal`, виклик сервісу все одно повертається за
@@ -87,7 +130,7 @@ export class LookupService {
    * реальний HTTP-провайдер нею скасовує вже непотрібний запит, — але
    * гарантію дає саме `Promise.race`.
    */
-  private async fetchFromProvider(isbn: string): Promise<BookLookupResult> {
+  private async fetchFromProvider(isbn: string): Promise<BookLookupResult | undefined> {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -110,20 +153,8 @@ export class LookupService {
     void providerCall.catch(() => undefined)
 
     try {
-      const found = await Promise.race([providerCall, timeout])
-
-      if (found === undefined) {
-        throw new ApiException(
-          API_ERROR_CODES.CATALOG_LOOKUP_NOT_FOUND,
-          `Зовнішній провайдер не знає ISBN ${isbn}`,
-          HttpStatus.NOT_FOUND,
-        )
-      }
-
-      return found
+      return await Promise.race([providerCall, timeout])
     } catch (error) {
-      if (error instanceof ApiException) throw error
-
       if (error instanceof LookupTimeoutError) {
         throw new ApiException(
           API_ERROR_CODES.CATALOG_LOOKUP_TIMEOUT,

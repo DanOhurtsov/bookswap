@@ -13,8 +13,8 @@ describe('mapLookupResultToDraft', () => {
     const draft = mapLookupResultToDraft(undefined)
 
     expect(draft).toEqual({
-      work: { title: '', authors: [] },
-      edition: { publisher: '', year: '', coverUrl: '' },
+      work: { title: '', authors: [], description: '' },
+      edition: { publisher: '', year: '', pageCount: '', coverUrl: '', format: undefined },
       translationLang: undefined,
     })
   })
@@ -40,6 +40,7 @@ describe('mapLookupResultToDraft', () => {
     expect(draft.work).toEqual({
       title: 'Шантарам',
       authors: ['Ґреґорі Девід Робертс', 'Другий автор'],
+      description: '',
     })
   })
 
@@ -47,6 +48,9 @@ describe('mapLookupResultToDraft', () => {
     const lookup: BookLookupResult = {
       title: 'Т',
       publisher: 'КСД',
+      description: 'Опис твору',
+      pageCount: 384,
+      format: 'HARDCOVER',
       coverUrl: 'https://example.com/cover.jpg',
     }
 
@@ -95,13 +99,26 @@ describe('mapLookupResultToDraft', () => {
       publishedYear: 2003,
       language: 'en',
       publisher: 'КСД',
+      description: 'Опис твору',
+      pageCount: 384,
+      format: 'HARDCOVER',
       coverUrl: 'https://example.com/cover.jpg',
       externalId: 'OL123456M',
     }
 
     expect(mapLookupResultToDraft(lookup)).toEqual({
-      work: { title: 'Шантарам', authors: ['Ґреґорі Девід Робертс'] },
-      edition: { publisher: 'КСД', year: '2003', coverUrl: 'https://example.com/cover.jpg' },
+      work: {
+        title: 'Шантарам',
+        authors: ['Ґреґорі Девід Робертс'],
+        description: 'Опис твору',
+      },
+      edition: {
+        publisher: 'КСД',
+        year: '2003',
+        pageCount: '384',
+        coverUrl: 'https://example.com/cover.jpg',
+        format: 'HARDCOVER',
+      },
       translationLang: 'en',
     })
   })

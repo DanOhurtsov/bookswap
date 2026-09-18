@@ -2,6 +2,7 @@ import type { CopyEntryMethod, WorkDetailResponse } from '@bookswap/shared'
 import type { AddBookSearchResult } from '../api/search-add-book'
 import type { ExistingEditionInput, ExistingWorkInput, NewWorkInput } from '../model/add-book-step'
 import { CandidateCard } from './CandidateCard'
+import { LookupCard } from './LookupCard'
 
 type SearchResultsProps = {
   result: AddBookSearchResult
@@ -42,6 +43,27 @@ export function SearchResults({
   onFoundWork,
   onCreateNew,
 }: SearchResultsProps) {
+  const hasExactCatalogEdition =
+    result.isbn !== undefined &&
+    result.candidates.some((candidate) =>
+      candidate.editions.some((edition) => edition.isbn13 === result.isbn),
+    )
+
+  if (result.candidates.length === 0 && result.lookup !== undefined) {
+    return (
+      <>
+        <p className="empty">У каталозі BookSwap цього видання ще немає.</p>
+        <ul className="books">
+          <LookupCard
+            isbn={result.isbn}
+            lookup={result.lookup}
+            onUse={() => onCreateNew(newWorkInput(result, entryMethod))}
+          />
+        </ul>
+      </>
+    )
+  }
+
   if (result.candidates.length === 0) {
     return (
       <>
@@ -55,6 +77,16 @@ export function SearchResults({
 
   return (
     <>
+      {result.lookup !== undefined && !hasExactCatalogEdition && (
+        <>
+          <p className="empty">
+            Точне видання знайдено зовні. Перевірте, чи твір уже є у BookSwap.
+          </p>
+          <ul className="books">
+            <LookupCard isbn={result.isbn} lookup={result.lookup} />
+          </ul>
+        </>
+      )}
       <p className="lede">Можливо, це один із цих творів?</p>
       <ul className="books">
         {result.candidates.map((candidate) => (

@@ -32,11 +32,27 @@ describe('bookLookupResultSchema', () => {
       publishedYear: 2003,
       language: 'en',
       publisher: 'КСД',
+      description: 'Опис твору',
+      pageCount: 384,
+      format: 'HARDCOVER',
       coverUrl: 'https://example.com/cover.jpg',
+      source: 'GOOGLE_BOOKS',
       externalId: 'OL123456M',
+      workExternalId: 'OL987654W',
     }
 
     expect(bookLookupResultSchema.parse(full)).toEqual(full)
+  })
+
+  it('відхиляє невідоме джерело та невалідні фізичні поля видання', () => {
+    expect(
+      bookLookupResultSchema.safeParse({
+        title: 'Шантарам',
+        source: 'BOOK_STORE',
+        pageCount: 0,
+        format: 'SCROLL',
+      }).success,
+    ).toBe(false)
   })
 
   it('відхиляє мову, що не є кодом ISO 639-1 (§6.3 п.7: не підміняти невідоме значення)', () => {
