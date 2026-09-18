@@ -1,7 +1,13 @@
 import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common'
 import { API_ERROR_CODES, bookLookupResultSchema, type BookLookupResult } from '@bookswap/shared'
 import { ApiException } from '../../common/api.exception'
+import { Prisma } from '../../generated/prisma/client'
 import { PrismaService } from '../../prisma/prisma.service'
+import {
+  BATCH_BOOK_LOOKUP_PROVIDER,
+  type BatchBookLookupProvider,
+  type BatchLookupUnavailableReason,
+} from './batch-book-lookup-provider'
 import {
   BOOK_LOOKUP_PROVIDER,
   BookLookupProviderError,
@@ -16,6 +22,15 @@ const NEGATIVE_CACHE_PAYLOAD = { notFound: true } as const
 
 type CacheReadResult =
   { kind: 'hit'; result: BookLookupResult } | { kind: 'not-found' } | { kind: 'miss' }
+
+/** Stage 8f-2: reading the cache works from a transaction client too. */
+type CacheClient = Pick<PrismaService, 'externalBookLookup'>
+
+/** Stage 8f-2: what one ISBN of a batch ended up as, cache and providers together. */
+export type BatchLookupRowOutcome =
+  | { kind: 'found'; result: BookLookupResult }
+  | { kind: 'not-found' }
+  | { kind: 'unavailable'; reason: BatchLookupUnavailableReason }
 
 function isNegativeCachePayload(value: unknown): boolean {
   return (
@@ -40,7 +55,55 @@ export class LookupService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(BOOK_LOOKUP_PROVIDER) private readonly provider: BookLookupProvider,
+    @Inject(BATCH_BOOK_LOOKUP_PROVIDER) private readonly batchProvider: BatchBookLookupProvider,
   ) {}
+
+  /**
+   * Stage 8f-2, R7: the cache-aware batch path behind a CSV preview.
+   *
+   * The cache contract is the single-lookup one, unchanged — same TTLs, same
+   * "a row that no longer parses is a miss, not a 500", same negative entries —
+   * only read and written in bulk instead of one row at a time. That matters
+   * beyond speed: a cached negative here and a cached negative in the wizard
+   * have to mean the same thing, or the same ISBN would answer differently
+   * depending on which screen asked.
+   *
+   * Never call this inside a transaction: it makes external HTTP requests.
+   */
+  async lookupMany(isbns: readonly string[]): Promise<Map<string, BatchLookupRowOutcome>> {
+    const unique = [...new Set(isbns)]
+    const outcomes = new Map<string, BatchLookupRowOutcome>()
+
+    if (unique.length === 0) return outcomes
+
+    const cached = await this.readCachedMany(unique)
+    const misses: string[] = []
+
+    for (const isbn of unique) {
+      const entry = cached.get(isbn)
+
+      if (entry === undefined) misses.push(isbn)
+      else outcomes.set(isbn, entry)
+    }
+
+    if (misses.length === 0) return outcomes
+
+    const controller = new AbortController()
+    const fetched = await this.batchProvider.lookupMany(misses, controller.signal)
+
+    for (const [isbn, result] of fetched.found) outcomes.set(isbn, { kind: 'found', result })
+    for (const isbn of fetched.notFound) outcomes.set(isbn, { kind: 'not-found' })
+    for (const [isbn, reason] of fetched.unavailable) {
+      outcomes.set(isbn, { kind: 'unavailable', reason })
+    }
+
+    // Only settled answers are cached. An ISBN we could not finish asking about
+    // must stay a miss, or one slow afternoon would be remembered for a day as
+    // "no such book".
+    await this.writeCacheMany(fetched.found, fetched.notFound)
+
+    return outcomes
+  }
 
   async lookup(isbn: string): Promise<BookLookupResult> {
     const cached = await this.readCache(isbn)
@@ -79,6 +142,14 @@ export class LookupService {
 
     if (row === null) return { kind: 'miss' }
 
+    return this.classifyCacheRow(isbn, row)
+  }
+
+  /** The TTL and payload rules above, applied to one already-read row. */
+  private classifyCacheRow(
+    isbn: string,
+    row: { payload: unknown; fetchedAt: Date },
+  ): CacheReadResult {
     const age = Date.now() - row.fetchedAt.getTime()
 
     if (isNegativeCachePayload(row.payload)) {
@@ -97,6 +168,71 @@ export class LookupService {
     }
 
     return { kind: 'hit', result: parsed.data }
+  }
+
+  /**
+   * Stage 8f-2: the cache for a whole file in one query — the read must not
+   * grow by a statement per row.
+   *
+   * Public and client-parameterised because CSV resolution reads it from inside
+   * its transaction, where the draft is being written. That is a read of the
+   * cache, never a write and never an external call, so it is safe there; the
+   * TTL and payload rules are the single-lookup ones, applied unchanged.
+   */
+  async readCachedMany(
+    isbns: readonly string[],
+    client: CacheClient = this.prisma,
+  ): Promise<Map<string, BatchLookupRowOutcome>> {
+    const cached = await this.readCacheMany(isbns, client)
+    const outcomes = new Map<string, BatchLookupRowOutcome>()
+
+    for (const [isbn, entry] of cached) {
+      if (entry.kind === 'hit') outcomes.set(isbn, { kind: 'found', result: entry.result })
+      if (entry.kind === 'not-found') outcomes.set(isbn, { kind: 'not-found' })
+    }
+
+    return outcomes
+  }
+
+  private async readCacheMany(
+    isbns: readonly string[],
+    client: CacheClient = this.prisma,
+  ): Promise<Map<string, CacheReadResult>> {
+    if (isbns.length === 0) return new Map()
+
+    const rows = await client.externalBookLookup.findMany({
+      where: { isbn: { in: [...isbns] } },
+    })
+
+    return new Map(rows.map((row) => [row.isbn, this.classifyCacheRow(row.isbn, row)]))
+  }
+
+  /**
+   * One statement for every new cache entry. Prisma has no batch upsert, and a
+   * loop of them would put the per-row growth back exactly where R7 forbids it,
+   * so this is the one place the import writes raw SQL.
+   */
+  private async writeCacheMany(
+    found: ReadonlyMap<string, BookLookupResult>,
+    notFound: ReadonlySet<string>,
+  ): Promise<void> {
+    const entries = [
+      ...[...found].map(([isbn, payload]) => ({ isbn, payload: JSON.stringify(payload) })),
+      ...[...notFound].map((isbn) => ({ isbn, payload: JSON.stringify(NEGATIVE_CACHE_PAYLOAD) })),
+    ]
+
+    if (entries.length === 0) return
+
+    const values = Prisma.join(
+      entries.map((entry) => Prisma.sql`(${entry.isbn}, ${entry.payload}::jsonb, NOW())`),
+    )
+
+    await this.prisma.$executeRaw`
+      INSERT INTO "ExternalBookLookup" ("isbn", "payload", "fetchedAt")
+      VALUES ${values}
+      ON CONFLICT ("isbn")
+      DO UPDATE SET "payload" = EXCLUDED."payload", "fetchedAt" = EXCLUDED."fetchedAt"
+    `
   }
 
   private async writeCache(isbn: string, payload: BookLookupResult): Promise<void> {

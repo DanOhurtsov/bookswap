@@ -98,13 +98,17 @@ describe('uniqueIsbn13', () => {
     expect(region).toBe(regionAgain)
   })
 
-  it('реальні namespace п’яти catalog e2e-файлів, що використовують helper, не колізять', () => {
+  it('реальні namespace e2e-файлів, що використовують helper, не колізять', () => {
     const REAL_NAMESPACES = [
       'catalog-lookup',
       'catalog-lookup-rate-limit',
       'catalog-search-candidates',
       'catalog-canonical',
       'catalog',
+      // Stage 8f-2: CSV-імпорт.
+      'library-import-preview',
+      'library-import-rows',
+      'library-import-staleness',
     ]
 
     const first = REAL_NAMESPACES.map((namespace) => uniqueIsbn13(namespace))

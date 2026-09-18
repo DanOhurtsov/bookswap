@@ -36,7 +36,12 @@ export type LibraryImportCsvError =
 
 export interface LibraryImportParsedRow {
   rowNumber: number
-  payload: LibraryImportRowPayload
+  /**
+   * Without `rowVersion`: parsing describes a file, and a version identifies a
+   * STORED row. It is minted where draft records are built, so there is exactly
+   * one place that decides when a row counts as changed.
+   */
+  payload: Omit<LibraryImportRowPayload, 'rowVersion'>
 }
 
 export type LibraryImportCsvParseResult =
@@ -173,7 +178,13 @@ function toCells(record: readonly string[]): LibraryImportCsvCells {
   )
 }
 
-function fieldErrors(issues: readonly { path: readonly PropertyKey[] }[]): LibraryImportRowError[] {
+/**
+ * Exported since 8f-2: an edited row re-parses through the same cell schemas as
+ * a file, so its failures must map to the same per-column errors.
+ */
+export function libraryImportFieldErrors(
+  issues: readonly { path: readonly PropertyKey[] }[],
+): LibraryImportRowError[] {
   const failed = new Set(issues.map((issue) => issue.path[0]))
 
   return LIBRARY_IMPORT_CSV_HEADER.filter((column) => failed.has(column)).map((column) =>
@@ -187,8 +198,12 @@ function fieldErrors(issues: readonly { path: readonly PropertyKey[] }[]): Libra
  * Agreed rule: every normalized value except `quantity`, in header order.
  * Author order is part of the key; nothing beyond the shared schemas is
  * normalized.
+ *
+ * Exported since 8f-2: an edit can create or clear a duplicate, so the whole
+ * draft is re-keyed after every PATCH with exactly this function — a second
+ * implementation would flag different rows than the file did.
  */
-function duplicateKey(values: LibraryImportRowValues): string {
+export function libraryImportDuplicateKey(values: LibraryImportRowValues): string {
   return JSON.stringify(
     LIBRARY_IMPORT_CSV_HEADER.filter((column) => column !== 'quantity').map(
       (column) => values[LIBRARY_IMPORT_COLUMN_VALUE_KEYS[column]] ?? null,
@@ -207,11 +222,16 @@ function toRows(records: readonly string[][]): LibraryImportParsedRow[] {
     if (!parsed.success) {
       return {
         rowNumber,
-        payload: { cells, values: null, errors: fieldErrors(parsed.error.issues) },
+        payload: {
+          cells,
+          values: null,
+          errors: libraryImportFieldErrors(parsed.error.issues),
+          resolution: null,
+        },
       }
     }
 
-    const key = duplicateKey(parsed.data)
+    const key = libraryImportDuplicateKey(parsed.data)
     const firstRowNumber = firstRowByKey.get(key)
     const errors: LibraryImportRowError[] = []
 
@@ -221,7 +241,8 @@ function toRows(records: readonly string[][]): LibraryImportParsedRow[] {
       errors.push({ code: 'DUPLICATE_ROW', firstRowNumber })
     }
 
-    return { rowNumber, payload: { cells, values: parsed.data, errors } }
+    // 8f-2 resolves rows; parsing only ever produces an unresolved payload.
+    return { rowNumber, payload: { cells, values: parsed.data, errors, resolution: null } }
   })
 }
 

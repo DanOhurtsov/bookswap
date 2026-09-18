@@ -11,6 +11,7 @@ import { EmailModule } from './email/email.module'
 import { FriendsModule } from './friends/friends.module'
 import { HealthModule } from './health/health.module'
 import { HistoryModule } from './history/history.module'
+import { LibraryImportModule } from './library/import/library-import.module'
 import { LibraryModule } from './library/library.module'
 import { LoansModule } from './loans/loans.module'
 import { NotificationsModule } from './notifications/notifications.module'
@@ -49,6 +50,9 @@ const ROOT_ENV_PATH = resolve(__dirname, '../../../.env')
         // docs/plan/stage-7.md, 7b: окремий бакет для GET /catalog/lookup —
         // інша природа захисту, ніж 'auth' (див. common/rate-limit.config.ts).
         { name: 'lookup', limit: 120, ttl: 60_000 },
+        // Stage 8f-2, §4: CSV import. Один preview може означати сотні ISBN,
+        // тож він не ділить бакет ні з 'auth', ні з 'lookup'.
+        { name: 'import', limit: 240, ttl: 60_000 },
       ],
     }),
     PrismaModule,
@@ -64,6 +68,7 @@ const ROOT_ENV_PATH = resolve(__dirname, '../../../.env')
     FriendsModule,
     CatalogModule,
     LibraryModule,
+    LibraryImportModule,
     WishlistModule,
     LoansModule,
     TelegramModule,

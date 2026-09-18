@@ -76,6 +76,24 @@ export const envSchema = z
      */
     CATALOG_LOOKUP_RATE_LIMIT: z.coerce.number().int().positive().default(20),
     CATALOG_LOOKUP_RATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    /**
+     * Stage 8f-2, R7a: скільки ISBN одного preview можуть дійти до одиночних
+     * fallback-провайдерів і скільки таких запитів летить одночасно. Ліміт
+     * рахує ISBN, не HTTP-виклики: двоє провайдерів — це до вдвічі більше
+     * запитів на той самий бюджет.
+     */
+    CATALOG_LOOKUP_FALLBACK_BUDGET: z.coerce.number().int().positive().default(50),
+    CATALOG_LOOKUP_FALLBACK_CONCURRENCY: z.coerce.number().int().positive().default(4),
+    /**
+     * R7: контакт у `User-Agent` для Open Library. Порожнє значення означає
+     * «контакту немає» — заголовок тоді несе лише назву застосунку, і жодна
+     * персональна адреса не підставляється за замовчуванням.
+     */
+    CATALOG_LOOKUP_CONTACT: z.string().optional(),
+    /** §4, Stage 8f-2: окремий бакет CSV-імпорту — preview і PATCH рядка. */
+    LIBRARY_IMPORT_PREVIEW_RATE_LIMIT: z.coerce.number().int().positive().default(5),
+    LIBRARY_IMPORT_PATCH_RATE_LIMIT: z.coerce.number().int().positive().default(120),
+    LIBRARY_IMPORT_RATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     /** Ключ Resend. Обов'язковий лише для `EMAIL_PROVIDER=resend` — див. superRefine. */
     RESEND_API_KEY: z.string().min(1).optional(),
     /** Відправник у форматі `Name <address@domain>` або просто адреси. */

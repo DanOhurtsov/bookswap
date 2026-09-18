@@ -1,12 +1,16 @@
 import { CATALOG_LIMITS } from './catalog'
 import {
   LIBRARY_IMPORT_COLUMN_VALUE_KEYS,
+  LIBRARY_IMPORT_CONTENT_BASE64_MAX,
   LIBRARY_IMPORT_CSV_HEADER,
   LIBRARY_IMPORT_LIMITS,
   libraryImportCsvCellsSchema,
   libraryImportCsvRowSchema,
   libraryImportInvalidCsvDetailsSchema,
+  libraryImportPreviewRequestSchema,
   libraryImportQuantityCellSchema,
+  libraryImportRowErrorSchema,
+  libraryImportRowPatchRequestSchema,
   libraryImportRowRecordSchema,
   libraryImportRowValuesSchema,
   type LibraryImportCsvCells,
@@ -219,11 +223,28 @@ describe('libraryImportCsvRowSchema', () => {
 })
 
 describe('libraryImportRowRecordSchema', () => {
+  /** 8f-2: a READY row carries the resolution its status names. */
+  const existingEdition = { kind: 'EXISTING_EDITION', editionId: 'ed-1', workId: 'w-1' } as const
+  const resolvedCatalog = {
+    work: { title: 'Дюна', authors: ['Френк Герберт'], origLang: 'en', firstPubYear: 1965 },
+    translation: null,
+    edition: {
+      isbn13: VALID_ISBN,
+      publisher: null,
+      year: null,
+      pageCount: null,
+      coverUrl: null,
+      format: 'PAPERBACK',
+    },
+  }
   const validPayload = {
     cells: cells(),
     values: libraryImportCsvRowSchema.parse(cells()),
     errors: [],
+    resolution: existingEdition,
+    rowVersion: 'row-version-1',
   }
+  const unresolved = { ...validPayload, resolution: null }
 
   it('accepts a valid READY row and an INVALID row with errors', () => {
     expect(
@@ -241,23 +262,30 @@ describe('libraryImportRowRecordSchema', () => {
           cells: cells({ isbn13: '' }),
           values: null,
           errors: [{ code: 'INVALID_ISBN', field: 'isbn13' }],
+          rowVersion: 'row-version-2',
         },
       }).success,
     ).toBe(true)
   })
 
   it('rejects inconsistent status/errors/values combinations', () => {
-    const invalidWithoutErrors = { rowNumber: 1, status: 'INVALID', payload: validPayload }
+    // Each case below isolates ONE inconsistency, so `resolution` is set to
+    // whatever the status expects and never doubles as a second reason to fail.
+    const invalidWithoutErrors = { rowNumber: 1, status: 'INVALID', payload: unresolved }
     const readyWithErrors = {
       rowNumber: 2,
       status: 'READY_CREATE_CHAIN',
-      payload: { ...validPayload, errors: [{ code: 'DUPLICATE_ROW', firstRowNumber: 1 }] },
+      payload: {
+        ...validPayload,
+        resolution: { kind: 'CREATE_CHAIN', workId: null, catalog: resolvedCatalog },
+        errors: [{ code: 'DUPLICATE_ROW', firstRowNumber: 1 }],
+      },
     }
     const needsReviewWithoutValues = {
       rowNumber: 1,
       status: 'NEEDS_REVIEW',
       payload: {
-        ...validPayload,
+        ...unresolved,
         values: null,
         errors: [{ code: 'INVALID_FIELD', field: 'title' }],
       },
@@ -265,7 +293,7 @@ describe('libraryImportRowRecordSchema', () => {
     const duplicateOfLaterRow = {
       rowNumber: 2,
       status: 'INVALID',
-      payload: { ...validPayload, errors: [{ code: 'DUPLICATE_ROW', firstRowNumber: 2 }] },
+      payload: { ...unresolved, errors: [{ code: 'DUPLICATE_ROW', firstRowNumber: 2 }] },
     }
 
     for (const record of [
@@ -278,23 +306,50 @@ describe('libraryImportRowRecordSchema', () => {
     }
   })
 
+  /**
+   * 8f-2: the status and the stored resolution are one fact, not two. A
+   * `NEEDS_REVIEW` row holding the resolution it had before an edit is exactly
+   * the drift R5 forbids — a changed ISBN must not keep the old edition.
+   */
+  it('ties each status to the resolution it is allowed to carry', () => {
+    const createChain = { kind: 'CREATE_CHAIN', workId: null, catalog: resolvedCatalog }
+    const at = (status: string, resolution: unknown): boolean =>
+      libraryImportRowRecordSchema.safeParse({
+        rowNumber: 1,
+        status,
+        payload: {
+          ...unresolved,
+          resolution,
+          errors: status === 'NEEDS_REVIEW' ? [{ code: 'LOOKUP_NOT_FOUND' }] : [],
+        },
+      }).success
+
+    expect(at('READY_EXISTING_EDITION', existingEdition)).toBe(true)
+    expect(at('READY_CREATE_CHAIN', createChain)).toBe(true)
+    expect(at('NEEDS_REVIEW', null)).toBe(true)
+    expect(at('READY_EXISTING_EDITION', createChain)).toBe(false)
+    expect(at('READY_CREATE_CHAIN', existingEdition)).toBe(false)
+    expect(at('READY_CREATE_CHAIN', null)).toBe(false)
+    expect(at('NEEDS_REVIEW', createChain)).toBe(false)
+  })
+
   it('rejects unknown keys, unknown error codes and INVALID_FIELD on isbn13', () => {
     const base = { rowNumber: 1, status: 'INVALID' as const }
 
     expect(
-      libraryImportRowRecordSchema.safeParse({ ...base, payload: { ...validPayload, extra: 1 } })
+      libraryImportRowRecordSchema.safeParse({ ...base, payload: { ...unresolved, extra: 1 } })
         .success,
     ).toBe(false)
     expect(
       libraryImportRowRecordSchema.safeParse({
         ...base,
-        payload: { ...validPayload, errors: [{ code: 'TEAPOT' }] },
+        payload: { ...unresolved, errors: [{ code: 'TEAPOT' }] },
       }).success,
     ).toBe(false)
     expect(
       libraryImportRowRecordSchema.safeParse({
         ...base,
-        payload: { ...validPayload, errors: [{ code: 'INVALID_FIELD', field: 'isbn13' }] },
+        payload: { ...unresolved, errors: [{ code: 'INVALID_FIELD', field: 'isbn13' }] },
       }).success,
     ).toBe(false)
   })
@@ -322,6 +377,158 @@ describe('libraryImportInvalidCsvDetailsSchema', () => {
         unknownColumnPositions: [],
         orderMismatch: false,
       }).success,
+    ).toBe(false)
+  })
+})
+
+/** Stage 8f-2: the HTTP contracts of the preview endpoints. */
+describe('libraryImportPreviewRequestSchema', () => {
+  const accepts = (contentBase64: string): boolean =>
+    libraryImportPreviewRequestSchema.safeParse({ contentBase64 }).success
+
+  it('accepts standard padded base64 only', () => {
+    expect(accepts(Buffer.from('isbn13,title').toString('base64'))).toBe(true)
+    expect(accepts('aXNibjEz')).toBe(true)
+    expect(accepts('aXNibjEzLA==')).toBe(true)
+  })
+
+  /**
+   * `Buffer.from(…, 'base64')` silently skips what it cannot read, so a request
+   * mangled in transit would decode to a SHORTER file — and hash, parse and
+   * import as a different one. Everything below has to be rejected before the
+   * decode, not tidied up during it.
+   */
+  it('rejects anything Buffer.from would quietly repair', () => {
+    expect(accepts('data:text/csv;base64,aXNibjEz')).toBe(false)
+    expect(accepts('aXNi bjEz')).toBe(false)
+    expect(accepts('aXNibjEz\naXNibjEz')).toBe(false)
+    expect(accepts('aXNibjEz-_')).toBe(false)
+    expect(accepts('aXNibjEz=')).toBe(false)
+    expect(accepts('!!!!')).toBe(false)
+    expect(accepts('')).toBe(false)
+  })
+
+  it('caps the payload at the transport limit and rejects unknown fields', () => {
+    expect(accepts('A'.repeat(LIBRARY_IMPORT_CONTENT_BASE64_MAX))).toBe(true)
+    expect(accepts('A'.repeat(LIBRARY_IMPORT_CONTENT_BASE64_MAX + 4))).toBe(false)
+    expect(
+      libraryImportPreviewRequestSchema.safeParse({ contentBase64: 'aXNibjEz', delimiter: ',' })
+        .success,
+    ).toBe(false)
+  })
+
+  /**
+   * The transport cap is deliberately larger than the 48 KiB file cap: a file
+   * a little over the limit must reach the parser and come back as
+   * IMPORT_TOO_LARGE with its real size, not as a bare validation error.
+   */
+  it('leaves room above the file limit for an honest IMPORT_TOO_LARGE', () => {
+    expect(LIBRARY_IMPORT_CONTENT_BASE64_MAX).toBeGreaterThan(
+      Math.ceil(LIBRARY_IMPORT_LIMITS.maxBytes / 3) * 4,
+    )
+  })
+})
+
+describe('libraryImportRowPatchRequestSchema', () => {
+  const accepts = (body: unknown): boolean =>
+    libraryImportRowPatchRequestSchema.safeParse(body).success
+
+  const at = 'row-version-1'
+
+  it('accepts one shape per action', () => {
+    expect(accepts({ action: 'EDIT', expectedRowVersion: at, cells: { title: 'Дюна' } })).toBe(true)
+    expect(accepts({ action: 'CHOOSE', expectedRowVersion: at, workId: 'work-1' })).toBe(true)
+    expect(accepts({ action: 'CHOOSE', expectedRowVersion: at, workId: null })).toBe(true)
+    expect(accepts({ action: 'SKIP', expectedRowVersion: at })).toBe(true)
+    expect(accepts({ action: 'RESTORE', expectedRowVersion: at })).toBe(true)
+    expect(accepts({ action: 'RETRY', expectedRowVersion: at })).toBe(true)
+  })
+
+  /**
+   * Agreed 8f-2 concurrency contract: the version is required for EVERY action,
+   * including the ones that never call a provider. Which row the person meant is
+   * the question, not how long the server took.
+   */
+  it('rejects any action without expectedRowVersion', () => {
+    expect(accepts({ action: 'SKIP' })).toBe(false)
+    expect(accepts({ action: 'RETRY' })).toBe(false)
+    expect(accepts({ action: 'RESTORE' })).toBe(false)
+    expect(accepts({ action: 'EDIT', cells: { title: 'Дюна' } })).toBe(false)
+    expect(accepts({ action: 'CHOOSE', workId: null })).toBe(false)
+    expect(accepts({ action: 'SKIP', expectedRowVersion: '' })).toBe(false)
+  })
+
+  it('rejects a field that belongs to another action', () => {
+    expect(accepts({ action: 'SKIP', expectedRowVersion: at, workId: 'work-1' })).toBe(false)
+    expect(accepts({ action: 'RETRY', expectedRowVersion: at, cells: { title: 'Д' } })).toBe(false)
+    expect(
+      accepts({ action: 'EDIT', expectedRowVersion: at, cells: { title: 'Д' }, workId: 'w-1' }),
+    ).toBe(false)
+  })
+
+  it('rejects an empty or unknown edit', () => {
+    expect(accepts({ action: 'EDIT', expectedRowVersion: at, cells: {} })).toBe(false)
+    expect(accepts({ action: 'EDIT', expectedRowVersion: at, cells: { not_a_column: 'x' } })).toBe(
+      false,
+    )
+    expect(accepts({ action: 'EDIT', expectedRowVersion: at, cells: { title: 42 } })).toBe(false)
+    expect(accepts({ action: 'EDIT', expectedRowVersion: at })).toBe(false)
+    expect(accepts({ action: 'CHOOSE', expectedRowVersion: at })).toBe(false)
+    expect(accepts({ action: 'UNSKIP', expectedRowVersion: at })).toBe(false)
+  })
+})
+
+describe('libraryImportRowErrorSchema', () => {
+  it('marks every lookup failure retryable and keeps "not found" separate', () => {
+    expect(
+      libraryImportRowErrorSchema.safeParse({
+        code: 'LOOKUP_UNAVAILABLE',
+        reason: 'TIMEOUT',
+        retryable: true,
+      }).success,
+    ).toBe(true)
+    // A non-retryable LOOKUP_UNAVAILABLE must not be expressible: "we could not
+    // ask" is always worth asking again.
+    expect(
+      libraryImportRowErrorSchema.safeParse({
+        code: 'LOOKUP_UNAVAILABLE',
+        reason: 'TIMEOUT',
+        retryable: false,
+      }).success,
+    ).toBe(false)
+    expect(libraryImportRowErrorSchema.safeParse({ code: 'LOOKUP_NOT_FOUND' }).success).toBe(true)
+    expect(
+      libraryImportRowErrorSchema.safeParse({ code: 'LOOKUP_UNAVAILABLE', retryable: true })
+        .success,
+    ).toBe(false)
+  })
+
+  it('AMBIGUOUS_CATALOG_MATCH always carries at least one candidate', () => {
+    const candidate = { workId: 'w-1', title: 'Дюна', authors: ['Френк Герберт'] }
+
+    expect(
+      libraryImportRowErrorSchema.safeParse({
+        code: 'AMBIGUOUS_CATALOG_MATCH',
+        candidates: [candidate],
+      }).success,
+    ).toBe(true)
+    expect(
+      libraryImportRowErrorSchema.safeParse({ code: 'AMBIGUOUS_CATALOG_MATCH', candidates: [] })
+        .success,
+    ).toBe(false)
+  })
+
+  it('MISSING_CATALOG_DATA names real CSV columns', () => {
+    expect(
+      libraryImportRowErrorSchema.safeParse({ code: 'MISSING_CATALOG_DATA', fields: ['title'] })
+        .success,
+    ).toBe(true)
+    expect(
+      libraryImportRowErrorSchema.safeParse({ code: 'MISSING_CATALOG_DATA', fields: ['nope'] })
+        .success,
+    ).toBe(false)
+    expect(
+      libraryImportRowErrorSchema.safeParse({ code: 'MISSING_CATALOG_DATA', fields: [] }).success,
     ).toBe(false)
   })
 })

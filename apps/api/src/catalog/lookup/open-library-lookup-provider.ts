@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { isLanguageCode, type BookLookupResult } from '@bookswap/shared'
 import { BookLookupProviderError, type BookLookupProvider } from './book-lookup-provider'
+import { lookupUserAgentHeaders } from './lookup.config'
 import {
   editionFormatFromBinding,
   exactIsbn13,
@@ -285,6 +286,17 @@ export function normalizeOpenLibraryLanguage(languages: unknown): string | undef
 /** Open Library повертає всі bibkeys одним об'єктом, ключ — `ISBN:<isbn>`. */
 type OpenLibraryBooksResponse = Record<string, OpenLibraryBookRecord | undefined>
 
+/**
+ * Stage 8f-2: what one batch answered. `found` and `failed` are disjoint, and an
+ * ISBN in neither was simply not in the answer — the provider's way of saying it
+ * has no record.
+ */
+export interface OpenLibraryBatchResult {
+  found: Map<string, BookLookupResult>
+  /** ISBNs whose record came back unreadable, with the reason. */
+  failed: Map<string, string>
+}
+
 interface OpenLibrarySearchDocument {
   key?: unknown
   title?: unknown
@@ -405,6 +417,78 @@ function coverUrlFrom(cover: unknown): string | undefined {
 }
 
 /**
+ * Stage 8f-2, R7: Open Library's usage guidelines cap a Books API call in
+ * practice, and ask for batching rather than hundreds of single-book requests.
+ */
+export const OPEN_LIBRARY_BIBKEYS_PER_REQUEST = 50
+
+/** One Books API call for any number of bibkeys, with the identified `User-Agent` R7 requires. */
+async function fetchBooks(
+  bibkeys: readonly string[],
+  signal: AbortSignal,
+): Promise<OpenLibraryBooksResponse> {
+  // Assembled by hand rather than through `URLSearchParams`: bibkeys are
+  // `ISBN:<digits>`, and encoding that colon would change the single-ISBN URL
+  // this provider has always sent, for no gain.
+  const url = `${API_ROOT}?bibkeys=${bibkeys.join(',')}&format=json&jscmd=data`
+
+  let response: Response
+
+  try {
+    response = await fetch(url, { signal, headers: lookupUserAgentHeaders() })
+  } catch (error) {
+    throw new BookLookupProviderError(error instanceof Error ? error.message : 'мережева помилка')
+  }
+
+  if (!response.ok) {
+    throw new BookLookupProviderError(`Open Library відповів HTTP ${String(response.status)}`)
+  }
+
+  const body = await response.json().catch(() => undefined)
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new BookLookupProviderError('Open Library повернув тіло, що не є JSON-об’єктом')
+  }
+
+  return body as OpenLibraryBooksResponse
+}
+
+/** One `jscmd=data` record → the normalized shared result. */
+function resultFromBooksRecord(record: Record<string, unknown>): BookLookupResult {
+  const title = record.title
+
+  if (typeof title !== 'string' || title.trim() === '') {
+    throw new BookLookupProviderError('Open Library повернув запис без назви')
+  }
+
+  const authors = Array.isArray(record.authors)
+    ? record.authors
+        .map((author: unknown) => (author as { name?: unknown } | null)?.name)
+        .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+    : []
+
+  const publisher = firstName(record.publishers)
+  const coverUrl = coverUrlFrom(record.cover)
+  const publishedYear = extractYear(record.publish_date)
+  const externalId = externalIdFromKey(record.key)
+  const language = normalizeOpenLibraryLanguage(record.languages)
+  const pageCount = positivePageCount(record.number_of_pages)
+  const format = editionFormatFromBinding(record.physical_format)
+
+  return {
+    title,
+    ...(authors.length > 0 ? { authors } : {}),
+    ...(publishedYear === undefined ? {} : { publishedYear }),
+    ...(language === undefined ? {} : { language }),
+    ...(publisher === undefined ? {} : { publisher }),
+    ...(pageCount === undefined ? {} : { pageCount }),
+    ...(format === undefined ? {} : { format }),
+    ...(coverUrl === undefined ? {} : { coverUrl }),
+    ...(externalId === undefined ? {} : { externalId }),
+  }
+}
+
+/**
  * R1: Open Library — без ключа й без квоти.
  *
  * Books API (`jscmd=data`), а не `/isbn/{isbn}.json`: останній віддає авторів
@@ -420,27 +504,8 @@ function coverUrlFrom(cover: unknown): string | undefined {
 export class OpenLibraryLookupProvider implements BookLookupProvider {
   async lookup(isbn: string, signal: AbortSignal): Promise<BookLookupResult | undefined> {
     const bibkey = `ISBN:${isbn}`
-    const url = `${API_ROOT}?bibkeys=${bibkey}&format=json&jscmd=data`
-
-    let response: Response
-
-    try {
-      response = await fetch(url, { signal })
-    } catch (error) {
-      throw new BookLookupProviderError(error instanceof Error ? error.message : 'мережева помилка')
-    }
-
-    if (!response.ok) {
-      throw new BookLookupProviderError(`Open Library відповів HTTP ${String(response.status)}`)
-    }
-
-    const body = await response.json().catch(() => undefined)
-
-    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-      throw new BookLookupProviderError('Open Library повернув тіло, що не є JSON-об’єктом')
-    }
-
-    const record = (body as OpenLibraryBooksResponse)[bibkey] as Record<string, unknown> | undefined
+    const body = await fetchBooks([bibkey], signal)
+    const record = body[bibkey] as Record<string, unknown> | undefined
 
     // Books API and Search API use different Open Library indexes. A recently
     // imported edition can temporarily be absent from one but present in the
@@ -448,36 +513,54 @@ export class OpenLibraryLookupProvider implements BookLookupProvider {
     // another provider.
     if (record === undefined) return lookupByIsbnSearch(isbn, signal)
 
-    const title = record.title
-    if (typeof title !== 'string' || title.trim() === '') {
-      throw new BookLookupProviderError('Open Library повернув запис без назви')
+    return resultFromBooksRecord(record)
+  }
+
+  /**
+   * Stage 8f-2, R7: one Books API call for up to
+   * {@link OPEN_LIBRARY_BIBKEYS_PER_REQUEST} ISBNs — the batching the provider's
+   * own guidelines ask for instead of hundreds of single-book requests.
+   *
+   * Deliberately NOT the batch twin of `lookup()`: no per-ISBN search fallback
+   * and no Work enrichment, because either would turn one request back into N.
+   *
+   * Three outcomes per ISBN, and the third one is the point. A bibkey the answer
+   * does not mention is simply absent — Open Library says "no record" that way.
+   * A bibkey it DOES mention but whose record we cannot read (no title, a shape
+   * we do not understand) is a failure about that one ISBN: reporting it as
+   * absent would let a later "nobody found it" become "no such book", which is
+   * a different and wrong claim. The other records of the batch are unaffected.
+   */
+  async lookupMany(isbns: readonly string[], signal: AbortSignal): Promise<OpenLibraryBatchResult> {
+    const result: OpenLibraryBatchResult = { found: new Map(), failed: new Map() }
+
+    if (isbns.length === 0) return result
+    if (isbns.length > OPEN_LIBRARY_BIBKEYS_PER_REQUEST) {
+      throw new BookLookupProviderError(
+        `Open Library batch обмежений ${String(OPEN_LIBRARY_BIBKEYS_PER_REQUEST)} bibkeys`,
+      )
     }
 
-    const authors = Array.isArray(record.authors)
-      ? record.authors
-          .map((author: unknown) => (author as { name?: unknown } | null)?.name)
-          .filter((name): name is string => typeof name === 'string' && name.trim() !== '')
-      : []
+    const body = await fetchBooks(
+      isbns.map((isbn) => `ISBN:${isbn}`),
+      signal,
+    )
 
-    const publisher = firstName(record.publishers)
-    const coverUrl = coverUrlFrom(record.cover)
-    const publishedYear = extractYear(record.publish_date)
-    const externalId = externalIdFromKey(record.key)
-    const language = normalizeOpenLibraryLanguage(record.languages)
-    const pageCount = positivePageCount(record.number_of_pages)
-    const format = editionFormatFromBinding(record.physical_format)
+    for (const isbn of isbns) {
+      const record = body[`ISBN:${isbn}`] as Record<string, unknown> | undefined
 
-    return {
-      title,
-      ...(authors.length > 0 ? { authors } : {}),
-      ...(publishedYear === undefined ? {} : { publishedYear }),
-      ...(language === undefined ? {} : { language }),
-      ...(publisher === undefined ? {} : { publisher }),
-      ...(pageCount === undefined ? {} : { pageCount }),
-      ...(format === undefined ? {} : { format }),
-      ...(coverUrl === undefined ? {} : { coverUrl }),
-      ...(externalId === undefined ? {} : { externalId }),
+      if (record === undefined) continue
+
+      try {
+        result.found.set(isbn, resultFromBooksRecord(record))
+      } catch (error) {
+        if (!(error instanceof BookLookupProviderError)) throw error
+
+        result.failed.set(isbn, error.message)
+      }
     }
+
+    return result
   }
 
   /**

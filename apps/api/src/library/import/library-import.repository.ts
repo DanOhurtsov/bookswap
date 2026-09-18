@@ -29,6 +29,14 @@ const DRAFT_TTL_MS = LIBRARY_IMPORT_LIMITS.draftTtlHours * 60 * 60 * 1000
 
 type TransactionClient = Pick<PrismaService, 'libraryImport' | 'libraryImportRow' | '$queryRaw'>
 
+/**
+ * What an `updateRows` callback may touch: the draft's own tables plus the
+ * read-only catalog tables resolution consults. Deliberately narrower than the
+ * full client — a draft is never a domain write, and the type says so.
+ */
+export type ImportReadClient = TransactionClient &
+  Pick<PrismaService, 'edition' | 'work' | 'externalBookLookup'>
+
 const IMPORT_SUMMARY_SELECT = {
   id: true,
   ownerId: true,
@@ -126,22 +134,75 @@ export class LibraryImportRepository {
     return this.prisma.$transaction(async (tx) => {
       await expireOwnerDrafts(tx, input.ownerId, input.now)
 
-      const found = await tx.libraryImport.findFirst({
-        where: { id: input.importId, ownerId: input.ownerId },
-        select: {
-          ...IMPORT_SUMMARY_SELECT,
-          rows: {
-            select: { rowNumber: true, status: true, payload: true },
-            orderBy: { rowNumber: 'asc' },
-          },
-        },
-      })
+      return readOwned(tx, { ownerId: input.ownerId, id: input.importId })
+    })
+  }
 
-      if (found === null) return null
+  /**
+   * Stage 8f-2: the same read keyed by `(ownerId, sourceHash)`.
+   *
+   * A repeated preview answers from here — a live draft or a finished summary
+   * comes back untouched (R6), and only a missing or expired import is worth
+   * resolving and writing again.
+   */
+  async findOwnedByHash(input: {
+    ownerId: string
+    sourceHash: string
+    now: Date
+  }): Promise<OwnedLibraryImport | null> {
+    return this.prisma.$transaction(async (tx) => {
+      await expireOwnerDrafts(tx, input.ownerId, input.now)
 
-      const { rows, ...summary } = found
+      return readOwned(tx, { ownerId: input.ownerId, sourceHash: input.sourceHash })
+    })
+  }
 
-      return { import: summary, rows: rows.map(validateRowOnRead) }
+  /**
+   * Stage 8f-2: the one way a draft's rows change after it exists.
+   *
+   * The import row is locked for the whole operation, so a PATCH cannot
+   * interleave with another PATCH, with lazy expiry, or with the revive half of
+   * a concurrent preview. `apply` runs inside that lock and is handed a
+   * read-only client: it may look things up (editions, the lookup cache,
+   * candidates) but not write, and it must never make an external call — those
+   * belong before this method is called (R7).
+   *
+   * Returns `null` when the import is not this owner's, and leaves everything
+   * untouched when `apply` throws: one transaction, so a rejected PATCH cannot
+   * land half-written.
+   */
+  async updateRows(input: {
+    ownerId: string
+    importId: string
+    now: Date
+    apply: (context: {
+      client: ImportReadClient
+      owned: OwnedLibraryImport
+    }) => Promise<readonly LibraryImportRowRecord[]>
+  }): Promise<OwnedLibraryImport | null> {
+    return this.prisma.$transaction(async (tx) => {
+      await expireOwnerDrafts(tx, input.ownerId, input.now)
+      await tx.$queryRaw`
+        SELECT "id" FROM "LibraryImport"
+        WHERE "id" = ${input.importId} AND "ownerId" = ${input.ownerId}
+        FOR UPDATE
+      `
+
+      const owned = await readOwned(tx, { ownerId: input.ownerId, id: input.importId })
+
+      if (owned === null) return null
+
+      const next = validateRows(await input.apply({ client: tx, owned }))
+
+      if (next.length > 0) {
+        // Rewritten wholesale, not patched row by row: every row's status,
+        // errors and duplicate flag are recomputed together, and two statements
+        // do it regardless of how many rows the file has.
+        await tx.libraryImportRow.deleteMany({ where: { importId: input.importId } })
+        await insertRows(tx, input.importId, next)
+      }
+
+      return readOwned(tx, { ownerId: input.ownerId, id: input.importId })
     })
   }
 
@@ -149,6 +210,28 @@ export class LibraryImportRepository {
   async expireOwnerDrafts(ownerId: string, now: Date): Promise<number> {
     return this.prisma.$transaction((tx) => expireOwnerDrafts(tx, ownerId, now))
   }
+}
+
+async function readOwned(
+  tx: TransactionClient,
+  where: { ownerId: string; id?: string; sourceHash?: string },
+): Promise<OwnedLibraryImport | null> {
+  const found = await tx.libraryImport.findFirst({
+    where,
+    select: {
+      ...IMPORT_SUMMARY_SELECT,
+      rows: {
+        select: { rowNumber: true, status: true, payload: true },
+        orderBy: { rowNumber: 'asc' },
+      },
+    },
+  })
+
+  if (found === null) return null
+
+  const { rows, ...summary } = found
+
+  return { import: summary, rows: rows.map(validateRowOnRead) }
 }
 
 async function saveDraftInTransaction(
@@ -266,9 +349,14 @@ function validateRowsForWrite(input: SaveLibraryImportDraftInput): LibraryImport
     throw new LibraryImportPayloadError('write', undefined)
   }
 
+  return validateRows(input.rows)
+}
+
+/** Every row re-validated against the shared contract, with `rowNumber` unique. */
+function validateRows(rows: readonly LibraryImportRowRecord[]): LibraryImportRowRecord[] {
   const seen = new Set<number>()
 
-  return input.rows.map((row) => {
+  return rows.map((row) => {
     const parsed = libraryImportRowRecordSchema.safeParse(row)
 
     if (!parsed.success || seen.has(parsed.data.rowNumber)) {

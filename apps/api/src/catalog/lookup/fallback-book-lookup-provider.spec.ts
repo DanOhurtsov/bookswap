@@ -22,6 +22,8 @@ describe('FallbackBookLookupProvider', () => {
     const openLibraryWithWorkLookup = {
       ...openLibrary,
       lookupWork: jest.fn().mockResolvedValue(workExternalId),
+      // The single-ISBN cascade never batches; the stub only satisfies the class type.
+      lookupMany: jest.fn().mockResolvedValue(new Map()),
     }
 
     return new FallbackBookLookupProvider(openLibraryWithWorkLookup, googleBooks, isbnDb)
@@ -73,6 +75,7 @@ describe('FallbackBookLookupProvider', () => {
     const openLibraryWithWorkLookup = {
       ...openLibrary,
       lookupWork: jest.fn(),
+      lookupMany: jest.fn().mockResolvedValue(new Map()),
     }
     const fallback = new FallbackBookLookupProvider(
       openLibraryWithWorkLookup,
