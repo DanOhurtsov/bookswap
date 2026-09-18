@@ -1,6 +1,7 @@
 import type { BookLookupResult } from '@bookswap/shared'
 import type { HttpException } from '@nestjs/common'
 import type { PrismaService } from '../../prisma/prisma.service'
+import type { BatchBookLookupProvider } from './batch-book-lookup-provider'
 import { BookLookupProviderError, type BookLookupProvider } from './book-lookup-provider'
 import { LookupService } from './lookup.service'
 
@@ -67,6 +68,19 @@ describe('LookupService', () => {
     return { provider: { lookup }, lookup }
   }
 
+  /**
+   * Stage 8f-2: the single-ISBN path must never reach the batch port. Every
+   * case below passes this, so a call that did would fail loudly here instead
+   * of silently going out to a provider.
+   */
+  function unusedBatchProvider(): BatchBookLookupProvider {
+    return {
+      lookupMany: () => {
+        throw new Error('Одиночний lookup не має торкатися batch-провайдера')
+      },
+    }
+  }
+
   const ISBN = '9783161484100'
 
   it('cache miss (рядка немає) — питає провайдера й записує кеш', async () => {
@@ -74,7 +88,7 @@ describe('LookupService', () => {
     const fresh: BookLookupResult = { title: 'Свіже' }
     const { provider, lookup } = fakeProvider(fresh)
 
-    const service = new LookupService(prisma, provider)
+    const service = new LookupService(prisma, provider, unusedBatchProvider())
     const result = await service.lookup(ISBN)
 
     expect(result).toEqual(fresh)
@@ -89,7 +103,7 @@ describe('LookupService', () => {
     const { prisma } = fakePrisma({ isbn: ISBN, payload: cached, fetchedAt: new Date() })
     const { provider, lookup } = fakeProvider({ title: 'мало б не використатись' })
 
-    const service = new LookupService(prisma, provider)
+    const service = new LookupService(prisma, provider, unusedBatchProvider())
     const result = await service.lookup(ISBN)
 
     expect(result).toEqual(cached)
@@ -106,7 +120,7 @@ describe('LookupService', () => {
     const fresh: BookLookupResult = { title: 'Нове' }
     const { provider, lookup } = fakeProvider(fresh)
 
-    const service = new LookupService(prisma, provider)
+    const service = new LookupService(prisma, provider, unusedBatchProvider())
     const result = await service.lookup(ISBN)
 
     expect(result).toEqual(fresh)
@@ -121,7 +135,7 @@ describe('LookupService', () => {
     })
     const { provider, lookup } = fakeProvider({ title: 'не мало б використатись' })
 
-    const service = new LookupService(prisma, provider)
+    const service = new LookupService(prisma, provider, unusedBatchProvider())
 
     await expect(codeOf(service.lookup(ISBN))).resolves.toMatchObject({
       code: 'CATALOG_LOOKUP_NOT_FOUND',
@@ -135,7 +149,7 @@ describe('LookupService', () => {
     const fresh: BookLookupResult = { title: 'Тепер знайдено' }
     const { provider, lookup } = fakeProvider(fresh)
 
-    const service = new LookupService(prisma, provider)
+    const service = new LookupService(prisma, provider, unusedBatchProvider())
 
     await expect(service.lookup(ISBN)).resolves.toEqual(fresh)
     expect(lookup).toHaveBeenCalledTimes(1)
@@ -156,7 +170,7 @@ describe('LookupService', () => {
       const { prisma } = fakePrisma({ isbn: ISBN, payload: legacyPayload, fetchedAt: new Date() })
       const { provider, lookup } = fakeProvider({ title: 'не мало б викликатись' })
 
-      const service = new LookupService(prisma, provider)
+      const service = new LookupService(prisma, provider, unusedBatchProvider())
       const result = await service.lookup(ISBN)
 
       expect(result).toEqual(legacyPayload)
@@ -174,7 +188,7 @@ describe('LookupService', () => {
       const fresh: BookLookupResult = { title: 'Перезаписане', language: 'en' }
       const { provider, lookup } = fakeProvider(fresh)
 
-      const service = new LookupService(prisma, provider)
+      const service = new LookupService(prisma, provider, unusedBatchProvider())
       const result = await service.lookup(ISBN)
 
       // Не впало з винятком парсингу, не повернуло зіпсоване значення як є —
@@ -191,7 +205,7 @@ describe('LookupService', () => {
       const fresh: BookLookupResult = { title: 'Нове' }
       const { provider, lookup } = fakeProvider(fresh)
 
-      const service = new LookupService(prisma, provider)
+      const service = new LookupService(prisma, provider, unusedBatchProvider())
 
       await expect(service.lookup(ISBN)).resolves.toEqual(fresh)
       expect(lookup).toHaveBeenCalledTimes(1)
@@ -204,7 +218,7 @@ describe('LookupService', () => {
       const lookup = jest.fn().mockResolvedValue(undefined)
       const provider: BookLookupProvider = { lookup }
 
-      const service = new LookupService(prisma, provider)
+      const service = new LookupService(prisma, provider, unusedBatchProvider())
 
       await expect(codeOf(service.lookup(ISBN))).resolves.toMatchObject({
         code: 'CATALOG_LOOKUP_NOT_FOUND',
@@ -221,12 +235,96 @@ describe('LookupService', () => {
       const { prisma, upsert } = fakePrisma(null)
       const { provider } = fakeProvider(new BookLookupProviderError('глюк'))
 
-      const service = new LookupService(prisma, provider)
+      const service = new LookupService(prisma, provider, unusedBatchProvider())
 
       await expect(codeOf(service.lookup(ISBN))).resolves.toMatchObject({
         code: 'CATALOG_LOOKUP_PROVIDER_ERROR',
       })
       expect(upsert).not.toHaveBeenCalled()
     })
+  })
+})
+
+/**
+ * Stage 8f-2: what the batch path is allowed to remember.
+ *
+ * The negative cache is a claim — "no provider knows this ISBN" — and it lasts a
+ * day. An ISBN whose search never finished has not earned that claim, and
+ * writing it would make one broken record mean "no such book" to the add-book
+ * wizard too.
+ */
+describe('LookupService.lookupMany — що потрапляє в кеш', () => {
+  function fakeBatchPrisma(): {
+    prisma: PrismaService
+    findMany: jest.Mock
+    executeRaw: jest.Mock
+  } {
+    const findMany = jest.fn().mockResolvedValue([])
+    const executeRaw = jest.fn().mockResolvedValue(1)
+
+    const prisma = {
+      externalBookLookup: { findMany },
+      $executeRaw: executeRaw,
+    } as unknown as PrismaService
+
+    return { prisma, findMany, executeRaw }
+  }
+
+  function batchProvider(outcome: {
+    found?: [string, BookLookupResult][]
+    notFound?: string[]
+    unavailable?: [string, 'PROVIDER_ERROR' | 'TIMEOUT' | 'BUDGET_EXHAUSTED'][]
+  }): BatchBookLookupProvider {
+    return {
+      lookupMany: () =>
+        Promise.resolve({
+          found: new Map(outcome.found ?? []),
+          notFound: new Set(outcome.notFound ?? []),
+          unavailable: new Map(outcome.unavailable ?? []),
+        }),
+    }
+  }
+
+  const single = { lookup: () => Promise.resolve(undefined) }
+
+  it('успіх і завершене «не знайдено» кешуються, незавершений пошук — ні', async () => {
+    const { prisma, executeRaw } = fakeBatchPrisma()
+    const service = new LookupService(
+      prisma,
+      single,
+      batchProvider({
+        found: [['9780306406157', { title: 'Є' }]],
+        notFound: ['9780262033848'],
+        unavailable: [['9783161484100', 'PROVIDER_ERROR']],
+      }),
+    )
+
+    const outcomes = await service.lookupMany(['9780306406157', '9780262033848', '9783161484100'])
+
+    expect(outcomes.get('9783161484100')).toEqual({
+      kind: 'unavailable',
+      reason: 'PROVIDER_ERROR',
+    })
+    expect(executeRaw).toHaveBeenCalledTimes(1)
+
+    const written = JSON.stringify(executeRaw.mock.calls[0])
+
+    expect(written).toContain('9780306406157')
+    expect(written).toContain('9780262033848')
+    // The one whose search never finished is absent from the write.
+    expect(written).not.toContain('9783161484100')
+  })
+
+  it('нічого завершеного — жодного запису в кеш', async () => {
+    const { prisma, executeRaw } = fakeBatchPrisma()
+    const service = new LookupService(
+      prisma,
+      single,
+      batchProvider({ unavailable: [['9780306406157', 'TIMEOUT']] }),
+    )
+
+    await service.lookupMany(['9780306406157'])
+
+    expect(executeRaw).not.toHaveBeenCalled()
   })
 })

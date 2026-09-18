@@ -128,6 +128,25 @@ export const API_ERROR_CODES = {
    * `details.reason` (`libraryImportInvalidCsvDetailsSchema`) says which.
    */
   IMPORT_INVALID_CSV: 'IMPORT_INVALID_CSV',
+  /**
+   * Stage 8f-2, R6a: the owner's own draft outlived its 24 h TTL (HTTP 410). Its
+   * rows are already deleted, so there is nothing left to read or resolve — the
+   * only way forward is to send the file again, which revives the same import
+   * with a new TTL. A `COMMITTED` import never reaches this code: it does not
+   * expire, and always answers with its previous summary.
+   */
+  IMPORT_EXPIRED: 'IMPORT_EXPIRED',
+  /**
+   * Stage 8f-2 (agreed): the row a `PATCH` was computed from has changed since
+   * the client read it (HTTP 409).
+   *
+   * The case this exists for is a slow one: a `RETRY` waits on a provider, the
+   * owner skips that row meanwhile, and the retry comes back to a row that is no
+   * longer the one it was asked about. Applying it would silently undo the skip,
+   * so the whole operation is refused instead — nothing is written. The body
+   * carries no draft content; the client re-reads the draft and decides again.
+   */
+  IMPORT_ROW_CONFLICT: 'IMPORT_ROW_CONFLICT',
 
   // --- Позичання (§5, §8) ----------------------------------------------------
   /** Запит на позичання власного примірника (HTTP 400). Інваріант §5.3.4. */

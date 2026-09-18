@@ -51,7 +51,8 @@ function draftFrom(cells: Parameters<typeof dataRow>[0][]): ParsedDraft {
     rows: result.rows.map((row) => ({
       rowNumber: row.rowNumber,
       status: row.payload.errors.length > 0 ? 'INVALID' : 'NEEDS_REVIEW',
-      payload: row.payload,
+      // 8f-2: a stored row always carries its own opaque version.
+      payload: { ...row.payload, rowVersion: `v-${String(row.rowNumber)}` },
     })),
   }
 }

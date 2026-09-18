@@ -57,7 +57,22 @@ describe('validateEnv', () => {
       CATALOG_WRITE_RATE_WINDOW_MS: 3600000,
       CATALOG_LOOKUP_RATE_LIMIT: 20,
       CATALOG_LOOKUP_RATE_WINDOW_MS: 60000,
+      // Stage 8f-2, R7a: бюджет fallback-провайдерів у CSV-імпорті.
+      CATALOG_LOOKUP_FALLBACK_BUDGET: 50,
+      CATALOG_LOOKUP_FALLBACK_CONCURRENCY: 4,
+      LIBRARY_IMPORT_PREVIEW_RATE_LIMIT: 5,
+      LIBRARY_IMPORT_PATCH_RATE_LIMIT: 120,
+      LIBRARY_IMPORT_RATE_WINDOW_MS: 60000,
     })
+  })
+
+  /**
+   * R7: контакт провайдера не має дефолту НАВМИСНО. Порожнє значення означає
+   * «контакту немає» — підставляти сюди чиюсь адресу за замовчуванням значило б
+   * скерувати чужі скарги на людину, яка про це не просила.
+   */
+  it('контакт провайдера не має дефолтного значення', () => {
+    expect(envSchema.parse(required).CATALOG_LOOKUP_CONTACT).toBeUndefined()
   })
 })
 

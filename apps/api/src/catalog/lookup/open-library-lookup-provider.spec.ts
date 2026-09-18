@@ -455,4 +455,80 @@ describe('OpenLibraryLookupProvider', () => {
     expect(result).toBeDefined()
     expect(bookLookupResultSchema.parse(result)).toEqual(result)
   })
+
+  /**
+   * Stage 8f-2, R7: the real adapter with a faked HTTP transport — the batch
+   * path has to tell three things apart, and the third one is where a bad
+   * answer used to become a confident "no such book".
+   */
+  describe('lookupMany (batch)', () => {
+    const OTHER = '9780306406157'
+    const THIRD = '9780262033848'
+
+    async function lookupMany(isbns: readonly string[]) {
+      return provider.lookupMany(isbns, new AbortController().signal)
+    }
+
+    it('шле всі bibkeys одним запитом', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({}))
+
+      await lookupMany([ISBN, OTHER])
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url] = fetchMock.mock.calls[0] as [string]
+
+      expect(url).toContain(`bibkeys=ISBN:${ISBN},ISBN:${OTHER}`)
+    })
+
+    it('відсутній bibkey — не знайдено, а не помилка', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ [`ISBN:${ISBN}`]: { title: 'Є' } }))
+
+      const result = await lookupMany([ISBN, OTHER])
+
+      expect([...result.found.keys()]).toEqual([ISBN])
+      expect(result.failed.size).toBe(0)
+    })
+
+    /**
+     * The record IS there, we just cannot read it. Reporting that as "absent"
+     * would let the caller conclude the book does not exist — a claim about the
+     * book made from a fact about the answer.
+     */
+    it('пошкоджений запис — помилка саме цього ISBN, решта batch уціліла', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          [`ISBN:${ISBN}`]: { title: 'Ціла книга' },
+          [`ISBN:${OTHER}`]: { title: '   ' },
+          [`ISBN:${THIRD}`]: { authors: [{ name: 'Без назви' }] },
+        }),
+      )
+
+      const result = await lookupMany([ISBN, OTHER, THIRD])
+
+      expect([...result.found.keys()]).toEqual([ISBN])
+      expect([...result.failed.keys()].sort()).toEqual([THIRD, OTHER].sort())
+      expect(result.failed.get(OTHER)).toContain('без назви')
+    })
+
+    it('batch НЕ робить пошуку по ISBN і не збагачує Work — це був би N+1', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({}))
+
+      await lookupMany([ISBN, OTHER, THIRD])
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('HTTP-помилка валить увесь batch, а не окремий ISBN', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({}, 503))
+
+      await expect(lookupMany([ISBN])).rejects.toBeInstanceOf(BookLookupProviderError)
+    })
+
+    it('більше за ліміт bibkeys — помилка до мережі', async () => {
+      const many = Array.from({ length: 51 }, (_, index) => `isbn-${String(index)}`)
+
+      await expect(lookupMany(many)).rejects.toBeInstanceOf(BookLookupProviderError)
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+  })
 })
