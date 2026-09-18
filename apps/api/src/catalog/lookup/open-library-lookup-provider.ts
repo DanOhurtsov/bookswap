@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common'
 import { isLanguageCode, type BookLookupResult } from '@bookswap/shared'
 import { BookLookupProviderError, type BookLookupProvider } from './book-lookup-provider'
+import {
+  editionFormatFromBinding,
+  exactIsbn13,
+  nonEmptyString,
+  positivePageCount,
+  stringArray,
+} from './lookup-provider.utils'
 
-const API_ROOT = 'https://openlibrary.org/api/books'
+const API_ROOT = 'https://openlibrary.org/api/books.json'
+const SEARCH_API_ROOT = 'https://openlibrary.org/search.json'
 
 interface OpenLibraryAuthor {
   name?: string
@@ -30,6 +38,8 @@ interface OpenLibraryBookRecord {
   publishers?: OpenLibraryPublisher[]
   cover?: OpenLibraryCover
   languages?: OpenLibraryLanguage[]
+  number_of_pages?: number
+  physical_format?: string
 }
 
 /**
@@ -275,6 +285,87 @@ export function normalizeOpenLibraryLanguage(languages: unknown): string | undef
 /** Open Library повертає всі bibkeys одним об'єктом, ключ — `ISBN:<isbn>`. */
 type OpenLibraryBooksResponse = Record<string, OpenLibraryBookRecord | undefined>
 
+interface OpenLibrarySearchDocument {
+  key?: unknown
+  title?: unknown
+  author_name?: unknown
+  isbn?: unknown
+}
+
+function comparableText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
+
+function workIdFromKey(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !/^\/works\/OL[0-9]+W$/u.test(value)) return undefined
+  return value.slice('/works/'.length)
+}
+
+function resultFromIsbnSearchDocument(value: unknown, isbn: string): BookLookupResult | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+
+  const document = value as OpenLibrarySearchDocument
+  if (!Array.isArray(document.isbn) || !document.isbn.some((entry) => exactIsbn13(entry, isbn))) {
+    return undefined
+  }
+
+  const title = nonEmptyString(document.title)
+  if (title === undefined) return undefined
+
+  const authors = stringArray(document.author_name)
+  const workExternalId = workIdFromKey(document.key)
+
+  return {
+    title,
+    ...(authors === undefined ? {} : { authors }),
+    ...(workExternalId === undefined ? {} : { workExternalId }),
+  }
+}
+
+async function lookupByIsbnSearch(
+  isbn: string,
+  signal: AbortSignal,
+): Promise<BookLookupResult | undefined> {
+  const url = new URL(SEARCH_API_ROOT)
+  url.searchParams.set('isbn', isbn)
+  url.searchParams.set('fields', 'key,title,author_name,isbn')
+  url.searchParams.set('limit', '5')
+
+  let response: Response
+
+  try {
+    response = await fetch(url, { signal })
+  } catch (error) {
+    throw new BookLookupProviderError(error instanceof Error ? error.message : 'мережева помилка')
+  }
+
+  if (!response.ok) {
+    throw new BookLookupProviderError(
+      `Open Library ISBN search відповів HTTP ${String(response.status)}`,
+    )
+  }
+
+  const body = await response.json().catch(() => undefined)
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new BookLookupProviderError('Open Library ISBN search повернув не JSON-об’єкт')
+  }
+
+  const documents = (body as Record<string, unknown>).docs
+  if (!Array.isArray(documents)) return undefined
+
+  for (const document of documents) {
+    const result = resultFromIsbnSearchDocument(document, isbn)
+    if (result !== undefined) return result
+  }
+
+  return undefined
+}
+
 /** Перший рік у рядку виду «March 2003», «2003», «Jul 08, 2003». */
 function extractYear(publishDate: unknown): number | undefined {
   if (typeof publishDate !== 'string') return undefined
@@ -351,7 +442,11 @@ export class OpenLibraryLookupProvider implements BookLookupProvider {
 
     const record = (body as OpenLibraryBooksResponse)[bibkey] as Record<string, unknown> | undefined
 
-    if (record === undefined) return undefined
+    // Books API and Search API use different Open Library indexes. A recently
+    // imported edition can temporarily be absent from one but present in the
+    // other, so an empty bibkey gets one exact-ISBN search before we move on to
+    // another provider.
+    if (record === undefined) return lookupByIsbnSearch(isbn, signal)
 
     const title = record.title
     if (typeof title !== 'string' || title.trim() === '') {
@@ -369,6 +464,8 @@ export class OpenLibraryLookupProvider implements BookLookupProvider {
     const publishedYear = extractYear(record.publish_date)
     const externalId = externalIdFromKey(record.key)
     const language = normalizeOpenLibraryLanguage(record.languages)
+    const pageCount = positivePageCount(record.number_of_pages)
+    const format = editionFormatFromBinding(record.physical_format)
 
     return {
       title,
@@ -376,8 +473,73 @@ export class OpenLibraryLookupProvider implements BookLookupProvider {
       ...(publishedYear === undefined ? {} : { publishedYear }),
       ...(language === undefined ? {} : { language }),
       ...(publisher === undefined ? {} : { publisher }),
+      ...(pageCount === undefined ? {} : { pageCount }),
+      ...(format === undefined ? {} : { format }),
       ...(coverUrl === undefined ? {} : { coverUrl }),
       ...(externalId === undefined ? {} : { externalId }),
     }
+  }
+
+  /**
+   * Resolves only a strong title + author match. A title-only result is a suggestion,
+   * not enough evidence to attach an edition to an Open Library Work automatically.
+   */
+  async lookupWork(
+    title: string,
+    authors: readonly string[],
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (authors.length === 0) return undefined
+
+    const url = new URL(SEARCH_API_ROOT)
+    url.searchParams.set('title', title)
+    url.searchParams.set('author', authors[0] ?? '')
+    url.searchParams.set('fields', 'key,title,author_name')
+    url.searchParams.set('limit', '5')
+
+    let response: Response
+
+    try {
+      response = await fetch(url, { signal })
+    } catch (error) {
+      throw new BookLookupProviderError(error instanceof Error ? error.message : 'мережева помилка')
+    }
+
+    if (!response.ok) {
+      throw new BookLookupProviderError(
+        `Open Library work search відповів HTTP ${String(response.status)}`,
+      )
+    }
+
+    const body = await response.json().catch(() => undefined)
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new BookLookupProviderError('Open Library work search повернув не JSON-об’єкт')
+    }
+
+    const documents = (body as Record<string, unknown>).docs
+    if (!Array.isArray(documents)) return undefined
+
+    const expectedTitle = comparableText(title)
+    const expectedAuthors = new Set(authors.map(comparableText))
+
+    for (const value of documents) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+
+      const document = value as OpenLibrarySearchDocument
+      if (typeof document.title !== 'string' || comparableText(document.title) !== expectedTitle) {
+        continue
+      }
+
+      if (!Array.isArray(document.author_name)) continue
+      const hasExactAuthor = document.author_name.some(
+        (author) => typeof author === 'string' && expectedAuthors.has(comparableText(author)),
+      )
+      if (!hasExactAuthor) continue
+
+      const workId = workIdFromKey(document.key)
+      if (workId !== undefined) return workId
+    }
+
+    return undefined
   }
 }

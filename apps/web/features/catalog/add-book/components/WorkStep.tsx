@@ -54,7 +54,7 @@ function defaultValues(
     title: draft.work.title === '' ? initialTitle : draft.work.title,
     origLang: 'uk',
     firstPubYear: null,
-    description: null,
+    description: draft.work.description === '' ? null : draft.work.description,
     authors: names.map((name) => ({ name, role: 'AUTHOR' })),
   }
 }

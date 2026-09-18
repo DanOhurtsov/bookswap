@@ -27,6 +27,14 @@ loadPublicEnvFromRoot()
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: 'covers.openlibrary.org' },
+      { protocol: 'https', hostname: 'books.google.com' },
+      { protocol: 'https', hostname: 'books.googleusercontent.com' },
+      { protocol: 'https', hostname: 'images.isbndb.com' },
+    ],
+  },
   // Явний білий список того, що доїде до браузера.
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001',

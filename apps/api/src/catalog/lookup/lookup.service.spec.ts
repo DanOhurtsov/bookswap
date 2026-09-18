@@ -113,6 +113,34 @@ describe('LookupService', () => {
     expect(lookup).toHaveBeenCalledTimes(1)
   })
 
+  it('свіжий негативний кеш повертає 404 без повторного виклику провайдерів', async () => {
+    const { prisma } = fakePrisma({
+      isbn: ISBN,
+      payload: { notFound: true },
+      fetchedAt: new Date(),
+    })
+    const { provider, lookup } = fakeProvider({ title: 'не мало б використатись' })
+
+    const service = new LookupService(prisma, provider)
+
+    await expect(codeOf(service.lookup(ISBN))).resolves.toMatchObject({
+      code: 'CATALOG_LOOKUP_NOT_FOUND',
+    })
+    expect(lookup).not.toHaveBeenCalled()
+  })
+
+  it('прострочений негативний кеш знову запускає провайдерів', async () => {
+    const old = new Date(Date.now() - 25 * 60 * 60_000)
+    const { prisma } = fakePrisma({ isbn: ISBN, payload: { notFound: true }, fetchedAt: old })
+    const fresh: BookLookupResult = { title: 'Тепер знайдено' }
+    const { provider, lookup } = fakeProvider(fresh)
+
+    const service = new LookupService(prisma, provider)
+
+    await expect(service.lookup(ISBN)).resolves.toEqual(fresh)
+    expect(lookup).toHaveBeenCalledTimes(1)
+  })
+
   describe('compatibility: звуження language до languageCodeSchema', () => {
     it('legacy payload БЕЗ ключа language (форма до Stage 7, єдина, яку колись писав провайдер) парситься без утрат', async () => {
       // Точна форма, яку повертав OpenLibraryLookupProvider до нормалізації
@@ -171,7 +199,7 @@ describe('LookupService', () => {
   })
 
   describe('помилки провайдера при cache miss', () => {
-    it('провайдер не знає ISBN (undefined) — CATALOG_LOOKUP_NOT_FOUND, кеш не пишеться', async () => {
+    it('провайдер не знає ISBN (undefined) — CATALOG_LOOKUP_NOT_FOUND і короткий негативний кеш', async () => {
       const { prisma, upsert } = fakePrisma(null)
       const lookup = jest.fn().mockResolvedValue(undefined)
       const provider: BookLookupProvider = { lookup }
@@ -181,7 +209,12 @@ describe('LookupService', () => {
       await expect(codeOf(service.lookup(ISBN))).resolves.toMatchObject({
         code: 'CATALOG_LOOKUP_NOT_FOUND',
       })
-      expect(upsert).not.toHaveBeenCalled()
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { isbn: ISBN },
+          create: { isbn: ISBN, payload: { notFound: true } },
+        }),
+      )
     })
 
     it('провайдер кидає помилку — CATALOG_LOOKUP_PROVIDER_ERROR, кеш не пишеться', async () => {

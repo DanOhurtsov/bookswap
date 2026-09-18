@@ -44,9 +44,9 @@ function defaultValues({
     publisher: draft.publisher === '' ? null : draft.publisher,
     year: draft.year === '' ? null : Number(draft.year),
     isbn13: initialIsbn ?? null,
-    pageCount: null,
+    pageCount: draft.pageCount === '' ? null : Number(draft.pageCount),
     coverUrl: draft.coverUrl === '' ? null : draft.coverUrl,
-    format: 'PAPERBACK',
+    format: draft.format ?? 'PAPERBACK',
   }
 }
 

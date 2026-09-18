@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { editionFormatSchema } from '../domain/catalog'
 import { isbn13Schema } from '../domain/isbn'
 import { languageCodeSchema } from '../domain/language'
 
@@ -16,6 +17,12 @@ export const bookLookupRequestSchema = z.object({
 })
 
 export type BookLookupRequest = z.infer<typeof bookLookupRequestSchema>
+
+export const BOOK_LOOKUP_SOURCES = ['OPEN_LIBRARY', 'GOOGLE_BOOKS', 'ISBNDB'] as const
+
+export const bookLookupSourceSchema = z.enum(BOOK_LOOKUP_SOURCES)
+
+export type BookLookupSource = z.infer<typeof bookLookupSourceSchema>
 
 /**
  * Нормалізована форма, спільна для всіх провайдерів (Open Library і будь-який
@@ -54,8 +61,15 @@ export const bookLookupResultSchema = z.object({
   /** ISO 639-1, уже нормалізований провайдером (§6.3 п.7). Цільове поле — лише `Translation.lang`. */
   language: languageCodeSchema.optional(),
   publisher: z.string().optional(),
+  description: z.string().min(1).optional(),
+  pageCount: z.number().int().positive().max(20_000).optional(),
+  format: editionFormatSchema.optional(),
   coverUrl: z.string().optional(),
+  /** Provider that supplied the exact ISBN record. Optional for legacy cache rows. */
+  source: bookLookupSourceSchema.optional(),
   externalId: z.string().optional(),
+  /** Strong Open Library Work match, kept as reference metadata rather than a catalog FK. */
+  workExternalId: z.string().optional(),
 })
 
 export type BookLookupResult = z.infer<typeof bookLookupResultSchema>

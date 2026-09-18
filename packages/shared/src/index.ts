@@ -356,12 +356,15 @@ export {
   type UpdateNotificationPreferencesRequest,
 } from './contracts/notification'
 export {
+  BOOK_LOOKUP_SOURCES,
   bookLookupRequestSchema,
   bookLookupResponseSchema,
   bookLookupResultSchema,
+  bookLookupSourceSchema,
   type BookLookupRequest,
   type BookLookupResponse,
   type BookLookupResult,
+  type BookLookupSource,
 } from './contracts/lookup'
 export {
   WISHLIST_LIMITS,

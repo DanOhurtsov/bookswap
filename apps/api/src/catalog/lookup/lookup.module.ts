@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common'
 import { AuthModule } from '../../auth/auth.module'
 import { BOOK_LOOKUP_PROVIDER } from './book-lookup-provider'
+import { FallbackBookLookupProvider } from './fallback-book-lookup-provider'
+import { GoogleBooksLookupProvider } from './google-books-lookup-provider'
+import { IsbnDbLookupProvider } from './isbndb-lookup-provider'
 import { LookupController } from './lookup.controller'
 import { LookupService } from './lookup.service'
 import { OpenLibraryLookupProvider } from './open-library-lookup-provider'
@@ -19,7 +22,10 @@ import { OpenLibraryLookupProvider } from './open-library-lookup-provider'
   providers: [
     LookupService,
     OpenLibraryLookupProvider,
-    { provide: BOOK_LOOKUP_PROVIDER, useExisting: OpenLibraryLookupProvider },
+    GoogleBooksLookupProvider,
+    IsbnDbLookupProvider,
+    FallbackBookLookupProvider,
+    { provide: BOOK_LOOKUP_PROVIDER, useExisting: FallbackBookLookupProvider },
   ],
 })
 export class LookupModule {}

@@ -604,6 +604,37 @@ describe('гілка «немає збігів»', () => {
     expect(await screen.findByText(/тепер у вашій бібліотеці/)).toBeInTheDocument()
   })
 
+  it('показує точну зовнішню знахідку перед заповненою формою', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+      '/catalog/lookup': () => ({
+        result: {
+          title: 'Influence, New and Expanded',
+          authors: ['Robert B Cialdini PhD'],
+          publisher: 'Harper Business',
+          publishedYear: 2021,
+          source: 'GOOGLE_BOOKS',
+        },
+      }),
+    })
+
+    await search(CANDIDATE_ISBN)
+
+    expect(
+      await screen.findByText('У каталозі BookSwap цього видання ще немає.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Influence, New and Expanded')).toBeInTheDocument()
+    expect(screen.getByText('Robert B Cialdini PhD')).toBeInTheDocument()
+    expect(screen.getByText('Harper Business · 2021')).toBeInTheDocument()
+    expect(screen.getByText('Знайдено за ISBN у Google Books')).toBeInTheDocument()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Додати цю книжку' }))
+
+    expect(await screen.findByText('Твір')).toBeInTheDocument()
+    expect(screen.getByLabelText('Назва твору')).toHaveValue('Influence, New and Expanded')
+  })
+
   it('підставляє дані з lookup у форму Work як редаговану чернетку', async () => {
     routeApiRequest({
       '/catalog/search/candidates': () => ({ candidates: [] }),
@@ -615,7 +646,7 @@ describe('гілка «немає збігів»', () => {
     await search(CANDIDATE_ISBN)
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Створити новий твір' }))
+    await user.click(await screen.findByRole('button', { name: 'Додати цю книжку' }))
 
     expect(await screen.findByText('Твір')).toBeInTheDocument()
     expect(screen.getByLabelText('Назва твору')).toHaveValue('З лукапу')
@@ -671,7 +702,7 @@ describe('гілка «немає збігів»', () => {
     await search(CANDIDATE_ISBN)
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Створити новий твір' }))
+    await user.click(await screen.findByRole('button', { name: 'Додати цю книжку' }))
 
     expect(await screen.findByText('Твір')).toBeInTheDocument()
     // Work-крок не отримує ні року видання, ні мови видання — жодного поля

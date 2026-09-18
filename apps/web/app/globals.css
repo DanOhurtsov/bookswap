@@ -437,6 +437,27 @@ button:not([data-ui='button']):disabled {
   color: var(--bookswap-muted);
 }
 
+.lookup-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+}
+
+.lookup-card__cover {
+  width: 4.5rem;
+  height: 6.75rem;
+  object-fit: cover;
+  border-radius: 0.25rem;
+  background: var(--field-bg);
+}
+
+.lookup-card__content {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
 /* Видання під твором — вужчий блок, щоб було видно, що це не окремі книжки. */
 .book__editions,
 .copies {

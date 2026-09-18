@@ -36,6 +36,8 @@ const lookup: BookLookupResult = {
   title: 'Lookup title',
   publishedYear: 2001,
   publisher: 'Видавництво з lookup',
+  pageCount: 320,
+  format: 'HARDCOVER',
   coverUrl: 'https://example.com/cover.jpg',
 }
 
@@ -60,14 +62,14 @@ it('keeps lookup and ISBN prefill editable and submits normalized fields', async
   expect(screen.getByLabelText('Видавництво')).toHaveValue('Видавництво з lookup')
   expect(screen.getByLabelText('Рік видання')).toHaveValue(2001)
   expect(screen.getByLabelText('ISBN-13')).toHaveValue('978-3-16-148410-0')
+  expect(screen.getByLabelText('Сторінок')).toHaveValue(320)
+  expect(screen.getByLabelText('Палітурка')).toHaveValue('HARDCOVER')
   expect(screen.getByLabelText('Обкладинка (посилання)')).toHaveValue(
     'https://example.com/cover.jpg',
   )
 
   await user.clear(screen.getByLabelText('Видавництво'))
   await user.type(screen.getByLabelText('Видавництво'), 'Виправлене видавництво')
-  await user.type(screen.getByLabelText('Сторінок'), '320')
-  await user.selectOptions(screen.getByLabelText('Палітурка'), 'HARDCOVER')
   await user.click(screen.getByRole('button', { name: 'Далі: мій примірник' }))
 
   await waitFor(() => {
