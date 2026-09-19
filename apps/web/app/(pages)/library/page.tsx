@@ -117,7 +117,8 @@ function LibraryScreen() {
       {view === 'borrowed' ? <BorrowedView /> : <OwnView view={view} />}
 
       <p className="form__aside">
-        <Link href="/catalog">Додати книжку</Link> · <Link href="/loans">Позичання</Link> ·{' '}
+        <Link href="/catalog">Додати книжку</Link> ·{' '}
+        <Link href="/library/imports">Імпорт із CSV</Link> · <Link href="/loans">Позичання</Link> ·{' '}
         <Link href="/history">Історія</Link> · <Link href="/friends">Друзі</Link> ·{' '}
         <Link href="/">На головну</Link>
       </p>
