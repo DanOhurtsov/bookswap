@@ -725,3 +725,186 @@ button:not([data-ui='button']):disabled {
     @apply border-border outline-ring/50;
   }
 }
+
+/* --- Імпорт CSV (Етап 8f-3) ------------------------------------------------ */
+/* Ті самі токени, що й решта сторінок, тож темна тема працює без окремих правил. */
+.import-intro {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--field-bg);
+}
+
+.import-intro__title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.import-intro__steps,
+.import-intro__limits {
+  margin: 0 0 1.25rem;
+  padding-left: 1.2rem;
+  font-size: 0.95rem;
+  color: var(--bookswap-muted);
+}
+
+.import-intro__limits {
+  margin-bottom: 0;
+}
+
+.import-file {
+  max-width: 100%;
+}
+
+/* Дії лишаються натисними пальцем: 2.75rem = 44px при типовому корені. */
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.import-action {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.import-action--link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.65rem 1.1rem;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--fg);
+  border-radius: 0.4rem;
+  text-decoration: none;
+}
+
+.import-summary {
+  margin-bottom: 1.5rem;
+}
+
+.import-summary__facts {
+  margin-bottom: 1rem;
+}
+
+.import-filters {
+  margin-bottom: 1rem;
+  gap: 0.5rem;
+}
+
+.import-rows {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.import-row {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 0.5rem;
+  /* Довгий ISBN чи назва без пробілів не мають розтягувати сторінку вбік. */
+  overflow-wrap: anywhere;
+}
+
+.import-row--needs_review {
+  border-left-color: var(--warn);
+}
+
+.import-row--invalid {
+  border-left-color: var(--error);
+}
+
+.import-row--ready_existing_edition,
+.import-row--ready_create_chain {
+  border-left-color: var(--ok);
+}
+
+.import-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.import-row__number {
+  font-size: 0.85rem;
+  color: var(--bookswap-muted);
+}
+
+/* Статус названо словами, а не лише кольором: колір тут — підсилення, не носій змісту. */
+.import-row__badge {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  color: var(--bookswap-muted);
+}
+
+.import-row__badge--needs_review {
+  color: var(--warn);
+}
+
+.import-row__badge--invalid {
+  color: var(--error);
+}
+
+.import-row__badge--ready_existing_edition,
+.import-row__badge--ready_create_chain {
+  color: var(--ok);
+}
+
+.import-row__title {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+}
+
+.import-row__errors {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  color: var(--warn);
+}
+
+.import-row__panel {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.import-row__panel-title {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+
+.import-row__panel-title:focus-visible {
+  outline: 2px solid var(--bookswap-accent);
+  outline-offset: 2px;
+}
+
+.import-candidates {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+.import-candidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.35rem 0;
+  cursor: pointer;
+}
+
+.import-candidate__title {
+  display: block;
+  font-weight: 600;
+}
