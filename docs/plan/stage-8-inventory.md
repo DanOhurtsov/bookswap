@@ -4,8 +4,9 @@
 (barcode/camera scan) і 8e (correction schema/audit, permissions/API та UI)
 завершені й у main. 8f-1 (CSV parser і import persistence) теж у main; там
 само — додаткові fallback-провайдери ISBN lookup (Open Library → Google Books →
-ISBNdb), на які спирається 8f-2. 8f-2 (batched preview API) реалізований на
-гілці `codex/8f2-import-preview-api` і чекає на рев'ю; 8f-3 (preview UI),
+ISBNdb), на які спирається 8f-2. 8f-2 (batched preview API, коміт `ae0b54d`) і
+8f-3 (preview UI, коміт `47088b2`) завершені й у main. 8f-4 (завантаження
+`.xlsx` у наявний preview) реалізовано на гілці `codex/xlsx-import-preview`.
 8g (atomic import commit) і 8h (onboarding і закриття етапу) ще не розпочаті.
 
 **Передумова:** Етап 8a (product analytics) завершено.
@@ -362,6 +363,175 @@ expired / committed / чужої чернетки лишаються чинни�
 невалідним `quantity`, що на parse не рахувався взагалі. Тоді повертається
 справжнє число і `canCommit: false`, а не підрізане до ліміту.
 
+### R6b. Погоджені рішення 8f-4 — XLSX у preview (PO, 2026-09-19)
+
+Знімають заборону §8 в частині XLSX і закривають вибори, які вона лишала
+відкритими. Усе, що не названо тут, лишається як у R4–R7a: колонки, порядок,
+правила валідації, resolution, дії над рядками, `expectedRowVersion`, 409,
+TTL та ізоляція сесій для `.xlsx` ті самі, що й для CSV.
+
+**Формат у запиті.** `POST /me/library/imports/preview` приймає
+`format: 'CSV' | 'XLSX'`. Поле відсутнє — це `CSV`, тож кожен клієнт 8f-2
+працює без змін; `null`, порожній рядок і невідоме значення — `VALIDATION_ERROR`,
+а не мовчазний fallback. Sniffing за байтами свідомо не застосовується: він дав
+би два шляхи до одного стану. Shared Zod (`.default('CSV')`) і Nest DTO
+(`@ValidateIf(format !== undefined)`, не `@IsOptional()`) узгоджені
+parity-тестами — `@IsOptional()` вважав би `null` відсутнім і розійшовся б зі
+схемою.
+
+**Читання — авторитетно на сервері.** Браузер надсилає початкові байти у
+base64 і не перетворює файл у CSV, не парсить аркуші й не перевіряє заголовок.
+Розширення файла лише обирає reader; вміст перевіряє сервер.
+
+**Бібліотека.** ExcelJS 4.4.0 (MIT) — читання й запис. Використовується ТІЛЬКИ
+`workbook.xlsx.load()`/`writeBuffer()`, які працюють у пам'яті через JSZip.
+`ExcelJS.stream.*` не використовується: саме той шлях тягне `unzipper@0.10`,
+`tmp` і запис на диск. Власний OOXML-reader не пишеться.
+
+**Безпечний ZIP-шлях.** `Workbook.xlsx.load()` не має жодного ліміту на
+розпакований обсяг, а JSZip при дублікаті імені бере ОСТАННІЙ запис. Тому
+перевірити архів і віддати ті самі байти далі — недостатньо: це два парсери над
+одними байтами, чия згода є припущенням. Натомість:
+
+1. yauzl 3.4.0 (`lazyEntries: true`, `validateEntrySizes: true`,
+   `strictFileNames: true`) читає central directory й обмежено витягує члени
+   послідовно;
+2. перевірки за метаданими ДО розпакування: ≤64 записів, сумарний і поодинокий
+   declared uncompressed ≤8 МіБ, ratio ≤200×, шифрований біт, дублікати імен,
+   небезпечні шляхи;
+3. під час читання рахуються ФАКТИЧНІ байти; перевищення припиняє всю обробку,
+   не лише поточний потік;
+4. з перевірених частин fflate `zipSync` складає НОВИЙ канонічний архів, і саме
+   його парсить ExcelJS. Оригінальний архів ExcelJS не бачить ніколи, тож
+   питання розбіжності двох парсерів не виникає;
+5. нічого не пишеться на диск.
+
+`strictFileNames: true` не косметика: без нього yauzl перетворює `\` у `/`,
+тож `xl\workbook.xml` став би робочою частиною тут, тоді як JSZip лишив би
+буквальне ім'я й не знайшов workbook — рівно та розбіжність, яку знімає
+пересборка.
+
+**Декларації читаються як XML, не як текст.** `[Content_Types].xml` і всі
+`*.rels` розбираються потоковим `saxes` (ISC, одна залежність — той самий
+парсер, який уже використовує ExcelJS). Причина: `TargetMode="External"`,
+`TargetMode='External'`, `TargetMode = "External"` і
+`Type="…extern&#97;lLink"` — це ОДНА декларація для будь-якого XML-читача й
+чотири різні рядки для `includes()`. Порівнюються вже розібрані значення
+атрибутів (лапки зняті, character references розгорнуті, імена атрибутів
+звіряються без урахування регістру), тож жодне написання не проходить повз.
+Те саме правило — для macro content types і `vbaProject`.
+
+Нічого не завантажується ззовні; частина з `DOCTYPE` відхиляється одразу
+(`MALFORMED_XLSX`), бо жодна частина OOXML його не потребує, а відмова знімає
+всі питання про розгортання entity (XXE, billion laughs) замість того, щоб
+покладатися на стриманість парсера. Власний XML-парсер не пишеться.
+
+**Частини, які не переносимо.** Allowlist переносить лише частини, від яких
+залежать значення комірок. `docProps/**`, `xl/calcChain.xml`,
+`xl/printerSettings/**` і `customXml/**` відкидаються як такі, що не несуть
+значень. Усе інше відхиляється ЯВНО: `xl/vbaProject.bin` — `MACRO_ENABLED`,
+`xl/externalLinks/**` — `EXTERNAL_LINKS`, решта — `FORBIDDEN_PART`. Додатково
+скануються content types і relationships, тож `TargetMode="External"` чи
+macro-content-type відхиляються навіть без відповідної частини у файлі.
+
+**Складність workbook — ДО `xlsx.load()`.** `load()` будує весь об'єктний граф
+одним викликом, тож ліміт, перевірений після нього, уже оплачено. Аркуші,
+рядки, комірки й посилання на комірки рахуються в самій розмітці перевірених
+частин (`xl/workbook.xml`, `xl/worksheets/sheet*.xml`) тим самим обмеженим
+XML-читачем, і обхід припиняється в момент вичерпання бюджету, а не після
+повного розбору.
+
+`<dimension ref="A1:XFD1048576"/>` не використовується ніде: це заявка, а не
+факт, і жоден цикл нею не керується. Небезпечні індекси відхиляються
+(`MALFORMED_XLSX`): рядок поза 1 048 576, колонка поза XFD, посилання, що не
+має форми комірки взагалі.
+
+Ліміти: ≤16 аркушів, ≤100 000 заповнених комірок і ≤20 000 елементів `<row>`
+на аркуш.
+
+**`maxSheetRows = 20 000` (PO, 2026-09-19) — це максимальна кількість
+XML-елементів `<row>` на одному аркуші, включно з порожніми.** Не кількість
+книжок: продуктовий ліміт лишається 200 data rows і перевіряється окремо, за
+рядками даних. Не максимальний номер рядка: індекс поза сіткою Excel
+(> 1 048 576) відхиляє перевірка посилань, а не цей ліміт. І не кількість
+комірок — їх обмежує `maxCells`.
+
+Потрібен він тому, що ліміт комірок сам по собі лишав дірку: аркуш із мільйона
+ПОРОЖНІХ `<row/>` не містить жодної комірки й однаково змушує читач збудувати
+мільйон об'єктів. 20 000 — стократний запас над 200 рядками даних, тож службові
+порожні рядки, які Excel пише вільно, нікому не коштують файла. Перевірка
+припиняє обробку на першому елементі понад ліміт і завжди до `xlsx.load()`.
+
+**Ліміти (початкові продуктові межі).** XLSX-файл ≤512 КіБ; фактичний
+розпакований обсяг ≤8 МіБ; ≤64 ZIP entries; ratio ≤200×; JSON-запит ≤768 КіБ.
+Ratio — додатковий фільтр, не заміна byte-limit. CSV зберігає власні 48 КіБ. Для
+обох форматів лишаються 200 рядків і 500 Copy. Виміряно на звичайному workbook
+із 200 заповненими рядками (усі 22 колонки): 20,7 КіБ файл, 164 КіБ
+розпаковано, 16 entries, максимальний ratio 11, 4422 комірки — запас від 4× до
+51× за кожною межею.
+
+**Один аркуш із даними.** Аркуш без жодної заповненої комірки (наприклад, лише
+з форматуванням) не є аркушем із даними. Нуль таких аркушів — `NO_SHEET`;
+більше одного — `MULTIPLE_SHEETS` зі списком їхніх НОМЕРІВ, і користувач сам
+лишає один. Мовчазний вибір чи об'єднання заборонені.
+
+**Комірки → raw cells.** Reader не створює нових значень: він дає ті самі 22
+рядкові клітинки, які далі проходять чинні shared-схеми. Текст — як є, без
+trim. Boolean — `true`/`false`. Порожня й відсутня комірка — `''`. Число
+рендериться (`String`), а судить його колонка: `1.5` некоректне в `page_count`
+і цілком нормальне в `title`. Hyperlink дає текст, не URL; rich text
+склеюється.
+
+- **Формули** відхиляють ФАЙЛ (`FORMULA_CELL`) без обчислення; cached result не
+  використовується як дані. Excel-error комірки — окрема причина `CELL_ERROR`.
+  Обидві вказують аркуш/рядок/колонку.
+- **Дати** перетворюються лише в `acquired_at`, і лише через UTC
+  (`toISOString().slice(0,10)`) — локальні getter'и зсували б добу на захід від
+  Гринвіча. Підтримано обидві системи, 1900 і 1904. Серійні номери до 61
+  (зона Excel-фікції 29.02.1900) відхиляються, а не відповідають датою на добу
+  хибною. Дата в іншій колонці — явна помилка рядка `INVALID_FIELD`, не мовчазне
+  серійне число.
+- **Числовий ISBN** приймається лише без втрати точності (безпечне ціле). Ніякого
+  доповнення нулями й розгортання експоненти здогадкою: число, що вціліло як
+  точне ціле, показується як є і чесно падає на контрольній сумі.
+
+Рядок, УСІ комірки якого reader відхилив, не вважається порожнім і не
+зникає — інакше файл з однією зламаною ISBN відповідав би «немає книжок».
+
+**Відхилена комірка зберігається як факт, а не як порожнеча.** Reader не
+вигадує тексту для комірки, яку не може перенести, тож вона лишається порожньою
+— але сама відмова зберігається поряд із рядком (`rejectedCells`: колонка →
+причина `UNEXPECTED_DATE` | `DATE_OUT_OF_RANGE` | `UNREPRESENTABLE_NUMBER`).
+Це закриває конкретну дірку: порожнє `quantity` означає 1, тож без цього запису
+наступний PATCH будь-якої ІНШОЇ колонки перечитував би рядок як валідний, і
+дефолт колонки тихо ставав би відповіддю, якої у файлі не було.
+
+Наслідки, однакові з невалідною коміркою CSV: рядок не має `values`, не бере
+участі в порівнянні дублікатів і не додає примірників до copy count (R6a:
+невалідне `quantity` не замінюється одиницею). Відмова знімається ЛИШЕ явним
+редагуванням саме цієї колонки; edit, skip, restore чи retry над рештою рядка
+її не торкаються. У відповіді `rejectedCells` віддається клієнту, щоб UI сказав,
+що саме було в комірці, а не абстрактне «некоректне значення».
+
+**sourceHash.** CSV лишається побайтово як у 8f-1: `SHA-256(байти)` після
+зняття одного BOM. Наявні імпорти не перехешовуються й далі знаходяться за
+старим hash (покрито regression-тестом). XLSX:
+`SHA-256('bookswap:library-import:xlsx:v1\n' ‖ отримані байти)`. Префікс
+рахується від ОРИГІНАЛЬНИХ байтів, не від перескладеного архіву. CSV і XLSX з
+однаковими рядками не об'єднуються в один імпорт. `COMMITTED` не скидається й
+не відновлюється.
+
+**Шаблон.** Окремий `/library-import-template.xlsx` — лише заголовок, без
+демонстраційної книги (та сама причина, що й для CSV у R6a). Колонка `isbn13`
+форматується як текст (`numFmt: '@'`), інакше Excel читає ISBN як число.
+Шаблон — комітнутий бінарний asset, що генерується
+`pnpm --filter @bookswap/api template:xlsx`; contract-тест читає САМЕ цей файл
+виробничим reader'ом.
+
+**Поза scope 8f-4:** import commit, 8g/8h, будь-які domain writes у preview,
+`.xls`, `.xlsm`, файли під паролем (одне чесне повідомлення на всі три),
+Google Sheets.
+
 ### R8. Права на catalog correction
 
 Глобальна admin-role не додається. Автентифікований користувач може змінити:
@@ -642,7 +812,7 @@ parity tests. Import draft завжди scoped до owner; чужий id пов�
 Стабільні row errors: `INVALID_ISBN`, `INVALID_FIELD`, `DUPLICATE_ROW`,
 `LOOKUP_UNAVAILABLE`, `LOOKUP_NOT_FOUND`, `MISSING_CATALOG_DATA`,
 `AMBIGUOUS_CATALOG_MATCH`. Import errors: `IMPORT_TOO_LARGE`, `IMPORT_INVALID_CSV`
-(R6a), `IMPORT_EXPIRED`, `IMPORT_NOT_READY`. Текст локалізує web; API повертає code і structured details.
+(R6a), `IMPORT_INVALID_XLSX` (R6b), `IMPORT_EXPIRED`, `IMPORT_NOT_READY`. Текст локалізує web; API повертає code і structured details.
 
 ## 5. Data model і migration safety
 
@@ -772,6 +942,18 @@ JSON не замінює shared contract. Жодного historical backfill aud
 - **DoD:** commit disabled до повної resolution; 200 rows usable на mobile/desktop;
   private note рендериться лише як text, ніколи як HTML/formula execution.
 
+### 8f-4 — завантаження XLSX у наявний preview
+
+- Дискримінатор `format`, безпечне читання ZIP із канонічною пересборкою,
+  reader комірок і шаблон `.xlsx` за R6b; спільна нормалізація/валідація/
+  resolution не дублюються.
+- **DoD:** еквівалентні CSV і XLSX дають однакові рядки, counts і readiness;
+  нуль domain writes; CSV-контракт і його тести не послаблені, старий
+  sourceHash знаходить наявний імпорт; формули, error-комірки, кілька
+  заповнених аркушів, підроблені розміри, дублікати шляхів, заборонені частини
+  й перевищення лімітів відхиляються з причиною; помилки не містять вмісту
+  файла. **Не робити:** commit, 8g/8h, Google Sheets, `.xls`/`.xlsm`.
+
 ### 8g — atomic import commit і analytics
 
 - Transactional catalog/Copy creation, row lock, safe rerun і cleanup R5–R6.
@@ -789,7 +971,7 @@ JSON не замінює shared contract. Жодного historical backfill aud
 
 ## 7. Наскрізна test matrix і release gate
 
-- Shared: valid/invalid boundaries, DTO parity, exact template/header.
+- Shared: valid/invalid boundaries, DTO parity, exact template/header (CSV і XLSX).
 - API: positive, negative, permission, idempotency, concurrency, transaction
   rollback, query-count і provider timeout tests.
 - Web: route server/client boundary, forms, scanner cleanup, CSV resolution,
@@ -805,8 +987,12 @@ migration і manual camera matrix пройдені, а docs описують ф�
 ## 8. Явне «Не робити»
 
 - Shelf photo, OCR/AI cover recognition, native app, Goodreads sync.
-- Title-only CSV, довільне зіставлення колонок, XLSX/Google Sheets integration,
+- Title-only CSV, довільне зіставлення колонок, Google Sheets integration,
   background jobs або distributed import queue.
+  **Зміна (PO, 2026-09-19):** заборона на XLSX знята рівно в одній частині —
+  локальне завантаження файла `.xlsx` у наявний import preview (R6b нижче).
+  Google Sheets integration, довільне зіставлення колонок, title-only import,
+  background jobs і distributed queue лишаються поза scope.
 - Public catalog edit, admin console, moderation workflow, delete/merge з edit UI.
 - Camera frame upload/storage, ISBN lookup на client, довіра до client validation.
 - CSV export; коли він з'явиться на Етапі 13, окремо neutralize formula prefixes
@@ -828,6 +1014,16 @@ migration і manual camera matrix пройдені, а docs описують ф�
   і record-size limits.
 - OWASP CSV Injection: імпортований текст не виконується; майбутній export має
   neutralize formula-leading cells.
+- ECMA-376 (OOXML): `.xlsx` — ZIP-контейнер із XML-частинами; `.xlsm` різниться
+  наявністю `xl/vbaProject.bin` і власним content type.
+- `.xls` і захищений паролем OOXML — обидва контейнери Compound File Binary
+  (magic `D0 CF 11 E0`), тож надійно розрізнити їх без парсера CFB не можна:
+  звідси одне спільне повідомлення (R6b).
+- yauzl: central directory, `validateEntrySizes` (звіряє фактичний потік із
+  оголошеним розміром), `strictFileNames`, відмова на шифрованих записах і
+  непідтримуваних методах стиснення.
+- ExcelJS 4.4.0 (MIT): `xlsx.load()`/`writeBuffer()` працюють у пам'яті через
+  JSZip; `unzipper`, `tmp` і `archiver` лежать лише на шляху `stream.*`.
 
 Посилання:
 
@@ -840,3 +1036,7 @@ migration і manual camera matrix пройдені, а docs описують ф�
 - <https://datatracker.ietf.org/doc/html/rfc4180>
 - <https://csv.js.org/parse/options/>
 - <https://wstg.owasp.org/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/21-Testing_for_CSV_Injection/>
+- <https://ecma-international.org/publications-and-standards/standards/ecma-376/>
+- <https://github.com/thejoshwolfe/yauzl>
+- <https://github.com/exceljs/exceljs>
+- <https://github.com/101arrowz/fflate>

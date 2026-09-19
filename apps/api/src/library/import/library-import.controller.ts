@@ -40,7 +40,14 @@ export class LibraryImportController {
     @CurrentUser() user: UserModel,
     @Body() dto: LibraryImportPreviewDto,
   ): Promise<LibraryImportDraftResponse> {
-    return this.imports.preview(user.id, dto.contentBase64)
+    // Absent means CSV, exactly as the shared schema's `.default()` says. An
+    // unknown or null value never reaches here — the DTO refuses it — so this
+    // coalesce only ever covers a body that did not mention the format at all.
+    return this.imports.preview({
+      ownerId: user.id,
+      format: dto.format ?? 'CSV',
+      contentBase64: dto.contentBase64,
+    })
   }
 
   @Get('me/library/imports/:id')

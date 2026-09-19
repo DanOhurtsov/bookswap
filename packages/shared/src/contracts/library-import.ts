@@ -56,16 +56,31 @@ export const libraryImportCsvColumnSchema = z.enum(LIBRARY_IMPORT_CSV_HEADER)
 
 export type LibraryImportCsvColumn = z.infer<typeof libraryImportCsvColumnSchema>
 
+/**
+ * 8f-4 (agreed PO decision, 2026-09-19): which file the bytes are.
+ *
+ * A discriminator rather than byte sniffing: sniffing would give two routes to
+ * one state and would quietly disagree with the file's own extension. Omitted
+ * means `CSV`, so every request written against the 8f-2 contract keeps working
+ * untouched; `null`, `''` and anything not in this list are validation errors,
+ * never a silent fallback.
+ */
+export const LIBRARY_IMPORT_FORMAT = ['CSV', 'XLSX'] as const
+
+export const libraryImportFormatSchema = z.enum(LIBRARY_IMPORT_FORMAT)
+
+export type LibraryImportFormat = z.infer<typeof libraryImportFormatSchema>
+
 export const LIBRARY_IMPORT_LIMITS = {
   /** 48 KiB, measured on the file as received (a leading BOM included). */
   maxBytes: 48 * 1024,
   /**
    * 8f-2: how many decoded bytes the preview endpoint accepts at all. Larger
-   * than `maxBytes` on purpose — a file modestly over the cap must come back as
-   * `IMPORT_TOO_LARGE` with its real size, not as a transport-level rejection
-   * that says nothing about why.
+   * than every per-format cap on purpose — a file modestly over its cap must
+   * come back as `IMPORT_TOO_LARGE` with its real size, not as a
+   * transport-level rejection that says nothing about why.
    */
-  maxRequestBytes: 96 * 1024,
+  maxRequestBytes: 768 * 1024,
   maxDataRows: 200,
   quantityMin: 1,
   quantityMax: 20,
@@ -74,6 +89,81 @@ export const LIBRARY_IMPORT_LIMITS = {
   maxCopies: 500,
   draftTtlHours: 24,
 } as const
+
+/**
+ * 8f-4 (agreed PO limits): what an `.xlsx` may cost us.
+ *
+ * The 48 KiB CSV cap deliberately does NOT carry over. A CSV's bytes are its
+ * content, so one number bounds both the file and the work of reading it. An
+ * `.xlsx` is a ZIP: its bytes bound nothing on their own, because the XML
+ * inside routinely expands five to twenty times — and a hostile file expands
+ * without limit. So the size of the container, the size of what it actually
+ * decompresses to, and the shape of the workbook are three separate caps, each
+ * enforced at the only moment it can be known.
+ */
+export const LIBRARY_IMPORT_XLSX_LIMITS = {
+  /** The container as received, checked before anything is decompressed. */
+  maxBytes: 512 * 1024,
+  /**
+   * The real total of decompressed bytes, counted as they are produced and
+   * abandoned the moment it is passed — never the archive's own claim about
+   * itself, which costs an attacker nothing to forge.
+   */
+  maxUncompressedBytes: 8 * 1024 * 1024,
+  /** A single member may not be larger than the whole budget either. */
+  maxEntryUncompressedBytes: 8 * 1024 * 1024,
+  maxEntries: 64,
+  /**
+   * An extra filter on top of `maxUncompressedBytes`, not a substitute for it:
+   * it rejects the classic bomb early, while the byte budget is what actually
+   * guarantees termination.
+   */
+  maxCompressionRatio: 200,
+  /** Workbook complexity: a small ZIP does not imply a small workbook. */
+  maxSheets: 16,
+  /** Populated cells on the data sheet — counted, never taken from `dimension`. */
+  maxCells: 100_000,
+  /**
+   * How many `<row>` ELEMENTS one sheet's markup may contain, empty ones
+   * included (agreed PO decision, 2026-09-19).
+   *
+   * Three things this is not. It is not a number of books: the product limit
+   * stays `maxDataRows` (200), and it is enforced separately, on data rows. It
+   * is not a maximum row index either — a sheet may address row 1 048 576, and
+   * an index beyond Excel's own grid is refused by the reference check, not by
+   * this. And it is not a cell count: `maxCells` bounds those.
+   *
+   * It exists because `maxCells` alone leaves a hole. A sheet of a million
+   * EMPTY `<row/>` elements holds no cells at all and still makes the workbook
+   * reader build a million row objects. Set a hundredfold above the 200 data
+   * rows an import may carry, so that the trailing styled-but-empty rows Excel
+   * writes freely never cost anyone their file.
+   */
+  maxSheetRows: 20_000,
+} as const
+
+/**
+ * 8f-4 (agreed PO decision): the exact bytes hashed before an `.xlsx`'s own.
+ *
+ * `sourceHash` is `SHA-256(prefix ‖ file)` for XLSX and stays `SHA-256(file)`
+ * — after one leading BOM — for CSV, untouched. Two consequences, both wanted:
+ * every import saved by 8f-1/8f-2 keeps the hash it already has and is still
+ * found by a repeated CSV upload, and a workbook can never collide with a CSV
+ * that happens to describe the same books. They are different files, they show
+ * the owner different cells, and they fail in different ways, so they are not
+ * one import.
+ *
+ * The prefix is versioned: should the reader ever change what it makes of the
+ * same bytes, `v2` would let old drafts expire on their own rather than be
+ * answered with a draft built under rules that no longer apply.
+ */
+export const LIBRARY_IMPORT_XLSX_HASH_PREFIX = 'bookswap:library-import:xlsx:v1\n'
+
+/** Per-format cap on the file as received. One lookup, so no call site retypes a number. */
+export const LIBRARY_IMPORT_MAX_FILE_BYTES = {
+  CSV: LIBRARY_IMPORT_LIMITS.maxBytes,
+  XLSX: LIBRARY_IMPORT_XLSX_LIMITS.maxBytes,
+} as const satisfies Record<LibraryImportFormat, number>
 
 /** R4: authors are `|`-separated; a literal `|` inside a name is not supported in v1. */
 export const LIBRARY_IMPORT_AUTHOR_SEPARATOR = '|'
@@ -431,6 +521,40 @@ export const libraryImportRowErrorSchema = z.discriminatedUnion('code', [
 
 export type LibraryImportRowError = z.infer<typeof libraryImportRowErrorSchema>
 
+/**
+ * 8f-4: why a reader could not turn one spreadsheet cell into a cell value.
+ *
+ * A CSV cell is text, so it either passes its field schema or does not, and the
+ * text itself is the whole record of what went wrong. A spreadsheet cell is
+ * typed, and a cell can hold something no text would have expressed — a date
+ * where a count belongs, a number that cannot be written out exactly. We refuse
+ * to invent text for those, which leaves the cell empty; without this record
+ * the emptiness would look like "not given" and quietly take the column's
+ * default on the next edit of some other column.
+ *
+ * So the rejection is stored beside the row and survives every action but one:
+ * editing that very column. It is cleared by a correction, never by a default.
+ */
+export const LIBRARY_IMPORT_CELL_REJECTION = [
+  /** A date in a column that is not `acquired_at`. */
+  'UNEXPECTED_DATE',
+  /** An `acquired_at` date inside Excel's 1900 leap-year fiction. */
+  'DATE_OUT_OF_RANGE',
+  /** A number we cannot write out plainly and exactly, an imprecise ISBN included. */
+  'UNREPRESENTABLE_NUMBER',
+] as const
+
+export const libraryImportCellRejectionSchema = z.enum(LIBRARY_IMPORT_CELL_REJECTION)
+
+export type LibraryImportCellRejection = z.infer<typeof libraryImportCellRejectionSchema>
+
+export const libraryImportRejectedCellsSchema = z.partialRecord(
+  libraryImportCsvColumnSchema,
+  libraryImportCellRejectionSchema,
+)
+
+export type LibraryImportRejectedCells = z.infer<typeof libraryImportRejectedCellsSchema>
+
 // --- Resolution (8f-2) --------------------------------------------------------
 
 /**
@@ -515,6 +639,11 @@ export const libraryImportRowPayloadSchema = z
     errors: z.array(libraryImportRowErrorSchema).max(LIBRARY_IMPORT_CSV_HEADER.length),
     resolution: libraryImportRowResolutionSchema.nullable().default(null),
     /**
+     * 8f-4: cells a reader refused, by column. `.default({})` so every row
+     * stored before this stage still parses — a CSV never produces any.
+     */
+    rejectedCells: libraryImportRejectedCellsSchema.default({}),
+    /**
      * 8f-2 (agreed): an opaque token identifying THIS state of the row.
      *
      * Minted fresh whenever an explicit action changes the row, and for every
@@ -583,14 +712,38 @@ export type LibraryImportRowRecord = z.infer<typeof libraryImportRowRecordSchema
  * body is read, so the CSV's own size is not known yet and must not be guessed
  * from the request length (base64 plus a JSON envelope is not the file).
  */
-export const LIBRARY_IMPORT_SIZE_LIMIT = ['BYTES', 'ROWS', 'COPIES', 'REQUEST_BYTES'] as const
+export const LIBRARY_IMPORT_SIZE_LIMIT = [
+  'BYTES',
+  'ROWS',
+  'COPIES',
+  'REQUEST_BYTES',
+  /** 8f-4, XLSX only: the ZIP's real decompressed total. */
+  'UNCOMPRESSED_BYTES',
+  'ZIP_ENTRIES',
+  /** Reported as a whole number — the ratio rounded up, so `actual` stays an integer. */
+  'COMPRESSION_RATIO',
+  'SHEETS',
+  'CELLS',
+  /** Rows present in a sheet's markup, empty ones included. */
+  'SHEET_ROWS',
+] as const
 
 const positiveCount = z.number().int().positive()
 
 /** `details` of `IMPORT_TOO_LARGE`. */
 export const libraryImportTooLargeDetailsSchema = z.discriminatedUnion('limit', [
   z.strictObject({
-    limit: z.enum(['BYTES', 'ROWS', 'COPIES']),
+    limit: z.enum([
+      'BYTES',
+      'ROWS',
+      'COPIES',
+      'UNCOMPRESSED_BYTES',
+      'ZIP_ENTRIES',
+      'COMPRESSION_RATIO',
+      'SHEETS',
+      'CELLS',
+      'SHEET_ROWS',
+    ]),
     max: positiveCount,
     actual: positiveCount,
   }),
@@ -641,6 +794,96 @@ export const libraryImportInvalidCsvDetailsSchema = z.discriminatedUnion('reason
 
 export type LibraryImportInvalidCsvDetails = z.infer<typeof libraryImportInvalidCsvDetailsSchema>
 
+/**
+ * 8f-4: why an `.xlsx` is not a library import. Separate from the CSV reasons
+ * because none of them overlap: a workbook has no delimiter and a CSV has no
+ * sheets, and one union covering both would force every reader of it to ask
+ * which half it is looking at.
+ */
+export const LIBRARY_IMPORT_INVALID_XLSX_REASON = [
+  /** Not a ZIP container at all. */
+  'NOT_A_ZIP',
+  /**
+   * A legacy `.xls` or a password-protected workbook (agreed PO wording). One
+   * reason for both on purpose: telling them apart would take guesswork inside
+   * a compound-file container, and a confident wrong answer is worse than an
+   * honest one that names both and says what to do.
+   */
+  'UNSUPPORTED_CONTAINER',
+  /** `.xlsm`: a macro part is present, whatever the file is named. */
+  'MACRO_ENABLED',
+  /** The workbook pulls data from another file; that data is not in front of us. */
+  'EXTERNAL_LINKS',
+  /** A member we do not read and will not pass on — content type or relationship. */
+  'FORBIDDEN_PART',
+  /** Two members with the same path: which one is "the" sheet is not ours to guess. */
+  'DUPLICATE_ENTRY',
+  /** A member path that escapes the archive, is absolute, or is otherwise unsafe. */
+  'UNSAFE_ENTRY_PATH',
+  /** The ZIP is structurally broken, or its declared sizes are not the real ones. */
+  'MALFORMED_ZIP',
+  /** A valid ZIP that is not a workbook we can read. */
+  'MALFORMED_XLSX',
+  /** No sheet holds any data. A sheet that is merely styled is not a data sheet. */
+  'NO_SHEET',
+  /** More than one sheet holds data — the owner says which, we never pick (agreed). */
+  'MULTIPLE_SHEETS',
+  'HEADER_MISMATCH',
+  /** A formula: refused outright, and its cached result is not read as data. */
+  'FORMULA_CELL',
+  /** An Excel error value (`#REF!`, `#N/A`, …) — distinct from a formula (agreed). */
+  'CELL_ERROR',
+  /** Header present, not one data row under it. */
+  'EMPTY',
+] as const
+
+/**
+ * A 1-based sheet position, never the sheet's name.
+ *
+ * Same rule as R6a's `unknownColumnPositions`: an error names a location, not
+ * file content. A sheet name is something the owner typed, and it has no
+ * business travelling back through an error body into a log.
+ */
+const sheetIndexSchema = z.number().int().positive().max(LIBRARY_IMPORT_XLSX_LIMITS.maxSheets)
+
+/** 1-based spreadsheet coordinates — the row and column as Excel numbers them. */
+const cellLocationSchema = {
+  sheet: sheetIndexSchema,
+  row: positiveCount,
+  column: positiveCount,
+}
+
+export const libraryImportInvalidXlsxDetailsSchema = z.discriminatedUnion('reason', [
+  z.strictObject({ reason: z.literal('NOT_A_ZIP') }),
+  z.strictObject({ reason: z.literal('UNSUPPORTED_CONTAINER') }),
+  z.strictObject({ reason: z.literal('MACRO_ENABLED') }),
+  z.strictObject({ reason: z.literal('EXTERNAL_LINKS') }),
+  z.strictObject({ reason: z.literal('FORBIDDEN_PART') }),
+  z.strictObject({ reason: z.literal('DUPLICATE_ENTRY') }),
+  z.strictObject({ reason: z.literal('UNSAFE_ENTRY_PATH') }),
+  z.strictObject({ reason: z.literal('MALFORMED_ZIP') }),
+  z.strictObject({ reason: z.literal('MALFORMED_XLSX') }),
+  z.strictObject({ reason: z.literal('NO_SHEET') }),
+  /** How many sheets carry data, so the message can say "leave one of N". */
+  z.strictObject({
+    reason: z.literal('MULTIPLE_SHEETS'),
+    sheets: z.array(sheetIndexSchema).min(2),
+  }),
+  z.strictObject({
+    reason: z.literal('HEADER_MISMATCH'),
+    sheet: sheetIndexSchema,
+    missingColumns: z.array(libraryImportCsvColumnSchema),
+    duplicateColumns: z.array(libraryImportCsvColumnSchema),
+    unknownColumnPositions: z.array(positiveCount),
+    orderMismatch: z.boolean(),
+  }),
+  z.strictObject({ reason: z.literal('FORMULA_CELL'), ...cellLocationSchema }),
+  z.strictObject({ reason: z.literal('CELL_ERROR'), ...cellLocationSchema }),
+  z.strictObject({ reason: z.literal('EMPTY'), sheet: sheetIndexSchema }),
+])
+
+export type LibraryImportInvalidXlsxDetails = z.infer<typeof libraryImportInvalidXlsxDetailsSchema>
+
 // --- HTTP contracts (8f-2) ------------------------------------------------------
 
 /**
@@ -663,6 +906,14 @@ export const LIBRARY_IMPORT_CONTENT_BASE64_MAX =
  * defined on, while the request itself stays an ordinary schema-validated DTO.
  */
 export const libraryImportPreviewRequestSchema = z.strictObject({
+  /**
+   * 8f-4: omitted means `CSV`, so every 8f-2 client keeps working unchanged.
+   * `.default()` and not `.optional()`: absent is the only thing that becomes
+   * `CSV`. An explicit `null`, an empty string or an unknown name is a
+   * validation error — a client that tried to say something we did not
+   * understand must be told so, not quietly given the other format.
+   */
+  format: libraryImportFormatSchema.default('CSV'),
   contentBase64: z
     .string()
     .min(1)
@@ -682,6 +933,11 @@ export const libraryImportRowResponseSchema = z.strictObject({
   values: libraryImportRowValuesSchema.nullable(),
   errors: z.array(libraryImportRowErrorSchema).max(LIBRARY_IMPORT_CSV_HEADER.length),
   resolution: libraryImportRowResolutionSchema.nullable(),
+  /**
+   * Which cells the reader refused and why, so the UI can say what was in a
+   * cell it is showing as empty instead of just calling the column invalid.
+   */
+  rejectedCells: libraryImportRejectedCellsSchema,
 })
 
 export type LibraryImportRowResponse = z.infer<typeof libraryImportRowResponseSchema>

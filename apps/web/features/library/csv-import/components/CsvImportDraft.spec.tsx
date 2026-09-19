@@ -1004,3 +1004,25 @@ it('keeps the typed text when a row action fails with a network error', async ()
   expect(screen.getByLabelText('Назва')).toHaveValue('B')
   expect(view.cachedDraft()).toBeDefined()
 })
+
+/**
+ * 8f-4 fix: a cell the reader refused renders as empty, so the generic
+ * "invalid value" sentence would leave a person staring at a blank box with no
+ * idea what to do. The row has to say what Excel put there.
+ */
+it('explains a refused cell by what was in it, not as a generic invalid value', async () => {
+  const row = buildRow({
+    rowNumber: 1,
+    status: 'INVALID',
+    rowVersion: 'v1',
+    errors: [{ code: 'INVALID_FIELD', field: 'quantity' }],
+  })
+
+  mockApiRequest.mockResolvedValue(
+    buildDraft({ rows: [{ ...row, rejectedCells: { quantity: 'UNEXPECTED_DATE' } }] }),
+  )
+  render(withQueryClient(<CsvImportDraft importId="import-1" />))
+
+  expect(await screen.findByText(/Excel зберіг у цій клітинці дату/)).toBeInTheDocument()
+  expect(screen.queryByText('Некоректне значення поля «Кількість примірників».')).toBeNull()
+})

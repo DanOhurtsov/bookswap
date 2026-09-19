@@ -30,6 +30,22 @@ function dtoAccepts<T extends object>(Dto: new () => T, body: unknown): boolean 
 }
 
 describe('LibraryImportPreviewDto ↔ libraryImportPreviewRequestSchema', () => {
+  it('reads a body with no format as CSV on both sides', () => {
+    const parsed = libraryImportPreviewRequestSchema.parse({ contentBase64: 'aXNibjEz' })
+
+    expect(parsed.format).toBe('CSV')
+
+    const dto = plainToInstance(
+      LibraryImportPreviewDto,
+      { contentBase64: 'aXNibjEz' },
+      { enableImplicitConversion: false },
+    )
+
+    // The DTO leaves it absent and the controller coalesces; what matters is
+    // that neither side rejects the body the 8f-2 clients already send.
+    expect(dto.format).toBeUndefined()
+  })
+
   const bodies: unknown[] = [
     { contentBase64: 'aXNibjEz' },
     { contentBase64: 'aXNibjEzLA==' },
@@ -44,6 +60,19 @@ describe('LibraryImportPreviewDto ↔ libraryImportPreviewRequestSchema', () => 
     { contentBase64: 42 },
     {},
     { contentBase64: 'aXNibjEz', extra: true },
+    // 8f-4: the format discriminator. Absent is CSV; everything else has to be
+    // one of the two names, because a client that said something we did not
+    // understand must hear about it rather than get the other format.
+    { format: 'CSV', contentBase64: 'aXNibjEz' },
+    { format: 'XLSX', contentBase64: 'aXNibjEz' },
+    { format: undefined, contentBase64: 'aXNibjEz' },
+    { format: null, contentBase64: 'aXNibjEz' },
+    { format: '', contentBase64: 'aXNibjEz' },
+    { format: 'csv', contentBase64: 'aXNibjEz' },
+    { format: 'XLS', contentBase64: 'aXNibjEz' },
+    { format: 'xlsx', contentBase64: 'aXNibjEz' },
+    { format: 42, contentBase64: 'aXNibjEz' },
+    { format: ['CSV'], contentBase64: 'aXNibjEz' },
   ]
 
   it.each(bodies)('reaches the same verdict on %j', (body) => {

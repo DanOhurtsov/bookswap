@@ -1,12 +1,18 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import type { LibraryImportRowPatchRequest, LibraryImportRowResponse } from '@bookswap/shared'
+import type {
+  LibraryImportRejectedCells,
+  LibraryImportRowError,
+  LibraryImportRowPatchRequest,
+  LibraryImportRowResponse,
+} from '@bookswap/shared'
 import type { ImportFailure } from '../model/import-draft-state'
 import type { ConfirmedRowAction } from '../model/use-library-import-draft'
 import {
   IMPORT_ROW_STATUS_BADGES,
   IMPORT_ROW_STATUS_LABELS,
+  describeRejectedCell,
   describeRowError,
 } from '../model/import-labels'
 import { ImportFailureNotice } from './ImportFailureNotice'
@@ -83,7 +89,7 @@ export function ImportRowCard({
       {row.errors.length > 0 && (
         <ul className="import-row__errors">
           {row.errors.map((error) => (
-            <li key={error.code}>{describeRowError(error)}</li>
+            <li key={error.code}>{describeError(error, row.rejectedCells)}</li>
           ))}
         </ul>
       )}
@@ -195,4 +201,21 @@ export function ImportRowCard({
       )}
     </li>
   )
+}
+
+/**
+ * A field error whose cell the reader refused explains itself differently.
+ *
+ * "Некоректне значення" next to a cell that renders empty tells a person
+ * nothing they can act on; what was in it, and that it has to be typed in, is
+ * the whole of the useful answer.
+ */
+function describeError(error: LibraryImportRowError, rejected: LibraryImportRejectedCells): string {
+  if (error.code !== 'INVALID_FIELD' && error.code !== 'INVALID_ISBN') {
+    return describeRowError(error)
+  }
+
+  const reason = rejected[error.field]
+
+  return reason === undefined ? describeRowError(error) : describeRejectedCell(error.field, reason)
 }

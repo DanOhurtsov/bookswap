@@ -129,6 +129,17 @@ export const API_ERROR_CODES = {
    */
   IMPORT_INVALID_CSV: 'IMPORT_INVALID_CSV',
   /**
+   * Stage 8f-4 (agreed PO decision): the uploaded `.xlsx` is not a library
+   * import — the container, the workbook's shape or a cell we refuse to read.
+   * `details.reason` (`libraryImportInvalidXlsxDetailsSchema`) says which, and
+   * names the sheet, row and column wherever they are known.
+   *
+   * Separate from `IMPORT_INVALID_CSV` because the two share no reason: the
+   * failures of a ZIP full of XML and of a line of delimited text have nothing
+   * in common but the moment they are found.
+   */
+  IMPORT_INVALID_XLSX: 'IMPORT_INVALID_XLSX',
+  /**
    * Stage 8f-2, R6a: the owner's own draft outlived its 24 h TTL (HTTP 410). Its
    * rows are already deleted, so there is nothing left to read or resolve — the
    * only way forward is to send the file again, which revives the same import

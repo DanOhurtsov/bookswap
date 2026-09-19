@@ -1,12 +1,13 @@
 import {
   libraryImportInvalidCsvDetailsSchema,
+  libraryImportInvalidXlsxDetailsSchema,
   libraryImportTooLargeDetailsSchema,
   type LibraryImportDraftResponse,
   type LibraryImportRowResponse,
   type LibraryImportRowStatus,
 } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
-import { describeInvalidCsv } from './import-labels'
+import { describeInvalidCsv, describeInvalidXlsx } from './import-labels'
 
 /**
  * R12: ONE canonical query for the whole draft. Summary, counts, readiness and
@@ -64,6 +65,12 @@ function describeFileError(error: ApiRequestError): string | undefined {
     return details.success ? describeInvalidCsv(details.data) : error.message
   }
 
+  if (error.code === 'IMPORT_INVALID_XLSX') {
+    const details = libraryImportInvalidXlsxDetailsSchema.safeParse(error.details)
+
+    return details.success ? describeInvalidXlsx(details.data) : error.message
+  }
+
   if (error.code !== 'IMPORT_TOO_LARGE') return undefined
 
   const details = libraryImportTooLargeDetailsSchema.safeParse(error.details)
@@ -76,6 +83,31 @@ function describeFileError(error: ApiRequestError): string | undefined {
 
   if (details.data.limit === 'COPIES') {
     return `У файлі забагато примірників: ${String(details.data.actual)} замість дозволених ${String(details.data.max)}.`
+  }
+
+  // The XLSX-only caps (8f-4). Each one names a different thing that was too
+  // big, because "the file is too large" would be untrue for most of them —
+  // the container is usually small and what it expands to is not.
+  if (details.data.limit === 'UNCOMPRESSED_BYTES') {
+    return `Розпакований вміст книги завеликий: максимум ${formatKib(details.data.max)}.`
+  }
+
+  if (details.data.limit === 'ZIP_ENTRIES' || details.data.limit === 'COMPRESSION_RATIO') {
+    return 'Структура файла незвична для звичайної книги Excel. Відкрийте її в Excel і збережіть заново як .xlsx.'
+  }
+
+  if (details.data.limit === 'SHEETS') {
+    return `У книзі забагато аркушів: ${String(details.data.actual)} замість дозволених ${String(details.data.max)}.`
+  }
+
+  // Phrased as "more than", because the count stops the moment the cap is
+  // passed rather than walking the rest of the sheet to reach an exact total.
+  if (details.data.limit === 'CELLS') {
+    return `На аркуші понад ${String(details.data.max)} заповнених клітинок — більше, ніж можна імпортувати.`
+  }
+
+  if (details.data.limit === 'SHEET_ROWS') {
+    return `На аркуші понад ${String(details.data.max)} рядків розмітки. Залиште аркуш лише з книжками, без порожніх рядків нижче.`
   }
 
   return `Файл завеликий: максимум ${formatKib(details.data.max)}.`

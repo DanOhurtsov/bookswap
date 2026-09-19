@@ -65,6 +65,7 @@ export function buildRow({
         }
       : null,
     errors,
+    rejectedCells: {},
     resolution:
       status === 'READY_EXISTING_EDITION'
         ? { kind: 'EXISTING_EDITION', editionId: 'edition-1', workId: 'work-1' }
