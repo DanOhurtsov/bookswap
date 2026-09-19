@@ -3,10 +3,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { LIBRARY_IMPORT_LIMITS, type LibraryImportDraftResponse } from '@bookswap/shared'
+import type { LibraryImportDraftResponse } from '@bookswap/shared'
 import { useSession } from '@/app/lib/use-session'
 import { previewLibraryImport } from '../api/library-import-requests'
-import { readCsvFileAsBase64 } from './csv-file'
+import { readImportFileAsBase64, type ImportFileReadFailure } from './import-file'
 import {
   classifyImportFailure,
   formatKib,
@@ -72,12 +72,12 @@ export function useLibraryImportUpload(): LibraryImportUpload {
     mutationKey: ['library-import', 'preview'],
     retry: false,
     mutationFn: async ({ file, token: startedAt }) => {
-      const read = await readCsvFileAsBase64(file)
+      const read = await readImportFileAsBase64(file)
 
-      if (!read.ok) throw new LocalFileError(read.reason, read.size)
+      if (!read.ok) throw new LocalFileError(read)
       if (startedAt !== token.current) throw new StaleSessionError()
 
-      return previewLibraryImport(read.contentBase64)
+      return previewLibraryImport(read.format, read.contentBase64)
     },
     onSuccess: (draft, variables) => {
       running.current = false
@@ -161,18 +161,19 @@ export function useLibraryImportUpload(): LibraryImportUpload {
  * against the server — the person has to pick a different file.
  */
 class LocalFileError extends Error {
-  constructor(
-    readonly reason: 'TOO_LARGE' | 'EMPTY',
-    readonly size: number,
-  ) {
+  constructor(readonly failure: ImportFileReadFailure) {
     super('Файл не пройшов локальну перевірку')
     this.name = 'LocalFileError'
   }
 
   describe(): string {
-    if (this.reason === 'EMPTY') return 'Файл порожній.'
+    if (this.failure.reason === 'EMPTY') return 'Файл порожній.'
 
-    return `Файл завеликий: ${formatKib(this.size)}, а дозволено щонайбільше ${formatKib(LIBRARY_IMPORT_LIMITS.maxBytes)}.`
+    if (this.failure.reason === 'UNSUPPORTED_EXTENSION') {
+      return 'Підтримуємо лише файли .csv і .xlsx. Старий формат .xls, .xlsm і захищені паролем файли не підходять — збережіть незахищену копію у форматі .xlsx.'
+    }
+
+    return `Файл завеликий: ${formatKib(this.failure.size)}, а для цього формату дозволено щонайбільше ${formatKib(this.failure.limit)}.`
   }
 }
 

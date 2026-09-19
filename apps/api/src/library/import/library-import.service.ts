@@ -1,10 +1,13 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
+  LIBRARY_IMPORT_MAX_FILE_BYTES,
   LIBRARY_IMPORT_LIMITS,
   libraryImportCsvRowSchema,
   type LibraryImportCsvCells,
   type LibraryImportDraftResponse,
+  type LibraryImportFormat,
+  type LibraryImportRejectedCells,
   type LibraryImportRowPatchRequest,
   type LibraryImportRowRecord,
   type LibraryImportRowValues,
@@ -12,12 +15,12 @@ import {
 import { LookupService } from '../../catalog/lookup/lookup.service'
 import { ApiException } from '../../common/api.exception'
 import { PrismaService } from '../../prisma/prisma.service'
+import { readLibraryImportFile, type LibraryImportFileError } from './library-import-file'
 import {
   libraryImportFieldErrors,
-  parseLibraryImportCsv,
-  type LibraryImportCsvError,
+  mergeFieldErrors,
   type LibraryImportParsedRow,
-} from './library-import-csv.parser'
+} from './library-import-rows'
 import {
   duplicateErrors,
   fieldErrorsOf,
@@ -71,8 +74,13 @@ export class LibraryImportService {
     private readonly lookup: LookupService,
   ) {}
 
-  async preview(ownerId: string, contentBase64: string): Promise<LibraryImportDraftResponse> {
-    const parsed = parseLibraryImportCsv(decodeContent(contentBase64))
+  async preview(input: {
+    ownerId: string
+    format: LibraryImportFormat
+    contentBase64: string
+  }): Promise<LibraryImportDraftResponse> {
+    const { ownerId, format, contentBase64 } = input
+    const parsed = await readLibraryImportFile(format, decodeContent(format, contentBase64))
 
     if (!parsed.ok) throw fileError(parsed.error)
 
@@ -241,30 +249,37 @@ export class LibraryImportService {
   }
 }
 
-function decodeContent(contentBase64: string): Uint8Array {
+function decodeContent(format: LibraryImportFormat, contentBase64: string): Uint8Array {
   const bytes = Buffer.from(contentBase64, 'base64')
 
   // The schema already rejected anything that is not standard padded base64, so
-  // this cannot silently decode to a shorter file. The cap is re-checked anyway:
-  // the parser reports the real size, which is what `IMPORT_TOO_LARGE` carries.
+  // this cannot silently decode to a shorter file. The transport cap is above
+  // every per-format cap on purpose, so a file modestly over its own limit still
+  // reaches its reader and is answered with its real size.
   if (bytes.byteLength > LIBRARY_IMPORT_LIMITS.maxRequestBytes) {
     throw new ApiException(
       API_ERROR_CODES.IMPORT_TOO_LARGE,
       'Файл завеликий',
       HttpStatus.PAYLOAD_TOO_LARGE,
-      { limit: 'BYTES', max: LIBRARY_IMPORT_LIMITS.maxBytes, actual: bytes.byteLength },
+      { limit: 'BYTES', max: LIBRARY_IMPORT_MAX_FILE_BYTES[format], actual: bytes.byteLength },
     )
   }
 
   return bytes
 }
 
-function fileError(error: LibraryImportCsvError): ApiException {
+const FILE_ERROR_MESSAGES = {
+  [API_ERROR_CODES.IMPORT_TOO_LARGE]: 'Файл перевищує дозволений розмір',
+  [API_ERROR_CODES.IMPORT_INVALID_CSV]: 'Файл не є коректним CSV імпорту',
+  [API_ERROR_CODES.IMPORT_INVALID_XLSX]: 'Файл не є коректною книгою Excel для імпорту',
+} as const
+
+function fileError(error: LibraryImportFileError): ApiException {
   const tooLarge = error.code === API_ERROR_CODES.IMPORT_TOO_LARGE
 
   return new ApiException(
-    tooLarge ? API_ERROR_CODES.IMPORT_TOO_LARGE : API_ERROR_CODES.IMPORT_INVALID_CSV,
-    tooLarge ? 'Файл перевищує дозволений розмір' : 'Файл не є коректним CSV імпорту',
+    error.code,
+    FILE_ERROR_MESSAGES[error.code],
     tooLarge ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST,
     error.details,
   )
@@ -322,6 +337,7 @@ function toDraftInput(row: LibraryImportParsedRow): RowDraftInput {
     cells: row.payload.cells,
     values: row.payload.values,
     fieldErrors: fieldErrorsOf(row.payload.errors),
+    rejectedCells: row.payload.rejectedCells,
     skipped: false,
     // A brand new draft: every row is being written for the first time.
     rowVersion: undefined,
@@ -334,6 +350,7 @@ function storedInput(row: LibraryImportRowRecord): RowDraftInput {
     cells: row.payload.cells,
     values: row.payload.values,
     fieldErrors: fieldErrorsOf(row.payload.errors),
+    rejectedCells: row.payload.rejectedCells,
     skipped: row.status === 'SKIPPED',
     // Untouched by this action: its version survives the rewrite, so a
     // concurrent operation on THIS row is not refused for someone else's edit.
@@ -358,16 +375,39 @@ function patchedInput(
   if (request.action !== 'EDIT') return { ...storedInput(row), skipped, rowVersion }
 
   const cells: LibraryImportCsvCells = { ...row.payload.cells, ...request.cells }
+  const rejectedCells = keepRejections(row.payload.rejectedCells, request.cells)
   const parsed = libraryImportCsvRowSchema.safeParse(cells)
+  const fieldErrors = mergeFieldErrors(
+    parsed.success ? [] : libraryImportFieldErrors(parsed.error.issues),
+    rejectedCells,
+  )
 
   return {
     rowNumber: row.rowNumber,
     cells,
-    values: parsed.success ? parsed.data : null,
-    fieldErrors: parsed.success ? [] : libraryImportFieldErrors(parsed.error.issues),
+    // A surviving rejection keeps the row without values for the same reason a
+    // failed cell does: its column has no answer, and the schema's default for
+    // an empty cell is not one.
+    values: parsed.success && fieldErrors.length === 0 ? parsed.data : null,
+    fieldErrors,
+    rejectedCells,
     skipped: false,
     rowVersion,
   }
+}
+
+/**
+ * Which refused cells an edit leaves standing.
+ *
+ * Only the columns this edit actually wrote lose their rejection — that is the
+ * explicit correction. Every other column keeps it, so editing a note cannot
+ * quietly heal a quantity that held a date.
+ */
+function keepRejections(
+  rejected: LibraryImportRejectedCells,
+  edited: Partial<Record<string, string>>,
+): LibraryImportRejectedCells {
+  return Object.fromEntries(Object.entries(rejected).filter(([column]) => !(column in edited)))
 }
 
 function applyAction(

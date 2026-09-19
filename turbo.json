@@ -34,7 +34,11 @@
     // otherwise editing only the template would replay a stale cached result.
     "@bookswap/api#test": {
       "dependsOn": ["^build", "generate"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/apps/web/public/library-import-template.csv"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/web/public/library-import-template.csv",
+        "$TURBO_ROOT$/apps/web/public/library-import-template.xlsx"
+      ],
       "outputs": []
     },
     // Потребує запущеної PostgreSQL, тож кешувати нічого: результат залежить від

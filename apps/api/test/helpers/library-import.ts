@@ -40,10 +40,27 @@ export async function preview(
   cookie: string,
   rows: readonly Partial<LibraryImportCsvCells>[],
 ): Promise<LibraryImportDraftResponse> {
+  // Deliberately sends no `format`: this is the 8f-2 request shape, and it has
+  // to keep meaning CSV for every existing client (agreed 8f-4 decision).
   const response = await request(app.getHttpServer())
     .post(importUrl('/preview'))
     .set('Cookie', cookie)
     .send({ contentBase64: toBase64(csvContent(rows)) })
+    .expect(201)
+
+  return libraryImportDraftResponseSchema.parse(response.body)
+}
+
+/** A preview of raw bytes in a named format — for workbooks and for bad files. */
+export async function previewFile(
+  app: INestApplication<App>,
+  cookie: string,
+  file: { format: 'CSV' | 'XLSX'; bytes: Uint8Array },
+): Promise<LibraryImportDraftResponse> {
+  const response = await request(app.getHttpServer())
+    .post(importUrl('/preview'))
+    .set('Cookie', cookie)
+    .send({ format: file.format, contentBase64: toBase64(file.bytes) })
     .expect(201)
 
   return libraryImportDraftResponseSchema.parse(response.body)

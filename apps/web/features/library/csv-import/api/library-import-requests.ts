@@ -1,6 +1,7 @@
 import {
   libraryImportDraftResponseSchema,
   type LibraryImportDraftResponse,
+  type LibraryImportFormat,
   type LibraryImportRowPatchRequest,
 } from '@bookswap/shared'
 import { apiRequest } from '@/app/lib/api'
@@ -16,10 +17,18 @@ import { apiRequest } from '@/app/lib/api'
  * readiness banner can only ever render a shape the API actually promised.
  */
 
-export function previewLibraryImport(contentBase64: string): Promise<LibraryImportDraftResponse> {
+/**
+ * The format travels explicitly even though the API defaults to CSV when it is
+ * missing: a request that says what it is sending cannot be misread if that
+ * default ever changes, and the server still decides what the bytes really are.
+ */
+export function previewLibraryImport(
+  format: LibraryImportFormat,
+  contentBase64: string,
+): Promise<LibraryImportDraftResponse> {
   return apiRequest('/me/library/imports/preview', {
     method: 'POST',
-    body: { contentBase64 },
+    body: { format, contentBase64 },
     schema: libraryImportDraftResponseSchema,
   })
 }

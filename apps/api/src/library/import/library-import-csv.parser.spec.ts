@@ -4,8 +4,8 @@ import { LIBRARY_IMPORT_CSV_HEADER, LIBRARY_IMPORT_LIMITS } from '@bookswap/shar
 import {
   parseLibraryImportCsv,
   type LibraryImportCsvParseResult,
-  type LibraryImportParsedRow,
 } from './library-import-csv.parser'
+import { type LibraryImportParsedRow } from './library-import-rows'
 import {
   OTHER_VALID_ISBN,
   VALID_ISBN,

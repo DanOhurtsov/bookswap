@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { TextEncoder } from 'node:util'
-import { LIBRARY_IMPORT_LIMITS } from '@bookswap/shared'
+import { LIBRARY_IMPORT_LIMITS, LIBRARY_IMPORT_XLSX_LIMITS } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import { buildDraft, buildRow } from '../library-import.test-helpers'
@@ -46,8 +46,18 @@ function csvFile(bytes: Uint8Array, name = 'books.csv'): File {
   } as unknown as File
 }
 
+function xlsxFile(bytes: Uint8Array, name = 'books.xlsx'): File {
+  return {
+    name,
+    size: bytes.byteLength,
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    arrayBuffer: () =>
+      Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+  } as unknown as File
+}
+
 function choose(file: File): void {
-  const input = screen.getByLabelText('Файл CSV')
+  const input = screen.getByLabelText('Файл CSV або Excel')
 
   Object.defineProperty(input, 'files', { value: [file], configurable: true })
   fireEvent.change(input)
@@ -66,10 +76,24 @@ it('states the shared limits rather than hard-coded numbers', () => {
     screen.getByText(new RegExp(String(LIBRARY_IMPORT_LIMITS.maxDataRows))),
   ).toBeInTheDocument()
   expect(screen.getByText(new RegExp(String(LIBRARY_IMPORT_LIMITS.maxCopies)))).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'шаблон CSV' })).toHaveAttribute(
+  expect(screen.getByRole('link', { name: 'CSV' })).toHaveAttribute(
     'href',
     '/library-import-template.csv',
   )
+})
+
+it('offers the Excel template and its own, larger size limit', () => {
+  render(withQueryClient(<CsvImportUpload />))
+
+  expect(screen.getByRole('link', { name: 'Excel (.xlsx)' })).toHaveAttribute(
+    'href',
+    '/library-import-template.xlsx',
+  )
+  // Both caps are shown: a workbook is a compressed archive, so one averaged
+  // number would be wrong for whichever format the person actually has.
+  expect(
+    screen.getByText(new RegExp(String(LIBRARY_IMPORT_XLSX_LIMITS.maxBytes / 1024))),
+  ).toBeInTheDocument()
 })
 
 it('sends the file bytes as base64 and opens the draft by its own URL', async () => {
@@ -85,7 +109,10 @@ it('sends the file bytes as base64 and opens the draft by its own URL', async ()
   await waitFor(() => {
     expect(mockApiRequest).toHaveBeenCalledWith(
       '/me/library/imports/preview',
-      expect.objectContaining({ method: 'POST', body: { contentBase64: '77u/aXNibg==' } }),
+      expect.objectContaining({
+        method: 'POST',
+        body: { format: 'CSV', contentBase64: '77u/aXNibg==' },
+      }),
     )
   })
   await waitFor(() => {
@@ -165,4 +192,94 @@ it('turns two submits in one batch into a single preview request', async () => {
     expect(mockPush).toHaveBeenCalled()
   })
   expect(mockApiRequest).toHaveBeenCalledTimes(1)
+})
+
+it('sends a workbook as XLSX, byte for byte, without reading it in the browser', async () => {
+  mockApiRequest.mockResolvedValue(draft)
+  render(withQueryClient(<CsvImportUpload />))
+
+  // A ZIP's local file header. The browser has no business knowing more about
+  // it than that — the server is the only reader.
+  choose(xlsxFile(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff])))
+  await act(async () => {
+    screen.getByRole('button', { name: 'Перевірити файл' }).click()
+    await Promise.resolve()
+  })
+
+  await waitFor(() => {
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      '/me/library/imports/preview',
+      expect.objectContaining({
+        method: 'POST',
+        body: { format: 'XLSX', contentBase64: 'UEsDBAD/' },
+      }),
+    )
+  })
+})
+
+it('refuses a .xls or password-protected file before any request', async () => {
+  render(withQueryClient(<CsvImportUpload />))
+
+  choose(xlsxFile(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]), 'library.xls'))
+  await act(async () => {
+    screen.getByRole('button', { name: 'Перевірити файл' }).click()
+    await Promise.resolve()
+  })
+
+  expect(await screen.findByText(/Підтримуємо лише файли .csv і .xlsx/)).toBeInTheDocument()
+  expect(mockApiRequest).not.toHaveBeenCalled()
+})
+
+it('accepts a workbook larger than the CSV cap', async () => {
+  mockApiRequest.mockResolvedValue(draft)
+  render(withQueryClient(<CsvImportUpload />))
+
+  choose(xlsxFile(new Uint8Array(LIBRARY_IMPORT_LIMITS.maxBytes + 1).fill(0x50)))
+  await act(async () => {
+    screen.getByRole('button', { name: 'Перевірити файл' }).click()
+    await Promise.resolve()
+  })
+
+  await waitFor(() => {
+    expect(mockApiRequest).toHaveBeenCalled()
+  })
+})
+
+it('explains a server-side workbook error, naming the cell it happened in', async () => {
+  mockApiRequest.mockRejectedValue(
+    new ApiRequestError(400, {
+      code: 'IMPORT_INVALID_XLSX',
+      message: 'Файл не є коректною книгою Excel для імпорту',
+      details: { reason: 'FORMULA_CELL', sheet: 1, row: 7, column: 2 },
+    }),
+  )
+  render(withQueryClient(<CsvImportUpload />))
+
+  choose(xlsxFile(new Uint8Array([0x50, 0x4b, 0x03, 0x04])))
+  await act(async () => {
+    screen.getByRole('button', { name: 'Перевірити файл' }).click()
+    await Promise.resolve()
+  })
+
+  expect(await screen.findByText(/рядок 7, колонка 2.*містить формулу/)).toBeInTheDocument()
+  expect(mockPush).not.toHaveBeenCalled()
+})
+
+it('asks for one data sheet instead of choosing between several', async () => {
+  mockApiRequest.mockRejectedValue(
+    new ApiRequestError(400, {
+      code: 'IMPORT_INVALID_XLSX',
+      message: 'Файл не є коректною книгою Excel для імпорту',
+      details: { reason: 'MULTIPLE_SHEETS', sheets: [1, 3] },
+    }),
+  )
+  render(withQueryClient(<CsvImportUpload />))
+
+  choose(xlsxFile(new Uint8Array([0x50, 0x4b, 0x03, 0x04])))
+  await act(async () => {
+    screen.getByRole('button', { name: 'Перевірити файл' }).click()
+    await Promise.resolve()
+  })
+
+  expect(await screen.findByText(/Залиште рівно один аркуш/)).toBeInTheDocument()
 })

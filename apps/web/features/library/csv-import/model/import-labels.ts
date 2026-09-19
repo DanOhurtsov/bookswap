@@ -1,6 +1,8 @@
 import type {
+  LibraryImportCellRejection,
   LibraryImportCsvColumn,
   LibraryImportInvalidCsvDetails,
+  LibraryImportInvalidXlsxDetails,
   LibraryImportLookupUnavailableReason,
   LibraryImportRowError,
   LibraryImportRowStatus,
@@ -95,6 +97,30 @@ export function describeRowError(error: LibraryImportRowError): string {
   }
 }
 
+/**
+ * A cell the reader could not carry over, explained by what was in it.
+ *
+ * A plain "invalid value" would be baffling here: the cell renders as empty,
+ * because the reader refuses to invent text for something a spreadsheet stored
+ * as a date or as a number it cannot write out. The person has to be told what
+ * was there and that typing a value is the way out.
+ */
+const CELL_REJECTIONS: Readonly<Record<LibraryImportCellRejection, string>> = {
+  UNEXPECTED_DATE:
+    'Excel зберіг у цій клітинці дату, а колонка не для дат. Впишіть потрібне значення вручну.',
+  DATE_OUT_OF_RANGE:
+    'Дата поза діапазоном, який Excel передає надійно. Впишіть її вручну у форматі РРРР-ММ-ДД (від 1900-03-01).',
+  UNREPRESENTABLE_NUMBER:
+    'Excel зберіг у цій клітинці число, яке не можна перенести без втрати точності. Впишіть значення вручну.',
+}
+
+export function describeRejectedCell(
+  column: LibraryImportCsvColumn,
+  reason: LibraryImportCellRejection,
+): string {
+  return `«${IMPORT_COLUMN_LABELS[column]}» — ${CELL_REJECTIONS[reason]}`
+}
+
 /** A file the server refused to parse at all — no rows, so no row errors either. */
 export function describeInvalidCsv(details: LibraryImportInvalidCsvDetails): string {
   switch (details.reason) {
@@ -111,4 +137,49 @@ export function describeInvalidCsv(details: LibraryImportInvalidCsvDetails): str
     case 'EMPTY':
       return 'У файлі лише заголовок, без жодної книжки.'
   }
+}
+
+/**
+ * A workbook the server refused to read. Every sentence names what to do next,
+ * and the ones that can name a location do — a person with 200 rows needs the
+ * cell, not a verdict on the file.
+ */
+export function describeInvalidXlsx(details: LibraryImportInvalidXlsxDetails): string {
+  switch (details.reason) {
+    case 'NOT_A_ZIP':
+      return 'Файл не схожий на книгу Excel. Збережіть його як .xlsx і спробуйте ще раз.'
+    case 'UNSUPPORTED_CONTAINER':
+      return 'Старий формат XLS або захищений файл не підтримується. Збережіть незахищену копію у форматі XLSX.'
+    case 'MACRO_ENABLED':
+      return 'Файли з макросами не підтримуються. Збережіть книгу як звичайний .xlsx без макросів.'
+    case 'EXTERNAL_LINKS':
+      return 'Книга посилається на інший файл, тож частини даних тут немає. Приберіть зовнішні посилання або вставте значення.'
+    case 'FORBIDDEN_PART':
+      return 'У книзі є вміст, який ми не імпортуємо (зображення, зведені таблиці чи подібне). Залишіть один аркуш із даними.'
+    case 'DUPLICATE_ENTRY':
+    case 'UNSAFE_ENTRY_PATH':
+    case 'MALFORMED_ZIP':
+    case 'MALFORMED_XLSX':
+      return 'Файл пошкоджений або зібраний незвично. Відкрийте його в Excel, збережіть заново як .xlsx і спробуйте ще раз.'
+    case 'NO_SHEET':
+      return 'У книзі немає аркуша з даними.'
+    case 'MULTIPLE_SHEETS':
+      return `Дані є більш ніж на одному аркуші (${describeSheets(details.sheets)}). Залиште рівно один аркуш із книжками — самі ми не вибираємо.`
+    case 'HEADER_MISMATCH':
+      return `Заголовок на аркуші ${String(details.sheet)} не збігається з шаблоном: колонки, їхній порядок і назви мають бути точно такими, як у шаблоні.`
+    case 'FORMULA_CELL':
+      return `${describeCell(details)} містить формулу. Замініть формули значеннями: ми не обчислюємо їх і не беремо збережений результат.`
+    case 'CELL_ERROR':
+      return `${describeCell(details)} містить помилку Excel (#REF!, #N/A тощо). Виправте її або вставте значення.`
+    case 'EMPTY':
+      return 'На аркуші лише заголовок, без жодної книжки.'
+  }
+}
+
+function describeSheets(sheets: readonly number[]): string {
+  return `аркуші ${sheets.map(String).join(', ')}`
+}
+
+function describeCell(details: { sheet: number; row: number; column: number }): string {
+  return `Клітинка на аркуші ${String(details.sheet)}, рядок ${String(details.row)}, колонка ${String(details.column)},`
 }

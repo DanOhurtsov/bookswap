@@ -2,20 +2,24 @@
 
 import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
-import { LIBRARY_IMPORT_LIMITS } from '@bookswap/shared'
+import { LIBRARY_IMPORT_LIMITS, LIBRARY_IMPORT_XLSX_LIMITS } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { formatKib } from '../model/import-draft-state'
+import { IMPORT_FILE_ACCEPT } from '../model/import-file'
 import { useLibraryImportUpload } from '../model/use-library-import-upload'
 import { ImportFailureNotice } from './ImportFailureNotice'
 
-const TEMPLATE_PATH = '/library-import-template.csv'
+const CSV_TEMPLATE_PATH = '/library-import-template.csv'
+const XLSX_TEMPLATE_PATH = '/library-import-template.xlsx'
 
 /**
- * Stage 8f-3: the entry point into a CSV import.
+ * Stage 8f-3, extended for `.xlsx` in 8f-4: the entry point into an import.
  *
  * The limits are read from the shared constants, never retyped: a second copy
  * of "48 KiB" here would go stale the first time the contract moves, and the
- * person would be told a rule the server no longer enforces.
+ * person would be told a rule the server no longer enforces. The two formats
+ * have different size caps for a real reason — a workbook is a compressed
+ * archive — so both are named rather than averaged into one number.
  */
 export function CsvImportUpload() {
   const upload = useLibraryImportUpload()
@@ -35,8 +39,8 @@ export function CsvImportUpload() {
         <h2 className="import-intro__title">Як це працює</h2>
         <ol className="import-intro__steps">
           <li>
-            Завантажте <Link href={TEMPLATE_PATH}>шаблон CSV</Link> і заповніть його своїми
-            книжками.
+            Завантажте шаблон — <Link href={XLSX_TEMPLATE_PATH}>Excel (.xlsx)</Link> або{' '}
+            <Link href={CSV_TEMPLATE_PATH}>CSV</Link> — і заповніть його своїми книжками.
           </li>
           <li>Надішліть файл — ми покажемо, що саме буде додано, ще до імпорту.</li>
           <li>Виправте або пропустіть рядки, з якими є питання.</li>
@@ -44,7 +48,10 @@ export function CsvImportUpload() {
 
         <h2 className="import-intro__title">Обмеження файла</h2>
         <ul className="import-intro__limits">
-          <li>Розмір — до {formatKib(LIBRARY_IMPORT_LIMITS.maxBytes)}.</li>
+          <li>
+            Розмір — до {formatKib(LIBRARY_IMPORT_LIMITS.maxBytes)} для CSV і до{' '}
+            {formatKib(LIBRARY_IMPORT_XLSX_LIMITS.maxBytes)} для .xlsx.
+          </li>
           <li>До {LIBRARY_IMPORT_LIMITS.maxDataRows} рядків із книжками.</li>
           <li>Разом — не більше {LIBRARY_IMPORT_LIMITS.maxCopies} примірників.</li>
           <li>
@@ -52,16 +59,20 @@ export function CsvImportUpload() {
             {LIBRARY_IMPORT_LIMITS.quantityMax}.
           </li>
           <li>ISBN-13 обовʼязковий у кожному рядку. Решту колонок можна лишити порожніми.</li>
-          <li>Кодування — UTF-8; колонки та їхній порядок — точно як у шаблоні.</li>
+          <li>Колонки та їхній порядок — точно як у шаблоні; для CSV кодування UTF-8.</li>
+          <li>
+            У книзі Excel — один аркуш із даними, без формул. Формати .xls, .xlsm і файли під
+            паролем не підтримуємо.
+          </li>
         </ul>
       </section>
 
       <div className="field">
-        <label htmlFor="import-file">Файл CSV</label>
+        <label htmlFor="import-file">Файл CSV або Excel</label>
         <input
           id="import-file"
           type="file"
-          accept=".csv,text/csv"
+          accept={IMPORT_FILE_ACCEPT}
           className="import-file"
           onChange={(event) => {
             setFile(event.target.files?.[0] ?? null)

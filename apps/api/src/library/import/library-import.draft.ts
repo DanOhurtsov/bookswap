@@ -4,12 +4,13 @@ import {
   type LibraryImportCounts,
   type LibraryImportDraftResponse,
   type LibraryImportReadiness,
+  type LibraryImportRejectedCells,
   type LibraryImportRowError,
   type LibraryImportRowRecord,
   type LibraryImportRowStatus,
   type LibraryImportRowValues,
 } from '@bookswap/shared'
-import { libraryImportDuplicateKey } from './library-import-csv.parser'
+import { libraryImportDuplicateKey } from './library-import-rows'
 import type { LibraryImportSummary, OwnedLibraryImport } from './library-import.repository'
 import type { ResolvedRow } from './library-import.resolver'
 
@@ -32,6 +33,8 @@ export interface RowDraftInput {
   values: LibraryImportRowValues | null
   /** Field-level errors from parsing; duplicates are recomputed, not carried. */
   fieldErrors: LibraryImportRowError[]
+  /** Cells an XLSX reader refused; they survive every action but an edit of their own column. */
+  rejectedCells: LibraryImportRejectedCells
   skipped: boolean
   /**
    * The version this row keeps, or `undefined` to mint a new one.
@@ -91,6 +94,7 @@ export function toRowRecord(
     cells: row.cells,
     values: row.values,
     rowVersion: row.rowVersion,
+    rejectedCells: row.rejectedCells,
   }
 
   if (row.skipped) {
@@ -128,6 +132,7 @@ function record(input: {
   errors: LibraryImportRowError[]
   resolution: LibraryImportRowRecord['payload']['resolution']
   rowVersion: string | undefined
+  rejectedCells: LibraryImportRejectedCells
 }): LibraryImportRowRecord {
   const { rowNumber, status, rowVersion, ...rest } = input
 
@@ -200,6 +205,7 @@ export function toDraftResponse(owned: OwnedLibraryImport): LibraryImportDraftRe
       values: row.payload.values,
       errors: row.payload.errors,
       resolution: row.payload.resolution,
+      rejectedCells: row.payload.rejectedCells,
     })),
   }
 }

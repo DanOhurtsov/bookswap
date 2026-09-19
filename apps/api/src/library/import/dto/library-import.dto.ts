@@ -16,8 +16,10 @@ import {
   CATALOG_LIMITS,
   LIBRARY_IMPORT_CONTENT_BASE64_MAX,
   LIBRARY_IMPORT_CSV_HEADER,
+  LIBRARY_IMPORT_FORMAT,
   LIBRARY_IMPORT_LIMITS,
   LIBRARY_IMPORT_ROW_ACTION,
+  type LibraryImportFormat,
   type LibraryImportRowAction,
 } from '@bookswap/shared'
 
@@ -36,6 +38,18 @@ const COLUMNS = new Set<string>(LIBRARY_IMPORT_CSV_HEADER)
 const ROW_VERSION_MAX = 64
 
 export class LibraryImportPreviewDto {
+  /**
+   * 8f-4: omitted means `CSV`, which keeps every 8f-2 client working.
+   *
+   * `@ValidateIf` and not `@IsOptional()`: `@IsOptional()` treats `null` as
+   * absent too, so it would accept `{ format: null }` while the shared schema
+   * refuses it — the two validators would disagree about a real body. Here only
+   * a genuinely missing property skips validation.
+   */
+  @ValidateIf((dto: LibraryImportPreviewDto) => dto.format !== undefined)
+  @IsIn(LIBRARY_IMPORT_FORMAT, { message: 'Невідомий формат файла' })
+  format?: LibraryImportFormat
+
   @IsString()
   @MinLength(1, { message: 'Файл порожній' })
   @MaxLength(LIBRARY_IMPORT_CONTENT_BASE64_MAX, { message: 'Файл завеликий' })
