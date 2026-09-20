@@ -4,6 +4,7 @@ import {
   libraryImportDraftResponseSchema,
   type LibraryImportCsvCells,
   type LibraryImportDraftResponse,
+  type LibraryImportNotReadyDetails,
   type LibraryImportRowError,
   type LibraryImportRowResponse,
   type LibraryImportRowStatus,
@@ -80,6 +81,9 @@ interface DraftOptions {
   canCommit?: boolean
   copyCount?: number
   createdCopyCount?: number | null
+  /** 8g: what the server says is standing between this draft and a commit. */
+  blockers?: LibraryImportNotReadyDetails[]
+  draftVersion?: string
 }
 
 export function buildDraft({
@@ -89,6 +93,8 @@ export function buildDraft({
   canCommit,
   copyCount,
   createdCopyCount = null,
+  blockers,
+  draftVersion = 'a'.repeat(64),
 }: DraftOptions): LibraryImportDraftResponse {
   const tally = (wanted: LibraryImportRowStatus): number =>
     rows.filter((row) => row.status === wanted).length
@@ -117,8 +123,24 @@ export function buildDraft({
     },
     readiness: {
       canCommit: canCommit ?? (unresolved === 0 && ready > 0),
+      // Mirrors what the API derives: the reasons a commit would be refused,
+      // in the same order `assessLibraryImportCommit` produces them.
+      blockers: blockers ?? [
+        ...(unresolved > 0
+          ? [
+              {
+                reason: 'ROWS_UNRESOLVED' as const,
+                rowNumbers: rows
+                  .filter((row) => row.status === 'NEEDS_REVIEW' || row.status === 'INVALID')
+                  .map((row) => row.rowNumber),
+              },
+            ]
+          : []),
+        ...(ready === 0 ? [{ reason: 'NOTHING_TO_IMPORT' as const }] : []),
+      ],
       copyCount: copyCount ?? ready,
     },
+    draftVersion,
     rows,
   })
 }

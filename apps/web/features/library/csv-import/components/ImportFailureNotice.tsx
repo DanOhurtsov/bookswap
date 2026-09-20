@@ -80,6 +80,11 @@ function describe(failure: ImportFailure): FailureCopy {
         hint: 'Ми перечитали чернетку. Перевірте рядок і повторіть дію, якщо вона ще потрібна.',
         canRetry: false,
       }
+    // 8g: the draft itself is fine and still on screen — it just cannot be
+    // imported yet. The server's sentence already names what to do, so it is
+    // shown as-is rather than rewritten into a second, vaguer one here.
+    case 'not-ready':
+      return { title: failure.message, canRetry: false }
     case 'unauthorized':
       return { title: 'Потрібно увійти ще раз.', canRetry: false }
     case 'rate-limited':

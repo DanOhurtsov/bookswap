@@ -1,14 +1,26 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common'
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import type { LibraryImportDraftResponse } from '@bookswap/shared'
 import { CurrentUser } from '../../auth/authenticated-request'
 import { SessionGuard } from '../../auth/session.guard'
 import {
+  LIBRARY_IMPORT_COMMIT_RATE_LIMIT,
   LIBRARY_IMPORT_PATCH_RATE_LIMIT,
   LIBRARY_IMPORT_PREVIEW_RATE_LIMIT,
   LIBRARY_IMPORT_RATE_WINDOW_MS,
 } from '../../common/rate-limit.config'
 import {
+  LibraryImportCommitDto,
   LibraryImportPreviewDto,
   LibraryImportRowParamsDto,
   LibraryImportRowPatchDto,
@@ -56,6 +68,33 @@ export class LibraryImportController {
     @Param('id') importId: string,
   ): Promise<LibraryImportDraftResponse> {
     return this.imports.getDraft(user.id, importId)
+  }
+
+  /**
+   * Stage 8g: the import becomes books.
+   *
+   * Throttled lower than the row PATCH and for a different reason: this one
+   * makes no external call at all, but it does write, and a repeat is cheap
+   * only because the endpoint is idempotent (R6). `@HttpCode(200)`, not the
+   * POST default of 201: a repeated commit answers with the import that already
+   * exists, and nothing here creates a new resource the client could address.
+   */
+  @Post('me/library/imports/:id/commit')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    import: { limit: LIBRARY_IMPORT_COMMIT_RATE_LIMIT, ttl: LIBRARY_IMPORT_RATE_WINDOW_MS },
+  })
+  commit(
+    @CurrentUser() user: UserModel,
+    @Param('id') importId: string,
+    @Body() dto: LibraryImportCommitDto,
+  ): Promise<LibraryImportDraftResponse> {
+    return this.imports.commit({
+      ownerId: user.id,
+      importId,
+      expectedDraftVersion: dto.expectedDraftVersion,
+    })
   }
 
   @Patch('me/library/imports/:id/rows/:rowNumber')

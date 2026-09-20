@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
-  LIBRARY_IMPORT_LIMITS,
   type LibraryImportCounts,
   type LibraryImportDraftResponse,
   type LibraryImportReadiness,
@@ -11,6 +10,7 @@ import {
   type LibraryImportRowValues,
 } from '@bookswap/shared'
 import { libraryImportDuplicateKey } from './library-import-rows'
+import { assessLibraryImportCommit, exceedsCopyCap } from './library-import.commit'
 import type { LibraryImportSummary, OwnedLibraryImport } from './library-import.repository'
 import type { ResolvedRow } from './library-import.resolver'
 
@@ -176,20 +176,43 @@ const COUNT_KEY = {
  * `copyCount` is recounted over the rows that would actually be committed, not
  * taken from the parse-time figure: after edits and skips the two are different
  * numbers, and it is this one that the 500-copy cap applies to.
+ *
+ * 8g (R6c): the verdict itself comes from `assessLibraryImportCommit` — the same
+ * function the commit re-runs under its own lock. The button and the endpoint
+ * therefore answer "is this importable" from one implementation rather than two
+ * that agree today.
  */
 export function toReadiness(rows: readonly LibraryImportRowRecord[]): LibraryImportReadiness {
-  let copyCount = 0
-  let unsettled = 0
+  const { blockers, plan } = assessLibraryImportCommit(rows)
 
-  for (const row of rows) {
-    if (row.status === 'SKIPPED') continue
-    if (row.status === 'NEEDS_REVIEW' || row.status === 'INVALID') unsettled += 1
-    else copyCount += row.payload.values?.quantity ?? 0
+  return {
+    // The cap keeps its own answer (`IMPORT_TOO_LARGE`, R6a) and so is not a
+    // blocker — but it still has to stop the button, and `copyCount` below
+    // reports the real figure rather than one clipped to the limit it broke.
+    canCommit: blockers.length === 0 && !exceedsCopyCap(plan.copyCount),
+    blockers,
+    copyCount: plan.copyCount,
   }
+}
 
-  const canCommit = unsettled === 0 && copyCount > 0 && copyCount <= LIBRARY_IMPORT_LIMITS.maxCopies
+/**
+ * 8g (R6c): an opaque version of the whole draft, for `expectedDraftVersion`.
+ *
+ * Built from the ordered `rowNumber:rowVersion` pairs and nothing else. Since a
+ * `rowVersion` is minted on every explicit action rather than derived from the
+ * row's content, an A → B → A edit lands on a different value here too — the
+ * property R7a requires per row, carried up to the draft. Recomputing derived
+ * state for untouched rows changes no version, so it changes no draft version.
+ *
+ * An `EXPIRED` or `COMMITTED` import has no rows left; it hashes the empty
+ * string, which is exactly as true of it as of any other row-less draft.
+ */
+export function toDraftVersion(rows: readonly LibraryImportRowRecord[]): string {
+  const pairs = [...rows]
+    .sort((left, right) => left.rowNumber - right.rowNumber)
+    .map((row) => `${String(row.rowNumber)}:${row.payload.rowVersion}`)
 
-  return { canCommit, copyCount }
+  return createHash('sha256').update(pairs.join('\n')).digest('hex')
 }
 
 export function toDraftResponse(owned: OwnedLibraryImport): LibraryImportDraftResponse {
@@ -197,6 +220,7 @@ export function toDraftResponse(owned: OwnedLibraryImport): LibraryImportDraftRe
     import: toSummaryResponse(owned.import),
     counts: toCounts(owned.rows),
     readiness: toReadiness(owned.rows),
+    draftVersion: toDraftVersion(owned.rows),
     rows: owned.rows.map((row) => ({
       rowNumber: row.rowNumber,
       status: row.status,

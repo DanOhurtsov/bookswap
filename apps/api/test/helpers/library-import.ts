@@ -106,3 +106,32 @@ export function errorCodesOf(draft: LibraryImportDraftResponse, rowNumber: numbe
 export function versionOf(draft: LibraryImportDraftResponse, rowNumber: number): string {
   return rowOf(draft, rowNumber).rowVersion
 }
+
+/**
+ * Stage 8g: `POST /me/library/imports/:id/commit`.
+ *
+ * `expectedDraftVersion` is passed by the caller rather than read fresh here:
+ * the staleness cases are exactly the ones that must hand over an old
+ * snapshot's version on purpose, the same reason `versionOf` exists.
+ */
+export function commitRequest(
+  app: INestApplication<App>,
+  cookie: string,
+  importId: string,
+  expectedDraftVersion: string,
+): request.Test {
+  return request(app.getHttpServer())
+    .post(importUrl(`/${importId}/commit`))
+    .set('Cookie', cookie)
+    .send({ expectedDraftVersion })
+}
+
+export async function commit(
+  app: INestApplication<App>,
+  cookie: string,
+  draft: LibraryImportDraftResponse,
+): Promise<LibraryImportDraftResponse> {
+  const response = await commitRequest(app, cookie, draft.import.id, draft.draftVersion).expect(200)
+
+  return libraryImportDraftResponseSchema.parse(response.body)
+}

@@ -7,11 +7,7 @@ import {
 import { apiRequest } from '@/app/lib/api'
 
 /**
- * Stage 8f-3: the three draft endpoints of 8f-2, and nothing else.
- *
- * There is deliberately no `commitLibraryImport` here: `POST .../commit` is
- * 8g's endpoint and does not exist yet. A stub that "simulates" it would be a
- * lie the UI then has to tell the user.
+ * Stage 8f-3 and 8g: the four endpoints of one import.
  *
  * Every call parses the answer with the shared schema, so the row table and the
  * readiness banner can only ever render a shape the API actually promised.
@@ -64,4 +60,27 @@ export function patchLibraryImportRow({
     `/me/library/imports/${encodeURIComponent(importId)}/rows/${String(rowNumber)}`,
     { method: 'PATCH', body: request, schema: libraryImportDraftResponseSchema },
   )
+}
+
+/**
+ * Stage 8g: turn the draft into books.
+ *
+ * `expectedDraftVersion` is the version of the draft that is on screen (R6c) —
+ * the server refuses the commit if anything has changed since, rather than
+ * importing a draft the person never reviewed.
+ *
+ * The answer is the same document shape as every other call here: the import,
+ * now `COMMITTED`, with no rows. Callers write it into the cache in place of
+ * the draft, so the private notes of a finished import stop being held in a
+ * browser that no longer has any use for them.
+ */
+export function commitLibraryImport(
+  importId: string,
+  expectedDraftVersion: string,
+): Promise<LibraryImportDraftResponse> {
+  return apiRequest(`/me/library/imports/${encodeURIComponent(importId)}/commit`, {
+    method: 'POST',
+    body: { expectedDraftVersion },
+    schema: libraryImportDraftResponseSchema,
+  })
 }

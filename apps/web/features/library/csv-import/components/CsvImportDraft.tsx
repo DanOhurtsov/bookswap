@@ -8,6 +8,7 @@ import {
   IMPORT_ROW_FILTERS,
   IMPORT_ROW_FILTER_LABELS,
   countImportRows,
+  rowsAwaitingRetry,
   selectImportRows,
   type ImportRowFilter,
 } from '../model/import-draft-state'
@@ -80,6 +81,9 @@ type DraftBodyProps = {
 
 function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
   const rows = useMemo(() => selectImportRows(draft, filter), [draft, filter])
+  // Rows the refused commit named. Derived from the failure, not from the rows
+  // themselves: the server refused on grounds the draft cannot see.
+  const awaitingRetry = useMemo(() => rowsAwaitingRetry(state.commitFailure), [state.commitFailure])
 
   return (
     <>
@@ -87,7 +91,12 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
         <ImportRefreshNotice failure={state.refreshFailure} onRetry={state.refresh} />
       )}
 
-      <ImportDraftSummary draft={draft} />
+      <ImportDraftSummary
+        draft={draft}
+        isCommitting={state.isCommitting}
+        failure={state.commitFailure}
+        onCommit={state.commit}
+      />
 
       <nav className="actions import-filters" aria-label="Фільтр рядків">
         {IMPORT_ROW_FILTERS.map((value) => (
@@ -120,6 +129,7 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
                 state.lastConfirmed?.rowNumber === row.rowNumber ? state.lastConfirmed : undefined
               }
               canReapply={state.isDraftCurrent}
+              awaitsRetry={awaitingRetry.has(row.rowNumber)}
               onAction={(request) => {
                 state.runRowAction({ rowNumber: row.rowNumber, request })
               }}

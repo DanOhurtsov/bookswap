@@ -4,6 +4,7 @@ import type {
   LibraryImportInvalidCsvDetails,
   LibraryImportInvalidXlsxDetails,
   LibraryImportLookupUnavailableReason,
+  LibraryImportNotReadyDetails,
   LibraryImportRowError,
   LibraryImportRowStatus,
 } from '@bookswap/shared'
@@ -182,4 +183,43 @@ function describeSheets(sheets: readonly number[]): string {
 
 function describeCell(details: { sheet: number; row: number; column: number }): string {
   return `Клітинка на аркуші ${String(details.sheet)}, рядок ${String(details.row)}, колонка ${String(details.column)},`
+}
+
+/**
+ * 8g: the label of the action these messages send people to.
+ *
+ * One constant, used by both the sentence and the button itself. They pointed
+ * at different words once already — the message named a button that did not
+ * exist on the row — and telling someone to press something they cannot find is
+ * worse than saying nothing.
+ */
+export const IMPORT_CATALOG_RETRY_LABEL = 'Оновити з каталогу'
+
+/** The label of the row action that re-asks the providers about an ISBN. */
+export const IMPORT_LOOKUP_RETRY_LABEL = 'Спробувати знайти ще раз'
+
+/**
+ * 8g (R6c): why a commit was refused, in words the owner can act on.
+ *
+ * Every reason names what to DO, not what the server found. "Рядки ще
+ * потребують уваги" is a state; "розберіться з ними або пропустіть" is the
+ * next move — and the difference is whether a person closes the tab.
+ */
+export function describeNotReadyReason(details: LibraryImportNotReadyDetails): string {
+  switch (details.reason) {
+    case 'ROWS_UNRESOLVED':
+      return 'Не всі рядки готові до імпорту. Розберіться з ними або пропустіть їх.'
+    case 'NOTHING_TO_IMPORT':
+      return 'Імпортувати нічого: усі рядки пропущено.'
+    case 'CONFLICTING_EDITION_ROWS':
+      return 'Кілька рядків описують той самий ISBN по-різному. Зведіть їх до одного опису або пропустіть зайві — самі ми не вибираємо, який із них правильний.'
+    case 'DRAFT_CHANGED':
+      return 'Чернетка змінилася після того, як ви її прочитали. Перечитайте її й повторіть імпорт.'
+    case 'WORK_MERGED':
+      return `Вибраний твір обʼєднали з іншим, поки ви готували імпорт. Оновіть ці рядки (кнопка «${IMPORT_CATALOG_RETRY_LABEL}») і виберіть твір заново.`
+    case 'WORK_LANG_MISMATCH':
+      return 'Вибраний твір написано іншою мовою оригіналу, ніж каже файл. Виправте «orig_lang» або виберіть інший твір.'
+    case 'EDITION_APPEARED':
+      return `Видання з таким ISBN уже зʼявилося в каталозі, поки ви готували імпорт. Оновіть ці рядки (кнопка «${IMPORT_CATALOG_RETRY_LABEL}»), щоб додати примірник до наявного видання.`
+  }
 }

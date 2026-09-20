@@ -83,3 +83,66 @@ export function beginRequest(test: request.Test): Promise<request.Response> {
     })
   })
 }
+
+/**
+ * A rendezvous point for N operations that must all reach the same place before
+ * any of them continues.
+ *
+ * `waitForBlockedBackend` proves contention on a PostgreSQL lock; this proves it
+ * where there is no lock to wait on. The two imports racing to insert the same
+ * ISBN share nothing before the insert, so nothing queues them: without a
+ * barrier the loser usually just reads the winner's row in its precheck, and the
+ * unique index — the thing the test claims to exercise — is never touched.
+ *
+ * `ready` is bounded: if a participant never arrives, the test fails saying so
+ * instead of hanging until Jest's own timeout, which says nothing about why.
+ */
+export interface Barrier {
+  /** Resolves once every participant has arrived. Rejects if they do not, in time. */
+  ready: Promise<void>
+  /** Lets every arrived participant continue. Safe to call more than once. */
+  release: () => void
+  /** Called by the participants themselves; resolves when `release()` is called. */
+  arrive: () => Promise<void>
+}
+
+export function barrier(participants: number, timeoutMs = 10_000): Barrier {
+  let arrived = 0
+  const allArrived = deferred()
+  const released = deferred()
+  let expire = (): void => undefined
+
+  const ready = new Promise<void>((resolve, reject) => {
+    // Declared before the timer that uses it, so there is no order to get wrong.
+    expire = () => {
+      reject(
+        new Error(
+          `Бар'єр не зібрав ${String(participants)} учасників за ${String(timeoutMs)} мс ` +
+            `(прийшло ${String(arrived)}) — тест не довів заявлену одночасність`,
+        ),
+      )
+    }
+    void allArrived.promise.then(resolve)
+  })
+  const timer = setTimeout(() => {
+    expire()
+  }, timeoutMs)
+
+  // Nothing here should keep the process alive on its own.
+  timer.unref()
+
+  return {
+    ready,
+    release: () => {
+      clearTimeout(timer)
+      released.resolve()
+    },
+    arrive: async () => {
+      arrived += 1
+
+      if (arrived >= participants) allArrived.resolve()
+
+      await released.promise
+    },
+  }
+}

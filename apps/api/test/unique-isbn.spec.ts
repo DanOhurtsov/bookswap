@@ -109,6 +109,9 @@ describe('uniqueIsbn13', () => {
       'library-import-preview',
       'library-import-rows',
       'library-import-staleness',
+      // Stage 8g: коміт імпорту.
+      'library-import-commit',
+      'library-import-commit-concurrency',
     ]
 
     const first = REAL_NAMESPACES.map((namespace) => uniqueIsbn13(namespace))
