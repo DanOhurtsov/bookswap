@@ -133,7 +133,7 @@ describe('CSV import row PATCH (e2e)', () => {
 
       expect(rowOf(updated, 1).status).toBe('READY_CREATE_CHAIN')
       expect(updated.counts).toMatchObject({ invalid: 0, readyCreateChain: 2 })
-      expect(updated.readiness).toEqual({ canCommit: true, copyCount: 2 })
+      expect(updated.readiness).toEqual({ canCommit: true, blockers: [], copyCount: 2 })
       // The answer is the whole draft, not the one row that changed (R12).
       expect(updated.rows).toHaveLength(2)
     })
@@ -374,7 +374,7 @@ describe('CSV import row PATCH (e2e)', () => {
 
       expect(rowOf(skipped, 2).status).toBe('SKIPPED')
       expect(skipped.counts).toMatchObject({ invalid: 0, skipped: 1, readyCreateChain: 1 })
-      expect(skipped.readiness).toEqual({ canCommit: true, copyCount: 1 })
+      expect(skipped.readiness).toEqual({ canCommit: true, blockers: [], copyCount: 1 })
     })
 
     /** Editing is the other way out of a duplicate — it is not "skip or nothing". */
@@ -401,7 +401,12 @@ describe('CSV import row PATCH (e2e)', () => {
         { action: 'SKIP', expectedRowVersion: versionOf(draft, 1) },
       )
 
-      expect(skipped.readiness).toEqual({ canCommit: false, copyCount: 0 })
+      expect(skipped.readiness).toEqual({
+        canCommit: false,
+        // 8g: every row is skipped, so there is nothing left to create.
+        blockers: [{ reason: 'NOTHING_TO_IMPORT' }],
+        copyCount: 0,
+      })
 
       const restored = await patchRow(
         app,
@@ -411,7 +416,7 @@ describe('CSV import row PATCH (e2e)', () => {
       )
 
       expect(rowOf(restored, 1).status).toBe('READY_CREATE_CHAIN')
-      expect(restored.readiness).toEqual({ canCommit: true, copyCount: 1 })
+      expect(restored.readiness).toEqual({ canCommit: true, blockers: [], copyCount: 1 })
     })
 
     /**
@@ -446,7 +451,13 @@ describe('CSV import row PATCH (e2e)', () => {
       const draft = await preview(app, cookie, [...atCap, { ...fullRow(), quantity: 'багато' }])
 
       expect(rowOf(draft, 26).status).toBe('INVALID')
-      expect(draft.readiness).toEqual({ canCommit: false, copyCount: 500 })
+      expect(draft.readiness).toEqual({
+        canCommit: false,
+        // 8g: row 26 has an invalid quantity, so it is unresolved — the cap is not
+        // what blocks this draft yet (the parse-time sum is exactly 500).
+        blockers: [{ reason: 'ROWS_UNRESOLVED', rowNumbers: [26] }],
+        copyCount: 500,
+      })
 
       const overflowed = await patchRow(
         app,
@@ -600,7 +611,7 @@ describe('CSV import row PATCH (e2e)', () => {
 
       expect(body.rows.find((row) => row.rowNumber === 1)?.status).toBe('SKIPPED')
       expect(body.rows.find((row) => row.rowNumber === 2)?.values?.quantity).toBe(5)
-      expect(body.readiness).toEqual({ canCommit: true, copyCount: 5 })
+      expect(body.readiness).toEqual({ canCommit: true, blockers: [], copyCount: 5 })
     })
 
     /**

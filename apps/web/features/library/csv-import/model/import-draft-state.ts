@@ -1,13 +1,15 @@
 import {
   libraryImportInvalidCsvDetailsSchema,
   libraryImportInvalidXlsxDetailsSchema,
+  libraryImportNotReadyDetailsSchema,
   libraryImportTooLargeDetailsSchema,
   type LibraryImportDraftResponse,
+  type LibraryImportNotReadyReason,
   type LibraryImportRowResponse,
   type LibraryImportRowStatus,
 } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
-import { describeInvalidCsv, describeInvalidXlsx } from './import-labels'
+import { describeInvalidCsv, describeInvalidXlsx, describeNotReadyReason } from './import-labels'
 
 /**
  * R12: ONE canonical query for the whole draft. Summary, counts, readiness and
@@ -30,6 +32,22 @@ export type ImportFailure =
   | { kind: 'expired' }
   | { kind: 'committed' }
   | { kind: 'conflict' }
+  /**
+   * 8g: the draft cannot be imported as it stands. Distinct from `conflict`
+   * because the answer is different: a conflict means "look again", this means
+   * "these rows still need you" — and the rows are named.
+   */
+  | {
+      kind: 'not-ready'
+      message: string
+      /**
+       * Kept structured, not only rendered: which recovery a row is offered
+       * depends on WHY the commit was refused, and a sentence cannot be
+       * branched on. `undefined` only when the body did not match the contract.
+       */
+      reason: LibraryImportNotReadyReason | undefined
+      rowNumbers: number[]
+    }
   | { kind: 'unauthorized' }
   | { kind: 'rate-limited'; message: string }
   | { kind: 'file'; message: string }
@@ -41,6 +59,7 @@ export function classifyImportFailure(error: unknown): ImportFailure {
   if (error.status === 404) return { kind: 'not-found' }
   if (error.code === 'IMPORT_EXPIRED') return { kind: 'expired' }
   if (error.code === 'IMPORT_ROW_CONFLICT') return { kind: 'conflict' }
+  if (error.code === 'IMPORT_NOT_READY') return describeNotReady(error)
   if (error.code === 'UNAUTHORIZED') return { kind: 'unauthorized' }
   if (error.code === 'TOO_MANY_REQUESTS') return { kind: 'rate-limited', message: error.message }
   if (error.code === 'CONFLICT') return { kind: 'committed' }
@@ -51,6 +70,59 @@ export function classifyImportFailure(error: unknown): ImportFailure {
 
   return { kind: 'other', message: error.message }
 }
+
+/**
+ * 8g: `IMPORT_NOT_READY` carries a typed reason and the rows it is about.
+ *
+ * Parsed with the shared schema rather than trusted: a body that does not match
+ * the contract falls back to the server's own sentence instead of rendering
+ * `undefined` row numbers at somebody.
+ */
+function describeNotReady(error: ApiRequestError): ImportFailure {
+  const details = libraryImportNotReadyDetailsSchema.safeParse(error.details)
+
+  if (!details.success) {
+    return { kind: 'not-ready', message: error.message, reason: undefined, rowNumbers: [] }
+  }
+
+  const rowNumbers = 'rowNumbers' in details.data ? details.data.rowNumbers : []
+
+  return {
+    kind: 'not-ready',
+    message: describeNotReadyReason(details.data),
+    reason: details.data.reason,
+    rowNumbers: [...rowNumbers],
+  }
+}
+
+/**
+ * 8g: reasons whose fix is re-running the row's resolution.
+ *
+ * Both describe a catalog that moved after the preview: the edition now exists,
+ * or the chosen work was merged away. The row itself still looks `READY_*` and
+ * carries no `LOOKUP_UNAVAILABLE`, so nothing on it would otherwise offer a way
+ * forward — which is exactly how a person ends up pressing "Імпортувати"
+ * repeatedly against an error that will never clear on its own.
+ *
+ * `RETRY` stays an explicit act: this only says which rows may be retried, it
+ * never runs one.
+ */
+const RETRYABLE_NOT_READY_REASONS: ReadonlySet<LibraryImportNotReadyReason> = new Set([
+  'EDITION_APPEARED',
+  'WORK_MERGED',
+])
+
+/** Rows the last commit failure says can be moved forward by re-resolving them. */
+export function rowsAwaitingRetry(failure: ImportFailure | undefined): ReadonlySet<number> {
+  if (failure?.kind !== 'not-ready') return EMPTY_ROWS
+  if (failure.reason === undefined || !RETRYABLE_NOT_READY_REASONS.has(failure.reason)) {
+    return EMPTY_ROWS
+  }
+
+  return new Set(failure.rowNumbers)
+}
+
+const EMPTY_ROWS: ReadonlySet<number> = new Set()
 
 /**
  * `IMPORT_INVALID_CSV` / `IMPORT_TOO_LARGE` carry structured `details` (R6a).

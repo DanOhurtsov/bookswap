@@ -12,8 +12,10 @@ import {
   type LibraryImportRowRecord,
   type LibraryImportRowValues,
 } from '@bookswap/shared'
+import { AnalyticsService } from '../../analytics/analytics.service'
 import { LookupService } from '../../catalog/lookup/lookup.service'
 import { ApiException } from '../../common/api.exception'
+import { isUniqueViolationOn } from '../../common/prisma-errors'
 import { PrismaService } from '../../prisma/prisma.service'
 import { readLibraryImportFile, type LibraryImportFileError } from './library-import-file'
 import {
@@ -22,17 +24,26 @@ import {
   type LibraryImportParsedRow,
 } from './library-import-rows'
 import {
+  assessLibraryImportCommit,
+  exceedsCopyCap,
+  type LibraryImportCommitPlan,
+} from './library-import.commit'
+import {
   duplicateErrors,
   fieldErrorsOf,
   toDraftResponse,
+  toDraftVersion,
   toRowRecord,
   type RowDraftInput,
 } from './library-import.draft'
+import { libraryImportNotReady } from './library-import.errors'
 import {
   LibraryImportRepository,
+  type CommitLibraryImportResult,
   type ImportReadClient,
   type OwnedLibraryImport,
 } from './library-import.repository'
+import { LibraryImportWriter } from './library-import.writer'
 import {
   LibraryImportResolver,
   type ResolvableRow,
@@ -72,6 +83,8 @@ export class LibraryImportService {
     private readonly repository: LibraryImportRepository,
     private readonly resolver: LibraryImportResolver,
     private readonly lookup: LookupService,
+    private readonly writer: LibraryImportWriter,
+    private readonly analytics: AnalyticsService,
   ) {}
 
   async preview(input: {
@@ -161,6 +174,158 @@ export class LibraryImportService {
     })
 
     return toDraftResponse(this.requireLive(updated))
+  }
+
+  /**
+   * Stage 8g (R6c): the draft becomes books, once, atomically.
+   *
+   * Everything that decides whether this may happen is checked INSIDE the
+   * transaction, under the import lock, against the draft and the catalog as
+   * they are at that moment — the client's `expectedDraftVersion` included. A
+   * check that ran before the lock would only describe a past the commit is not
+   * about.
+   *
+   * The two things that deliberately sit outside it: an already-committed
+   * import answers before any other test (so a retry after a lost response
+   * works even with its rows gone and its TTL spent), and analytics is written
+   * after the transaction commits, best-effort, per 8a.
+   */
+  async commit(input: {
+    ownerId: string
+    importId: string
+    expectedDraftVersion: string
+  }): Promise<LibraryImportDraftResponse> {
+    const { ownerId, importId, expectedDraftVersion } = input
+    let plan: LibraryImportCommitPlan | undefined
+    let createdCopyIds: readonly string[] = []
+
+    const committed = await this.runCommit({
+      ownerId,
+      importId,
+      apply: async ({ client, owned }) => {
+        this.requireLive(owned)
+        requireCurrentDraft(owned.rows, expectedDraftVersion)
+
+        const assessed = assessLibraryImportCommit(owned.rows)
+
+        plan = assessed.plan
+
+        const [blocker] = assessed.blockers
+
+        if (blocker !== undefined) throw libraryImportNotReady(blocker)
+        if (exceedsCopyCap(assessed.plan.copyCount)) throw tooManyCopies(assessed.plan.copyCount)
+
+        createdCopyIds = await this.writer.write({ client, ownerId, plan: assessed.plan })
+
+        return createdCopyIds
+      },
+      plan: () => plan,
+    })
+
+    if (committed.outcome === 'COMMITTED') await this.recordAddedCopies(ownerId, createdCopyIds)
+
+    // The rows are gone with the commit, so the answer is the summary over an
+    // empty draft — the same document shape `GET` and `PATCH` return (R12), so
+    // the client replaces its cached draft with it and nothing has to know that
+    // this particular response came from a commit.
+    return toDraftResponse({ import: committed.import, rows: [] })
+  }
+
+  /**
+   * Runs the commit transaction and turns one specific race into one specific
+   * answer.
+   *
+   * Requirement B (agreed): a unique violation on the ISBN index aborts the
+   * WHOLE transaction — nothing more is attempted inside it, because inside an
+   * aborted transaction nothing can be. Only that constraint becomes
+   * `EDITION_APPEARED`; any other Prisma failure keeps its own identity rather
+   * than being dressed up as a catalog race the user could act on.
+   */
+  private async runCommit(input: {
+    ownerId: string
+    importId: string
+    apply: Parameters<LibraryImportRepository['commit']>[0]['apply']
+    plan: () => LibraryImportCommitPlan | undefined
+  }): Promise<CommitLibraryImportResult> {
+    try {
+      const result = await this.repository.commit({
+        ownerId: input.ownerId,
+        importId: input.importId,
+        now: new Date(),
+        apply: input.apply,
+      })
+
+      if (result === null) throw notFound()
+
+      return result
+    } catch (error) {
+      if (!isUniqueViolationOn(error, EDITION_ISBN_UNIQUE)) throw error
+
+      // The transaction is already rolled back, so this reads the catalog as it
+      // now is — which is the only way to name the rows honestly: the violation
+      // itself says which index broke, never which value did.
+      throw await this.editionAppeared(input.plan())
+    }
+  }
+
+  /** Which rows of the plan an ISBN now exists for. */
+  private async editionAppeared(plan: LibraryImportCommitPlan | undefined): Promise<ApiException> {
+    const chains = plan?.chains ?? []
+    const isbns = chains.map((chain) => chain.isbn13)
+    const taken =
+      isbns.length === 0
+        ? []
+        : await this.prisma.edition.findMany({
+            where: { isbn13: { in: isbns } },
+            select: { isbn13: true },
+          })
+    const takenIsbns = new Set(taken.flatMap((edition) => edition.isbn13 ?? []))
+    const named = chains
+      .filter((chain) => takenIsbns.has(chain.isbn13))
+      .flatMap((chain) => chain.rowNumbers)
+    // The winner of the race may itself have been rolled back by the time we
+    // look, so "the index refused it" is the stronger evidence: fall back to
+    // every row the plan would have created rather than to an empty list.
+    const rowNumbers = named.length > 0 ? named : chains.flatMap((chain) => chain.rowNumbers)
+
+    if (rowNumbers.length === 0) return notFound()
+
+    return libraryImportNotReady({
+      reason: 'EDITION_APPEARED',
+      rowNumbers: [...rowNumbers].sort((left, right) => left - right),
+    })
+  }
+
+  /**
+   * R3/R5: one `BOOK_ADDED` with `method: 'CSV'` per created copy, after the
+   * commit.
+   *
+   * Best-effort by 8a's design: `record()` never throws, so a failure here
+   * cannot turn an import that already happened into an error the user sees. It
+   * is also idempotent — the dedupe key is derived from the copy id — so a
+   * repeated attempt writes nothing twice.
+   *
+   * This is where the constant-statement promise of the transaction stops
+   * applying to the request as a whole: `record()` writes one event per call by
+   * 8a's contract, so a 500-copy import ends with 500 inserts here. Batching
+   * them would mean changing that contract, which is 8a's to change.
+   */
+  private async recordAddedCopies(ownerId: string, copyIds: readonly string[]): Promise<void> {
+    // `allSettled`, not `all`: 8a promises that `record()` resolves whatever
+    // happens, but the books are already committed by the time we get here, and
+    // an import must not be reported as failed because a promise about
+    // analytics was broken. The guarantee belongs to the caller that has
+    // something to lose, not to the callee that made the promise.
+    await Promise.allSettled(
+      copyIds.map((copyId) =>
+        this.analytics.record({
+          type: 'BOOK_ADDED',
+          subjectUserId: ownerId,
+          domainEntityId: copyId,
+          properties: { method: 'CSV' },
+        }),
+      ),
+    )
   }
 
   /** A preview resolves outside any lock; the read-only transaction only pins the trigram threshold. */
@@ -302,6 +467,39 @@ function requireCurrentRow(row: LibraryImportRowRecord, expected: string): void 
     API_ERROR_CODES.IMPORT_ROW_CONFLICT,
     'Рядок змінився після того, як ви його прочитали. Перечитайте чернетку й повторіть дію.',
     HttpStatus.CONFLICT,
+  )
+}
+
+/** The Postgres index behind `Edition.isbn13 @unique` — see the init migration. */
+const EDITION_ISBN_UNIQUE = 'Edition_isbn13_key'
+
+/**
+ * The draft must still be the one the client decided to commit (R6c).
+ *
+ * Same reasoning as `requireCurrentRow`, one level up: the import lock only
+ * makes two operations take turns, it does not make the second one right. A
+ * commit computed from a draft that a second tab has since edited would import
+ * something nobody reviewed.
+ */
+function requireCurrentDraft(rows: readonly LibraryImportRowRecord[], expected: string): void {
+  if (toDraftVersion(rows) === expected) return
+
+  throw libraryImportNotReady({ reason: 'DRAFT_CHANGED' })
+}
+
+/**
+ * R6a/R7a: the 500-copy cap, re-checked against what would really be created.
+ *
+ * Kept as `IMPORT_TOO_LARGE` rather than folded into `IMPORT_NOT_READY`: it is
+ * the same limit the parser reports, and the client already knows how to say
+ * this one.
+ */
+function tooManyCopies(actual: number): ApiException {
+  return new ApiException(
+    API_ERROR_CODES.IMPORT_TOO_LARGE,
+    'Забагато примірників для одного імпорту',
+    HttpStatus.PAYLOAD_TOO_LARGE,
+    { limit: 'COPIES', max: LIBRARY_IMPORT_LIMITS.maxCopies, actual },
   )
 }
 

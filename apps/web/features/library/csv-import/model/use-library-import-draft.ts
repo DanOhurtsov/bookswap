@@ -4,7 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import type { LibraryImportDraftResponse, LibraryImportRowPatchRequest } from '@bookswap/shared'
 import { useSession } from '@/app/lib/use-session'
-import { fetchLibraryImportDraft, patchLibraryImportRow } from '../api/library-import-requests'
+import {
+  commitLibraryImport,
+  fetchLibraryImportDraft,
+  patchLibraryImportRow,
+} from '../api/library-import-requests'
 import {
   classifyImportFailure,
   libraryImportQueryKey,
@@ -46,9 +50,15 @@ export interface LibraryImportDraft {
   lastConfirmed: ConfirmedRowAction | undefined
   pendingRowNumber: number | undefined
   isMutating: boolean
+  /** 8g: a commit is in flight. Row actions are blocked for its duration, and vice versa. */
+  isCommitting: boolean
+  /** Why the last commit failed — including which rows still need attention. */
+  commitFailure: ImportFailure | undefined
   refresh: () => void
   dismissActionFailure: () => void
   runRowAction: (input: RowActionInput) => void
+  /** 8g: import the draft exactly as it is on screen. A no-op while anything else is running. */
+  commit: () => void
 }
 
 interface ActionContext {
@@ -96,6 +106,7 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
   const queryClient = useQueryClient()
   const { state: session } = useSession()
   const [actionFailure, setActionFailure] = useState<ImportFailure>()
+  const [commitFailure, setCommitFailure] = useState<ImportFailure>()
   const [failedRowNumber, setFailedRowNumber] = useState<number>()
   const [lastConfirmed, setLastConfirmed] = useState<ConfirmedRowAction>()
   const [awaitingRefresh, setAwaitingRefresh] = useState(false)
@@ -111,10 +122,44 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
   // PATCHes, and `mutation.isPending` is a value from the last completed render
   // — it cannot possibly have flipped yet inside that batch.
   const running = useRef(false)
+  /**
+   * The session and draft this hook is currently about. Read by the latch
+   * below, which outlives a render and must not answer for a different person.
+   */
+  const sessionKey = session.status === 'authenticated' ? session.user.id : session.status
+  const identityKey = `${importId} ${sessionKey}`
+  const identityRef = useRef(identityKey)
+  /**
+   * A commit the server has confirmed, latched the moment its response arrives.
+   *
+   * This is what closes the late-GET hole. A `GET` issued while the commit was
+   * still in flight reads the draft BEFORE the commit's transaction lands, so it
+   * comes back carrying rows — and a private note — for an import that is
+   * already finished. Cancelling queries in `onMutate` does not cover it: that
+   * read may well start after the mutation did. Guarding the render does not
+   * cover it either, because by then the stale draft is in the cache, where
+   * `getQueryData` and the next render can both still reach it.
+   *
+   * So the guard sits in the `queryFn`, where every read must pass regardless of
+   * which one wins the race: after the fetch resolves, a confirmed commit wins
+   * over whatever the server said a moment earlier.
+   */
+  const committedRef = useRef<
+    { identityKey: string; draft: LibraryImportDraftResponse } | undefined
+  >(undefined)
 
   const query = useQuery({
     queryKey: libraryImportQueryKey(importId),
-    queryFn: ({ signal }) => fetchLibraryImportDraft(importId, signal),
+    queryFn: async ({ signal }) => {
+      const fetched = await fetchLibraryImportDraft(importId, signal)
+      const confirmed = committedRef.current
+
+      if (confirmed !== undefined && confirmed.identityKey === identityRef.current) {
+        return confirmed.draft
+      }
+
+      return fetched
+    },
     // Stopped for good once the answer is 401/404/410: retrying would only ask
     // the same question again, and would fight the cache clearing below.
     enabled: fatalFailure === undefined,
@@ -213,6 +258,83 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
     },
   })
 
+  /**
+   * 8g: the commit shares this hook — and, crucially, the SAME `running` gate,
+   * `token` and identity guard as the row actions.
+   *
+   * Two mutations over one cached document must not be able to run at once: a
+   * row PATCH landing during a commit would write a draft back over a summary
+   * the server has already declared final. One gate is what makes that
+   * unrepresentable, rather than unlikely.
+   */
+  const commitMutation = useMutation<
+    LibraryImportDraftResponse,
+    unknown,
+    string,
+    { token: number }
+  >({
+    mutationKey: ['library-import', importId, 'commit'],
+    // §3.9: a mutation is never retried by the library. A commit that timed
+    // out may well have succeeded, and asking again on the user's behalf is
+    // the one thing idempotency should not have to clean up after.
+    retry: false,
+    mutationFn: async (expectedDraftVersion) => {
+      const identity = identityRef.current
+      const committedDraft = await commitLibraryImport(importId, expectedDraftVersion)
+
+      // Latched here rather than in `onSuccess`: that runs a microtask later,
+      // and a `GET` resolving in between would slip its stale draft into the
+      // cache through the very gap this latch exists to close.
+      committedRef.current = { identityKey: identity, draft: committedDraft }
+
+      return committedDraft
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: libraryImportQueryKey(importId) })
+      token.current += 1
+      setCommitFailure(undefined)
+
+      return { token: token.current }
+    },
+    onSuccess: (committed, _variables, context) => {
+      running.current = false
+
+      if (context.token !== token.current) return
+
+      // The confirmed result replaces the draft immediately, and no refetch
+      // follows: the answer already IS the final summary, and the rows it no
+      // longer carries are rows nobody may read again. A later failing GET
+      // therefore cannot take this success back — there is nothing left for
+      // it to overwrite it with.
+      queryClient.setQueryData(libraryImportQueryKey(importId), committed)
+      setAwaitingRefresh(false)
+      setActionFailure(undefined)
+      setFailedRowNumber(undefined)
+    },
+    onError: (error, _variables, context) => {
+      running.current = false
+
+      if (context === undefined || context.token !== token.current) return
+
+      const failure = classifyImportFailure(error)
+
+      if (FATAL_FAILURES.has(failure.kind)) {
+        setFatalFailure(failure)
+
+        return
+      }
+
+      setCommitFailure(failure)
+
+      // The draft moved under the request, or rows still need attention: the
+      // honest next screen is the draft as it actually is now.
+      if (failure.kind === 'not-ready' || failure.kind === 'conflict') {
+        setAwaitingRefresh(true)
+        void runRefresh(context.token)
+      }
+    },
+  })
+
   const queryFailure = query.error === null ? undefined : classifyImportFailure(query.error)
 
   // Latched during render, not in an effect — the same "adjust state while
@@ -244,17 +366,20 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
 
   // Same guard as the correction feature (8e-3): a late callback from a
   // PREVIOUS draft or a PREVIOUS person must not surface as this one's state.
-  const sessionKey = session.status === 'authenticated' ? session.user.id : session.status
-  const identityKey = `${importId} ${sessionKey}`
   const previousIdentityKey = useRef(identityKey)
 
   useEffect(() => {
     if (previousIdentityKey.current === identityKey) return
 
     previousIdentityKey.current = identityKey
+    // Both before anything else: a late commit response settling after this
+    // point must not be able to answer for the person who just arrived.
+    identityRef.current = identityKey
+    committedRef.current = undefined
     token.current += 1
     running.current = false
     setActionFailure(undefined)
+    setCommitFailure(undefined)
     setFailedRowNumber(undefined)
     setLastConfirmed(undefined)
     setAwaitingRefresh(false)
@@ -273,7 +398,9 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
     failedRowNumber,
     lastConfirmed,
     pendingRowNumber: mutation.isPending ? mutation.variables?.rowNumber : undefined,
-    isMutating: mutation.isPending,
+    isMutating: mutation.isPending || commitMutation.isPending,
+    isCommitting: commitMutation.isPending,
+    commitFailure,
     refresh: () => {
       void runRefresh(token.current)
     },
@@ -282,10 +409,29 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
       setFailedRowNumber(undefined)
     },
     runRowAction: (input) => {
-      if (running.current || mutation.isPending) return
+      if (running.current || mutation.isPending || commitMutation.isPending) return
 
       running.current = true
       mutation.mutate(input)
+    },
+    commit: () => {
+      // The same synchronous gate the row actions use, for the same reason: two
+      // clicks inside one render batch must not become two requests, and
+      // `isPending` is a value from the last completed render — it cannot have
+      // flipped yet inside that batch.
+      if (running.current || mutation.isPending || commitMutation.isPending) return
+
+      const current = queryClient.getQueryData<LibraryImportDraftResponse>(
+        libraryImportQueryKey(importId),
+      )
+
+      // Committing needs the version of the draft that is actually on screen.
+      // Without one there is nothing honest to send, and inventing a value
+      // would ask the server to skip the very check it exists for.
+      if (current === undefined) return
+
+      running.current = true
+      commitMutation.mutate(current.draftVersion)
     },
   }
 }

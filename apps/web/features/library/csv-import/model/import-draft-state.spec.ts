@@ -1,7 +1,13 @@
 import { LIBRARY_IMPORT_LIMITS } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { buildDraft, buildRow } from '../library-import.test-helpers'
-import { classifyImportFailure, countImportRows, selectImportRows } from './import-draft-state'
+import { IMPORT_CATALOG_RETRY_LABEL } from './import-labels'
+import {
+  classifyImportFailure,
+  countImportRows,
+  rowsAwaitingRetry,
+  selectImportRows,
+} from './import-draft-state'
 
 function apiError(status: number, code: string, details?: unknown): ApiRequestError {
   return new ApiRequestError(status, {
@@ -95,5 +101,77 @@ describe('row views over the one cached draft', () => {
     expect(countImportRows(draft, 'attention')).toBe(2)
     expect(countImportRows(draft, 'ready')).toBe(1)
     expect(countImportRows(draft, 'skipped')).toBe(1)
+  })
+})
+
+describe('rowsAwaitingRetry', () => {
+  function refusal(details: unknown) {
+    return classifyImportFailure(
+      new ApiRequestError(409, {
+        code: 'IMPORT_NOT_READY',
+        message: 'Чернетку імпорту не можна імпортувати',
+        details,
+      }),
+    )
+  }
+
+  it.each([
+    [
+      'EDITION_APPEARED',
+      'Видання з таким ISBN уже зʼявилося в каталозі, поки ви готували імпорт. ' +
+        'Оновіть ці рядки (кнопка «Оновити з каталогу»), щоб додати примірник до наявного видання.',
+    ],
+    [
+      'WORK_MERGED',
+      'Вибраний твір обʼєднали з іншим, поки ви готували імпорт. ' +
+        'Оновіть ці рядки (кнопка «Оновити з каталогу») і виберіть твір заново.',
+    ],
+  ])('називає рівно ту кнопку, яка є на рядку: %s', (reason, message) => {
+    // Pinned as exact text, not a fragment: the previous wording sent people to
+    // a "Спробувати ще раз" button that does not exist on such a row, and only
+    // a full-string check would have caught it.
+    expect(refusal({ reason, rowNumbers: [1] })).toMatchObject({ message })
+    expect(message).toContain(`«${IMPORT_CATALOG_RETRY_LABEL}»`)
+  })
+
+  it('зберігає структуровану причину, а не лише текст', () => {
+    const failure = refusal({ reason: 'EDITION_APPEARED', rowNumbers: [2, 5] })
+
+    expect(failure).toMatchObject({ kind: 'not-ready', reason: 'EDITION_APPEARED' })
+  })
+
+  it.each(['EDITION_APPEARED', 'WORK_MERGED'])(
+    'називає рядки, яким допоможе повторне резолвлення: %s',
+    (reason) => {
+      expect([...rowsAwaitingRetry(refusal({ reason, rowNumbers: [2, 5] }))]).toEqual([2, 5])
+    },
+  )
+
+  it.each([
+    ['DRAFT_CHANGED', {}],
+    ['NOTHING_TO_IMPORT', {}],
+    ['ROWS_UNRESOLVED', { rowNumbers: [1] }],
+    ['CONFLICTING_EDITION_ROWS', { rowNumbers: [1, 2] }],
+    ['WORK_LANG_MISMATCH', { rowNumbers: [1] }],
+  ])('не пропонує повтор там, де він нічого не виправить: %s', (reason, rest) => {
+    expect(rowsAwaitingRetry(refusal({ reason, ...rest })).size).toBe(0)
+  })
+
+  it('тіло, що не відповідає контракту, не вигадує рядків', () => {
+    const failure = refusal({ reason: 'НЕВІДОМО' })
+
+    expect(failure).toMatchObject({ kind: 'not-ready', reason: undefined })
+    expect(rowsAwaitingRetry(failure).size).toBe(0)
+  })
+
+  it('інші збої не пропонують повтор каталогу', () => {
+    expect(rowsAwaitingRetry(undefined).size).toBe(0)
+    expect(
+      rowsAwaitingRetry(
+        classifyImportFailure(
+          new ApiRequestError(409, { code: 'IMPORT_ROW_CONFLICT', message: 'Рядок змінився' }),
+        ),
+      ).size,
+    ).toBe(0)
   })
 })

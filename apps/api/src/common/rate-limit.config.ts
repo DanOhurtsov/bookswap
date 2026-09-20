@@ -56,4 +56,15 @@ export const CATALOG_LOOKUP_RATE_WINDOW_MS = fromEnv('CATALOG_LOOKUP_RATE_WINDOW
  */
 export const LIBRARY_IMPORT_PREVIEW_RATE_LIMIT = fromEnv('LIBRARY_IMPORT_PREVIEW_RATE_LIMIT', 5)
 export const LIBRARY_IMPORT_PATCH_RATE_LIMIT = fromEnv('LIBRARY_IMPORT_PATCH_RATE_LIMIT', 120)
+
+/**
+ * §4, Stage 8g: commit — 10 per minute per authenticated client.
+ *
+ * Lower than the row PATCH although it reaches no provider at all: this is the
+ * only import endpoint that writes to the catalog, and it writes up to 500
+ * copies at once. The limit is not what makes a repeat safe — idempotency is
+ * (R6) — it just keeps one client from queueing commits faster than they can
+ * finish.
+ */
+export const LIBRARY_IMPORT_COMMIT_RATE_LIMIT = fromEnv('LIBRARY_IMPORT_COMMIT_RATE_LIMIT', 10)
 export const LIBRARY_IMPORT_RATE_WINDOW_MS = fromEnv('LIBRARY_IMPORT_RATE_WINDOW_MS', 60_000)

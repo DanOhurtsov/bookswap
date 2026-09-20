@@ -10,6 +10,8 @@ import type {
 import type { ImportFailure } from '../model/import-draft-state'
 import type { ConfirmedRowAction } from '../model/use-library-import-draft'
 import {
+  IMPORT_CATALOG_RETRY_LABEL,
+  IMPORT_LOOKUP_RETRY_LABEL,
   IMPORT_ROW_STATUS_BADGES,
   IMPORT_ROW_STATUS_LABELS,
   describeRejectedCell,
@@ -28,6 +30,12 @@ type ImportRowCardProps = {
   /** This row's most recently confirmed action — already filtered to this row. */
   confirmed: ConfirmedRowAction | undefined
   canReapply: boolean
+  /**
+   * 8g: the last commit named this row as one the catalog moved under
+   * (`EDITION_APPEARED`/`WORK_MERGED`). Such a row is still `READY_*` and has no
+   * error of its own, so without this it would offer no way forward at all.
+   */
+  awaitsRetry: boolean
   onAction: (request: LibraryImportRowPatchRequest) => void
 }
 
@@ -47,6 +55,7 @@ export function ImportRowCard({
   failure,
   confirmed,
   canReapply,
+  awaitsRetry,
   onAction,
 }: ImportRowCardProps) {
   const [panel, setPanel] = useState<OpenPanel>()
@@ -54,7 +63,11 @@ export function ImportRowCard({
   const chooseRef = useRef<HTMLButtonElement>(null)
 
   const ambiguous = row.errors.find((error) => error.code === 'AMBIGUOUS_CATALOG_MATCH')
-  const retryable = row.errors.some((error) => error.code === 'LOOKUP_UNAVAILABLE')
+  const lookupFailed = row.errors.some((error) => error.code === 'LOOKUP_UNAVAILABLE')
+  // `canReapply` guards the catalog case specifically: re-resolving needs the
+  // row version from a draft that has actually been re-read, and after a
+  // refused commit that re-read is still on its way.
+  const retryable = lookupFailed || (awaitsRetry && canReapply)
   const hasConflict = failure?.kind === 'conflict'
   const isbn = row.values?.isbn13 ?? row.cells.isbn13
   const title = row.values?.title ?? row.cells.title
@@ -136,7 +149,7 @@ export function ImportRowCard({
               onAction({ action: 'RETRY', expectedRowVersion: row.rowVersion })
             }}
           >
-            Спробувати знайти ще раз
+            {lookupFailed ? IMPORT_LOOKUP_RETRY_LABEL : IMPORT_CATALOG_RETRY_LABEL}
           </button>
         )}
 

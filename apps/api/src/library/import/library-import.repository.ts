@@ -27,6 +27,10 @@ const OWNER_SOURCE_HASH_UNIQUE = 'LibraryImport_ownerId_sourceHash_key'
 
 const DRAFT_TTL_MS = LIBRARY_IMPORT_LIMITS.draftTtlHours * 60 * 60 * 1000
 
+/** 8g: room for the whole commit, and for waiting out one concurrent commit of the same import. */
+const COMMIT_TIMEOUT_MS = 30_000
+const COMMIT_MAX_WAIT_MS = 10_000
+
 type TransactionClient = Pick<PrismaService, 'libraryImport' | 'libraryImportRow' | '$queryRaw'>
 
 /**
@@ -36,6 +40,18 @@ type TransactionClient = Pick<PrismaService, 'libraryImport' | 'libraryImportRow
  */
 export type ImportReadClient = TransactionClient &
   Pick<PrismaService, 'edition' | 'work' | 'externalBookLookup'>
+
+/**
+ * Stage 8g: what a commit callback may touch — the catalog chain of §3 plus
+ * `Copy`.
+ *
+ * The one place in this file that hands out a write client, and it is named so
+ * that the difference from {@link ImportReadClient} is visible at every call
+ * site. `Loan` is absent on purpose: an import creates books at home, never a
+ * lending arrangement.
+ */
+export type ImportCommitClient = TransactionClient &
+  Pick<PrismaService, 'author' | 'work' | 'workAuthor' | 'translation' | 'edition' | 'copy'>
 
 const IMPORT_SUMMARY_SELECT = {
   id: true,
@@ -86,6 +102,12 @@ export type SaveLibraryImportDraftOutcome =
 
 export interface SaveLibraryImportDraftResult {
   outcome: SaveLibraryImportDraftOutcome
+  import: LibraryImportSummary
+}
+
+/** 8g: whether this call did the committing, or found it already done. */
+export interface CommitLibraryImportResult {
+  outcome: 'COMMITTED' | 'ALREADY_COMMITTED'
   import: LibraryImportSummary
 }
 
@@ -204,6 +226,75 @@ export class LibraryImportRepository {
 
       return readOwned(tx, { ownerId: input.ownerId, id: input.importId })
     })
+  }
+
+  /**
+   * Stage 8g (R6c): the one transaction in which an import becomes real.
+   *
+   * The import row is locked for the whole operation — the same lock a `PATCH`
+   * takes — so a commit cannot interleave with a row edit, with lazy expiry, or
+   * with a second commit. `apply` runs inside that lock with a write client and
+   * returns the ids of the copies it created; this method then marks the import
+   * `COMMITTED` and deletes its rows, payloads and private notes included.
+   *
+   * Everything is one transaction, so `apply` throwing leaves no half-import
+   * behind: not a `Work`, not an `Author`, not a single `Copy`.
+   *
+   * Order matters and is agreed (R6c): an already-`COMMITTED` import answers
+   * with its stored summary immediately after the OWNER check, before any TTL
+   * or draft-version test. A retry after a lost response arrives without rows to
+   * hash and possibly past the original TTL, and it is exactly then that
+   * answering it correctly matters most.
+   *
+   * Returns `null` when the import is not this owner's — a foreign id and a
+   * missing one are indistinguishable from outside.
+   */
+  async commit(input: {
+    ownerId: string
+    importId: string
+    now: Date
+    apply: (context: {
+      client: ImportCommitClient
+      owned: OwnedLibraryImport
+    }) => Promise<readonly string[]>
+  }): Promise<CommitLibraryImportResult | null> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await expireOwnerDrafts(tx, input.ownerId, input.now)
+        await tx.$queryRaw`
+          SELECT "id" FROM "LibraryImport"
+          WHERE "id" = ${input.importId} AND "ownerId" = ${input.ownerId}
+          FOR UPDATE
+        `
+
+        const owned = await readOwned(tx, { ownerId: input.ownerId, id: input.importId })
+
+        if (owned === null) return null
+
+        if (owned.import.status === 'COMMITTED') {
+          return { outcome: 'ALREADY_COMMITTED' as const, import: owned.import }
+        }
+
+        const copyIds = await input.apply({ client: tx, owned })
+
+        await tx.libraryImportRow.deleteMany({ where: { importId: input.importId } })
+        await tx.libraryImport.update({
+          where: { id: input.importId },
+          data: {
+            status: 'COMMITTED',
+            committedAt: input.now,
+            createdCopyCount: copyIds.length,
+          },
+        })
+
+        return { outcome: 'COMMITTED' as const, import: await readSummary(tx, input.importId) }
+      },
+      // Explicit rather than Prisma's 5 s default. The work inside is a fixed
+      // handful of statements whatever the row count, but 500 copies and a
+      // `bookswap_norm` round trip on a cold connection have no business racing
+      // a timeout that was chosen for a single `update`.
+      { timeout: COMMIT_TIMEOUT_MS, maxWait: COMMIT_MAX_WAIT_MS },
+    )
   }
 
   /** Lazily expires this owner's overdue drafts. Returns how many were expired. */

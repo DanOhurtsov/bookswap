@@ -4,6 +4,7 @@ import {
   IsInt,
   IsObject,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -36,6 +37,9 @@ const COLUMNS = new Set<string>(LIBRARY_IMPORT_CSV_HEADER)
 
 /** Mirrors `libraryImportRowVersionSchema`. */
 const ROW_VERSION_MAX = 64
+
+/** Mirrors `libraryImportDraftVersionSchema`: SHA-256, lowercase hex. */
+const DRAFT_VERSION_PATTERN = /^[0-9a-f]{64}$/
 
 export class LibraryImportPreviewDto {
   /**
@@ -106,6 +110,21 @@ export class LibraryImportRowPatchDto {
   @ValidateIf((dto: LibraryImportRowPatchDto) => dto.action === 'CHOOSE')
   @IsWorkChoice()
   workId?: string | null
+}
+
+/**
+ * Stage 8g (R6c): which state of the WHOLE draft this commit was decided on.
+ *
+ * Required, not optional: a commit ruled on a draft someone else's tab has
+ * since edited is a commit of something nobody reviewed. The shape is pinned to
+ * the shared schema's — 64 lowercase hex characters — so a client cannot pass
+ * some other opaque string and have one validator accept what the other
+ * refuses.
+ */
+export class LibraryImportCommitDto {
+  @IsString()
+  @Matches(DRAFT_VERSION_PATTERN, { message: 'Очікується версія чернетки імпорту' })
+  expectedDraftVersion!: string
 }
 
 function IsBase64Content(): PropertyDecorator {

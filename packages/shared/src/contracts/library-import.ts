@@ -967,6 +967,78 @@ export const libraryImportCountsSchema = z.strictObject({
 
 export type LibraryImportCounts = z.infer<typeof libraryImportCountsSchema>
 
+// --- Commit (8g) ---------------------------------------------------------------
+
+/**
+ * 8g, R6c: why a draft cannot be committed as it stands.
+ *
+ * One `IMPORT_NOT_READY` code with typed reasons rather than seven codes: to a
+ * client they all mean the same thing — this draft is not importable right now,
+ * these are the rows — and they are all answered the same way. Splitting them
+ * would buy seven branches of identical handling.
+ *
+ * The first three are decided from the draft alone, so `readiness.blockers`
+ * carries them and the owner sees the problem before pressing anything. The
+ * rest can only be known at commit time, under the import lock, against the
+ * catalog as it is at that instant.
+ */
+export const LIBRARY_IMPORT_NOT_READY_REASON = [
+  /** Rows that are still `NEEDS_REVIEW` or `INVALID`. */
+  'ROWS_UNRESOLVED',
+  /** Every row is skipped, so a commit would create nothing at all. */
+  'NOTHING_TO_IMPORT',
+  /**
+   * Rows sharing one new ISBN disagree about what to create — a different
+   * resolved catalog, or a different chosen `Work` (a new one against an
+   * existing one counts, even when the metadata match).
+   */
+  'CONFLICTING_EDITION_ROWS',
+  /** The draft changed after the client read the `draftVersion` it sent. */
+  'DRAFT_CHANGED',
+  /** A chosen `Work` was merged away between the choice and the commit. */
+  'WORK_MERGED',
+  /** A chosen `Work` is written in another original language than the row says. */
+  'WORK_LANG_MISMATCH',
+  /** An `Edition` with this ISBN appeared between the preview and the commit. */
+  'EDITION_APPEARED',
+] as const
+
+export const libraryImportNotReadyReasonSchema = z.enum(LIBRARY_IMPORT_NOT_READY_REASON)
+
+export type LibraryImportNotReadyReason = z.infer<typeof libraryImportNotReadyReasonSchema>
+
+/** Which rows a reason is about. Row NUMBERS only — never a cell of their content. */
+const blockedRowNumbersSchema = z
+  .array(libraryImportRowNumberSchema)
+  .min(1)
+  .max(LIBRARY_IMPORT_LIMITS.maxDataRows)
+
+export const libraryImportNotReadyDetailsSchema = z.discriminatedUnion('reason', [
+  z.strictObject({ reason: z.literal('ROWS_UNRESOLVED'), rowNumbers: blockedRowNumbersSchema }),
+  z.strictObject({ reason: z.literal('NOTHING_TO_IMPORT') }),
+  z.strictObject({
+    reason: z.literal('CONFLICTING_EDITION_ROWS'),
+    rowNumbers: blockedRowNumbersSchema,
+  }),
+  z.strictObject({ reason: z.literal('DRAFT_CHANGED') }),
+  z.strictObject({ reason: z.literal('WORK_MERGED'), rowNumbers: blockedRowNumbersSchema }),
+  z.strictObject({ reason: z.literal('WORK_LANG_MISMATCH'), rowNumbers: blockedRowNumbersSchema }),
+  z.strictObject({ reason: z.literal('EDITION_APPEARED'), rowNumbers: blockedRowNumbersSchema }),
+])
+
+export type LibraryImportNotReadyDetails = z.infer<typeof libraryImportNotReadyDetailsSchema>
+
+/**
+ * 8g, R6c: which state of the WHOLE draft a commit was decided on.
+ *
+ * Derived from the ordered `rowNumber:rowVersion` pairs, so it changes exactly
+ * when some row's minted version changes and never merely because derived state
+ * was recomputed. It is not a hash of the draft's content: `rowVersion` tokens
+ * are minted rather than computed, which is what makes an A → B → A edit
+ * produce a different value here — the same property R7a requires per row.
+ */
+export const libraryImportDraftVersionSchema = z.string().regex(/^[0-9a-f]{64}$/)
+
 /**
  * R5: commit is allowed only once every row is `READY_*` or `SKIPPED`, and only
  * if something is actually left to create. `copyCount` here is the live sum over
@@ -974,6 +1046,16 @@ export type LibraryImportCounts = z.infer<typeof libraryImportCountsSchema>
  */
 export const libraryImportReadinessSchema = z.strictObject({
   canCommit: z.boolean(),
+  /**
+   * 8g, R6c: everything standing between this draft and a commit, computed by
+   * the very same function the commit re-runs under its lock — so the button
+   * and the endpoint cannot disagree about whether the draft is ready.
+   *
+   * Empty does not by itself mean `canCommit`: exceeding the 500-copy cap keeps
+   * its own `IMPORT_TOO_LARGE` answer (R6a) and is visible as `copyCount`
+   * rather than as a blocker.
+   */
+  blockers: z.array(libraryImportNotReadyDetailsSchema),
   /**
    * Deliberately NOT capped at `maxCopies`. Editing can carry a draft past the
    * cap — a row whose quantity was invalid counted for nothing at parse time
@@ -1002,6 +1084,13 @@ export const libraryImportDraftResponseSchema = z.strictObject({
   import: libraryImportSummaryResponseSchema,
   counts: libraryImportCountsSchema,
   readiness: libraryImportReadinessSchema,
+  /**
+   * 8g: send it back as `expectedDraftVersion` to commit exactly the draft you
+   * were shown. Present on every answer, an `EXPIRED` or `COMMITTED` one
+   * included — where it is the version of an empty set of rows, which is all
+   * such an import has left.
+   */
+  draftVersion: libraryImportDraftVersionSchema,
   rows: z.array(libraryImportRowResponseSchema).max(LIBRARY_IMPORT_LIMITS.maxDataRows),
 })
 
@@ -1065,3 +1154,23 @@ export const libraryImportRowPatchRequestSchema = z.discriminatedUnion('action',
 ])
 
 export type LibraryImportRowPatchRequest = z.infer<typeof libraryImportRowPatchRequestSchema>
+
+/**
+ * 8g, R6c: the one thing a commit carries.
+ *
+ * Required, for the same reason `expectedRowVersion` is required on every row
+ * action: the import lock only makes concurrent operations take turns, it does
+ * not make the second one still right. A commit decided on the draft as it
+ * looked before someone's other tab skipped a row is a commit of something
+ * nobody reviewed.
+ *
+ * A repeated commit of an import that already succeeded never reaches this
+ * check — an answered `COMMITTED` is returned first (R6c), which is what makes
+ * a retry after a lost response work even once the rows, and with them every
+ * `rowVersion` the client could echo, are gone.
+ */
+export const libraryImportCommitRequestSchema = z.strictObject({
+  expectedDraftVersion: libraryImportDraftVersionSchema,
+})
+
+export type LibraryImportCommitRequest = z.infer<typeof libraryImportCommitRequestSchema>

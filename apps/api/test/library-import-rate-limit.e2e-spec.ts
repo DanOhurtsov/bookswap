@@ -114,4 +114,31 @@ describe('Rate limiting на CSV-імпорт (e2e)', () => {
       .send({ action: 'SKIP', expectedRowVersion: rowVersion })
       .expect(200)
   })
+
+  /**
+   * Stage 8g: the same argument again, for the call that matters most.
+   *
+   * A commit has its own allowance in this bucket (10/min), and it reaches no
+   * provider at all. Someone who has spent their preview budget preparing a
+   * draft must still be able to import it — being throttled out of the last
+   * step would strand the work they just did.
+   */
+  it('вичерпаний ліміт preview не блокує коміт наявної чернетки', async () => {
+    await send(cookie).expect(429)
+
+    const current = await request(app.getHttpServer())
+      .get(importUrl(`/${importId}`))
+      .set('Cookie', cookie)
+      .expect(200)
+    const { draftVersion } = current.body as { draftVersion: string }
+    const response = await request(app.getHttpServer())
+      .post(importUrl(`/${importId}/commit`))
+      .set('Cookie', cookie)
+      .send({ expectedDraftVersion: draftVersion })
+
+    // The draft's only row was skipped above, so the honest answer is "nothing
+    // to import" — the point is that it is that, and not a 429.
+    expect(response.status).toBe(409)
+    expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.IMPORT_NOT_READY)
+  })
 })

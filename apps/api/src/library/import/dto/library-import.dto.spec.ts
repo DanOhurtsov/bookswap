@@ -3,10 +3,12 @@ import { plainToInstance } from 'class-transformer'
 import { validateSync } from 'class-validator'
 import {
   LIBRARY_IMPORT_CONTENT_BASE64_MAX,
+  libraryImportCommitRequestSchema,
   libraryImportPreviewRequestSchema,
   libraryImportRowPatchRequestSchema,
 } from '@bookswap/shared'
 import {
+  LibraryImportCommitDto,
   LibraryImportPreviewDto,
   LibraryImportRowParamsDto,
   LibraryImportRowPatchDto,
@@ -126,5 +128,33 @@ describe('LibraryImportRowParamsDto', () => {
     expect(dtoAccepts(LibraryImportRowParamsDto, { id: 'import-1', rowNumber: '1.5' })).toBe(false)
     expect(dtoAccepts(LibraryImportRowParamsDto, { id: 'import-1', rowNumber: 'нуль' })).toBe(false)
     expect(dtoAccepts(LibraryImportRowParamsDto, { id: '', rowNumber: '1' })).toBe(false)
+  })
+})
+
+describe('LibraryImportCommitDto ↔ libraryImportCommitRequestSchema', () => {
+  const version = 'a'.repeat(64)
+
+  it('обидва приймають лише повну версію чернетки', () => {
+    expect(
+      libraryImportCommitRequestSchema.safeParse({ expectedDraftVersion: version }).success,
+    ).toBe(true)
+    expect(dtoAccepts(LibraryImportCommitDto, { expectedDraftVersion: version })).toBe(true)
+  })
+
+  it.each([
+    ['відсутня версія', {}],
+    ['null замість версії', { expectedDraftVersion: null }],
+    ['порожній рядок', { expectedDraftVersion: '' }],
+    ['закоротка версія', { expectedDraftVersion: 'a'.repeat(63) }],
+    ['задовга версія', { expectedDraftVersion: 'a'.repeat(65) }],
+    ['не hex', { expectedDraftVersion: `${'a'.repeat(63)}Z` }],
+    ['великі літери', { expectedDraftVersion: 'A'.repeat(64) }],
+    ['зайве поле', { expectedDraftVersion: version, force: true }],
+  ])('обидва відхиляють: %s', (_name, body) => {
+    // A commit is the one import call that writes, so neither validator may be
+    // the lenient one: a body one of them accepts is a body that reaches the
+    // service having been checked only once.
+    expect(libraryImportCommitRequestSchema.safeParse(body).success).toBe(false)
+    expect(dtoAccepts(LibraryImportCommitDto, body)).toBe(false)
   })
 })

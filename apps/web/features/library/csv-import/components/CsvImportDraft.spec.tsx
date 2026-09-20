@@ -3,9 +3,14 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
-import type { LibraryImportCsvCells, LibraryImportRowError } from '@bookswap/shared'
+import type {
+  LibraryImportCsvCells,
+  LibraryImportDraftResponse,
+  LibraryImportRowError,
+} from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { createTestQueryClient, withQueryClient } from '@/app/lib/test-query-client'
+import { IMPORT_CATALOG_RETRY_LABEL } from '../model/import-labels'
 import { SECOND_ISBN, VALID_ISBN, buildDraft, buildRow } from '../library-import.test-helpers'
 import { CsvImportDraft } from './CsvImportDraft'
 
@@ -85,6 +90,16 @@ function renderDraft(importId = 'import-1') {
   }
 }
 
+/** A response the test hands out now and settles later. */
+function deferredResponse<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+
+  return { promise, resolve }
+}
+
 function rowCard(rowNumber: number): HTMLElement {
   return screen.getByText(`№${String(rowNumber)}`).closest('li') as HTMLElement
 }
@@ -118,26 +133,184 @@ it('shows the server counts and readiness instead of counting readiness itself',
   expect(screen.getByText(/Ще треба розібратися з рядками: 2/)).toBeInTheDocument()
 })
 
-it('keeps the import button inert while the commit endpoint does not exist', async () => {
+it('commits the draft the user is looking at, and only once per click', async () => {
   const ready = buildDraft({
     rows: [buildRow({ rowNumber: 1, status: 'READY_EXISTING_EDITION', rowVersion: 'v1' })],
+    draftVersion: 'b'.repeat(64),
   })
+  const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 3 })
 
-  mockApiRequest.mockResolvedValue(ready)
+  mockApiRequest.mockImplementation((path: string) =>
+    Promise.resolve(String(path).includes('/commit') ? committed : ready),
+  )
   renderDraft()
 
   const commit = await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' })
 
-  expect(ready.readiness.canCommit).toBe(true)
-  expect(screen.getByText('Чернетка готова до імпорту.')).toBeInTheDocument()
+  expect(commit).toBeEnabled()
+
+  // Two clicks in one go: the synchronous gate must turn them into one request.
+  await userEvent.click(commit)
+  await userEvent.click(commit)
+
+  const calls = mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/commit'))
+
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.[0]).toBe('/me/library/imports/import-1/commit')
+  // The version of the draft that was on screen — not a guess, not omitted.
+  expect(calls[0]?.[1]).toMatchObject({
+    method: 'POST',
+    body: { expectedDraftVersion: 'b'.repeat(64) },
+  })
+
+  expect(await screen.findByText(/Цей імпорт уже завершено/)).toBeInTheDocument()
+  expect(screen.getByText(/додано примірників — 3/)).toBeInTheDocument()
+})
+
+it('keeps the confirmed commit on screen when a later read actually fails', async () => {
+  const ready = buildDraft({
+    rows: [buildRow({ rowNumber: 1, status: 'READY_EXISTING_EDITION', rowVersion: 'v1' })],
+  })
+  const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 2 })
+
+  mockApiRequest.mockImplementation((path: string) =>
+    Promise.resolve(String(path).includes('/commit') ? committed : ready),
+  )
+
+  const { refreshInBackground, cachedDraft } = renderDraft()
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' }))
+  await screen.findByText(/Цей імпорт уже завершено/)
+
+  // Every later read of this import fails — and the read is actually made.
+  // Swapping the mock without issuing a request would have proven nothing.
+  mockApiRequest.mockReset()
+  mockApiRequest.mockRejectedValue(
+    new ApiRequestError(500, { code: 'INTERNAL_ERROR', message: 'Мережа недоступна' }),
+  )
+
+  await act(async () => {
+    await refreshInBackground()
+  })
+
+  expect(mockApiRequest).toHaveBeenCalledWith('/me/library/imports/import-1', expect.anything())
+  expect(screen.getByText(/додано примірників — 2/)).toBeInTheDocument()
+  expect(cachedDraft()).toMatchObject({ import: { status: 'COMMITTED', createdCopyCount: 2 } })
+})
+
+it('drops a GET that was already in flight when the commit was confirmed', async () => {
+  const ready = buildDraft({
+    rows: [
+      buildRow({
+        rowNumber: 1,
+        status: 'READY_EXISTING_EDITION',
+        rowVersion: 'v1',
+        cells: { note: 'приватна нотатка' },
+      }),
+    ],
+  })
+  const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 2 })
+  const staleGet = deferredResponse<LibraryImportDraftResponse>()
+  const pendingCommit = deferredResponse<LibraryImportDraftResponse>()
+
+  // First GET answers immediately so the draft renders; everything after is
+  // driven by the test.
+  mockApiRequest.mockResolvedValueOnce(ready)
+
+  const { refreshInBackground, cachedDraft } = renderDraft()
+
+  await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' })
+
+  mockApiRequest.mockImplementation((path: string) =>
+    String(path).includes('/commit') ? pendingCommit.promise : staleGet.promise,
+  )
+
+  // The exact ordering from the report: a commit is in flight, a GET starts
+  // while it is, the commit is confirmed, and only then does that GET answer —
+  // with the draft as it looked BEFORE the commit landed on the server.
+  await userEvent.click(screen.getByRole('button', { name: 'Імпортувати до бібліотеки' }))
+
+  void refreshInBackground()
+  await act(async () => {
+    await Promise.resolve()
+  })
+
+  await act(async () => {
+    pendingCommit.resolve(committed)
+    await pendingCommit.promise
+  })
+
+  await screen.findByText(/Цей імпорт уже завершено/)
+
+  await act(async () => {
+    staleGet.resolve(ready)
+    await staleGet.promise
+  })
+
+  // Neither in the DOM…
+  expect(screen.getByText(/Цей імпорт уже завершено/)).toBeInTheDocument()
+  expect(screen.queryByText('№1')).not.toBeInTheDocument()
+  expect(screen.queryByText(/приватна нотатка/)).not.toBeInTheDocument()
+
+  // …nor in the canonical cache, which a render guard alone would have left
+  // holding the stale rows and their private note.
+  expect(cachedDraft()).toMatchObject({ import: { status: 'COMMITTED', createdCopyCount: 2 } })
+  expect(cachedDraft()).toMatchObject({ rows: [] })
+})
+
+it.each(['EDITION_APPEARED', 'WORK_MERGED'])(
+  'explains a %s refusal and offers exactly the button it names',
+  async (reason) => {
+    const ready = buildDraft({
+      rows: [buildRow({ rowNumber: 1, status: 'READY_CREATE_CHAIN', rowVersion: 'v1' })],
+    })
+
+    mockApiRequest.mockImplementation((path: string) =>
+      String(path).includes('/commit')
+        ? Promise.reject(
+            new ApiRequestError(409, {
+              code: 'IMPORT_NOT_READY',
+              message: 'Чернетку імпорту не можна імпортувати',
+              details: { reason, rowNumbers: [1] },
+            }),
+          )
+        : Promise.resolve(ready),
+    )
+    renderDraft()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' }))
+
+    const alert = await screen.findByRole('alert')
+
+    // The message names a button, so that button has to be on the row it names.
+    expect(alert).toHaveTextContent(`кнопка «${IMPORT_CATALOG_RETRY_LABEL}»`)
+    expect(
+      within(rowCard(1)).getByRole('button', { name: IMPORT_CATALOG_RETRY_LABEL }),
+    ).toBeInTheDocument()
+    // Not a dead end: the draft is still there and still committable.
+    expect(screen.getByRole('button', { name: 'Імпортувати до бібліотеки' })).toBeInTheDocument()
+  },
+)
+
+it('says which rows disagree about one ISBN instead of enabling the button', async () => {
+  const blocked = buildDraft({
+    rows: [
+      buildRow({ rowNumber: 1, status: 'READY_CREATE_CHAIN', rowVersion: 'v1' }),
+      buildRow({ rowNumber: 2, status: 'READY_CREATE_CHAIN', rowVersion: 'v2' }),
+    ],
+    canCommit: false,
+    blockers: [{ reason: 'CONFLICTING_EDITION_ROWS', rowNumbers: [1, 2] }],
+  })
+
+  mockApiRequest.mockResolvedValue(blocked)
+  renderDraft()
+
+  const commit = await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' })
+
   expect(commit).toBeDisabled()
-  expect(screen.getByText(/зʼявиться на наступному підетапі/)).toBeInTheDocument()
-  // No past-tense success claim over an import that has not happened, and no
-  // invented endpoint. "Буде додано примірників" is future tense on purpose.
-  expect(screen.queryByText(/книг[иж]ки? додано/i)).not.toBeInTheDocument()
-  expect(screen.queryByText(/імпорт завершено/i)).not.toBeInTheDocument()
+  expect(screen.getByText(/той самий ISBN по-різному \(рядки 1, 2\)/)).toBeInTheDocument()
   expect(
-    mockApiRequest.mock.calls.filter(([path]) => String(path).includes('commit')),
+    mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/commit')),
   ).toHaveLength(0)
 })
 

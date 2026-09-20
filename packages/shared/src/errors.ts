@@ -158,6 +158,23 @@ export const API_ERROR_CODES = {
    * carries no draft content; the client re-reads the draft and decides again.
    */
   IMPORT_ROW_CONFLICT: 'IMPORT_ROW_CONFLICT',
+  /**
+   * Stage 8g, R6c: the draft cannot be committed as it stands (HTTP 409).
+   *
+   * One code for every such answer, with `details.reason`
+   * (`libraryImportNotReadyDetailsSchema`) saying which: unresolved rows,
+   * nothing left to import, an ISBN group whose rows disagree about what to
+   * create, a draft that changed under the request, a chosen `Work` that was
+   * merged away or speaks another original language, or an `Edition` that
+   * appeared between the preview and the commit.
+   *
+   * Deliberately not seven top-level codes. For the client every one of them is
+   * the same sentence — "this draft cannot be imported right now, and here are
+   * the rows" — followed by the same act: re-read the draft and fix the named
+   * rows. `details` carries `rowNumbers` only, never row content: a private
+   * `note` has no business travelling back inside an error.
+   */
+  IMPORT_NOT_READY: 'IMPORT_NOT_READY',
 
   // --- Позичання (§5, §8) ----------------------------------------------------
   /** Запит на позичання власного примірника (HTTP 400). Інваріант §5.3.4. */
