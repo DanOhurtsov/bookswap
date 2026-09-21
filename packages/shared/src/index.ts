@@ -213,6 +213,16 @@ export {
   type WorkRevisionSnapshot,
 } from './contracts/catalog-correction'
 export {
+  ACTIVATION_NEXT_ACTION,
+  ACTIVATION_TARGET,
+  activationNextActionFor,
+  activationNextActionSchema,
+  activationResponseSchema,
+  hasReachedActivationTarget,
+  type ActivationNextAction,
+  type ActivationResponse,
+} from './contracts/activation'
+export {
   COPY_ENTRY_METHOD,
   LIBRARY_LIMITS,
   addCopyRequestSchema,
