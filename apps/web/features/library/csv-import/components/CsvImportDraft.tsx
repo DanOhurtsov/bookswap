@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useMemo } from 'react'
 import type { LibraryImportDraftResponse } from '@bookswap/shared'
+import { ActivationChecklist } from '@/features/library/activation/index.client'
 import {
   IMPORT_ROW_FILTERS,
   IMPORT_ROW_FILTER_LABELS,
@@ -155,6 +156,11 @@ function CommittedNotice({ draft }: { draft: LibraryImportDraftResponse }) {
           ? '.'
           : `: додано примірників — ${String(draft.import.createdCopyCount)}.`}
       </p>
+
+      {/* Stage 8h-2 (R11): the commit invalidated `['activation']`, so this is
+          the count after the import, not the one from before it. */}
+      <ActivationChecklist />
+
       <p className="form__aside">
         <Link href="/library">Моя бібліотека</Link>
       </p>

@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Edition, Translation, Work, WorkAuthor, WorkDetailResponse } from '@bookswap/shared'
+import { createTestQueryClient, withQueryClient } from '@/app/lib/test-query-client'
 import { AddBookWizard } from './AddBookWizard'
 
 /**
@@ -134,8 +135,23 @@ function candidate(overrides: Partial<WorkDetailResponse> = {}): WorkDetailRespo
  * (створення `Work`) перехопив би виклик `/works/:id/editions` (створення
  * `Edition`), бо другий шлях теж починається з першого.
  */
+/**
+ * Stage 8h-2: the success step shows the activation checklist, which reads
+ * `/me/activation` through this same transport. Routed here once rather than in
+ * every test — no test in this file is about the checklist, they are about the
+ * wizard's branches, and an unrouted path throws by design below.
+ */
+const ACTIVATION_PROGRESS = {
+  ownedCopyCount: 2,
+  target: 10,
+  hasReachedTarget: false,
+  nextAction: 'ADD_BOOKS',
+} as const
+
 function routeApiRequest(handlers: Record<string, (options: { body?: unknown }) => unknown>): void {
-  const byLength = Object.entries(handlers).sort(([a], [b]) => b.length - a.length)
+  const byLength = Object.entries(handlers)
+    .concat([['/me/activation', () => ACTIVATION_PROGRESS]])
+    .sort(([a], [b]) => b.length - a.length)
 
   mockApiRequest.mockImplementation(async (path: string, options: { body?: unknown } = {}) => {
     const match = byLength.find(([prefix]) => path.startsWith(prefix))
@@ -156,7 +172,7 @@ beforeEach(() => {
 async function search(query: string): Promise<void> {
   const user = userEvent.setup()
 
-  render(<AddBookWizard />)
+  render(withQueryClient(<AddBookWizard />))
 
   const input = await screen.findByLabelText('Назва або ISBN')
   await user.type(input, query)
@@ -168,7 +184,7 @@ async function searchViaScan(): Promise<void> {
   searchParams = new URLSearchParams('mode=scan')
   const user = userEvent.setup()
 
-  render(<AddBookWizard />)
+  render(withQueryClient(<AddBookWizard />))
 
   const scanButton = await screen.findByRole('button', { name: 'Simulate scan' })
   await user.click(scanButton)
@@ -339,16 +355,19 @@ describe('швидке послідовне додавання', () => {
 
   it('remounts clean search state when URL history changes', async () => {
     searchParams = new URLSearchParams('q=Кобзар')
-    const { rerender } = render(<AddBookWizard />)
+    // One client across all three renders: a fresh provider per rerender would
+    // remount the subtree, and this test is about the URL driving the reset.
+    const client = createTestQueryClient()
+    const { rerender } = render(withQueryClient(<AddBookWizard />, client))
 
     expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Кобзар')
 
     searchParams = new URLSearchParams()
-    rerender(<AddBookWizard />)
+    rerender(withQueryClient(<AddBookWizard />, client))
     expect(screen.getByLabelText('Назва або ISBN')).toHaveValue('')
 
     searchParams = new URLSearchParams('q=Кобзар')
-    rerender(<AddBookWizard />)
+    rerender(withQueryClient(<AddBookWizard />, client))
     expect(screen.getByLabelText('Назва або ISBN')).toHaveValue('Кобзар')
   })
 })
@@ -925,7 +944,7 @@ describe('camera scan — entryMethod BARCODE', () => {
     })
 
     const user = userEvent.setup()
-    render(<AddBookWizard />)
+    render(withQueryClient(<AddBookWizard />))
 
     // The user never uses the scanner (e.g. it errored) — falls back to the
     // manual field, which is always visible alongside it.

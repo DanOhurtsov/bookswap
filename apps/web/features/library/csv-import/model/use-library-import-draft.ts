@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import type { LibraryImportDraftResponse, LibraryImportRowPatchRequest } from '@bookswap/shared'
 import { useSession } from '@/app/lib/use-session'
+import { invalidateActivation } from '@/features/library/activation/index.client'
 import {
   commitLibraryImport,
   fetchLibraryImportDraft,
@@ -298,6 +299,13 @@ export function useLibraryImportDraft(importId: string): LibraryImportDraft {
     },
     onSuccess: (committed, _variables, context) => {
       running.current = false
+
+      // Stage 8h-2: the commit created copies, so the activation checklist is
+      // out of date wherever it is mounted. Deliberately NOT behind the token
+      // guard below: that guard exists to stop a superseded response being
+      // WRITTEN into the cache, and this writes nothing — it only marks a key
+      // stale. The books exist either way.
+      void invalidateActivation(queryClient)
 
       if (context.token !== token.current) return
 

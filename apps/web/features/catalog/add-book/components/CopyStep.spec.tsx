@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { CopyResponse } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
+import { withQueryClient } from '@/app/lib/test-query-client'
 import { CopyStep } from './CopyStep'
 
 jest.mock('@/app/lib/api', () => {
@@ -38,7 +39,7 @@ beforeEach(() => {
 it('submits GOOD and FRIENDS defaults with empty note and date as null', async () => {
   mockApiRequest.mockResolvedValue(createdCopy)
   const onDone = jest.fn()
-  render(<CopyStep editionId="edition-1" onDone={onDone} />)
+  render(withQueryClient(<CopyStep editionId="edition-1" onDone={onDone} />))
   const user = userEvent.setup()
 
   expect(screen.getByLabelText('Стан примірника')).toHaveValue('GOOD')
@@ -66,7 +67,7 @@ it('submits GOOD and FRIENDS defaults with empty note and date as null', async (
 
 it('submits an exact calendar date and trimmed private note', async () => {
   mockApiRequest.mockResolvedValue(createdCopy)
-  render(<CopyStep editionId="edition-1" onDone={jest.fn()} />)
+  render(withQueryClient(<CopyStep editionId="edition-1" onDone={jest.fn()} />))
   const user = userEvent.setup()
 
   await user.selectOptions(screen.getByLabelText('Стан примірника'), 'DAMAGED')
@@ -97,7 +98,7 @@ it('keeps entered copy metadata and exposes an API error', async () => {
     new ApiRequestError(409, { code: 'CONFLICT', message: 'Примірник не вдалося додати' }),
   )
   const onDone = jest.fn()
-  render(<CopyStep editionId="edition-1" onDone={onDone} />)
+  render(withQueryClient(<CopyStep editionId="edition-1" onDone={onDone} />))
   const user = userEvent.setup()
 
   await user.type(screen.getByLabelText('Нотатка'), 'Особиста нотатка')
@@ -112,11 +113,13 @@ it('keeps entered copy metadata and exposes an API error', async () => {
 
 it('keeps only condition and visibility defaults for the next copy', () => {
   render(
-    <CopyStep
-      editionId="edition-2"
-      defaults={{ condition: 'WORN', visibility: 'PRIVATE' }}
-      onDone={jest.fn()}
-    />,
+    withQueryClient(
+      <CopyStep
+        editionId="edition-2"
+        defaults={{ condition: 'WORN', visibility: 'PRIVATE' }}
+        onDone={jest.fn()}
+      />,
+    ),
   )
 
   expect(screen.getByLabelText('Стан примірника')).toHaveValue('WORN')
@@ -134,7 +137,7 @@ it('allows only one in-flight request when the form is submitted twice', async (
       }),
   )
   const onDone = jest.fn()
-  render(<CopyStep editionId="edition-1" onDone={onDone} />)
+  render(withQueryClient(<CopyStep editionId="edition-1" onDone={onDone} />))
 
   const submitButton = screen.getByRole('button', { name: 'Додати до бібліотеки' })
   const form = submitButton.closest('form')

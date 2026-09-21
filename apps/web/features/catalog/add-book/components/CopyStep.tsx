@@ -9,12 +9,14 @@ import {
   type AddCopyRequest,
   type CopyEntryMethod,
 } from '@bookswap/shared'
+import { useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { useForm, type FieldErrors, type UseFormRegister } from 'react-hook-form'
 import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '@/app/lib/labels'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
+import { invalidateActivation } from '@/features/library/activation/index.client'
 import { nullableText } from '../model/form-values'
 import { DEFAULT_COPY_DEFAULTS, type CopyDefaults } from '../model/copy-defaults'
 
@@ -88,6 +90,7 @@ export function CopyStep({
 }: CopyStepProps) {
   const [failure, setFailure] = useState<unknown>()
   const isSubmissionLocked = useRef(false)
+  const queryClient = useQueryClient()
   const {
     register,
     handleSubmit,
@@ -109,6 +112,11 @@ export function CopyStep({
         body: request,
         schema: copyResponseSchema,
       })
+      // Stage 8h-2: the one place a Copy is born in this wizard — the first
+      // book and every «ще один такий примірник» both land here — so this is
+      // the one place the checklist needs to be told. After the POST resolved:
+      // a rejected request throws above and invalidates nothing.
+      await invalidateActivation(queryClient)
       onDone({
         condition: request.condition ?? DEFAULT_COPY_DEFAULTS.condition,
         visibility: request.visibility ?? DEFAULT_COPY_DEFAULTS.visibility,
