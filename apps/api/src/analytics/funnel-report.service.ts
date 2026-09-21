@@ -4,6 +4,7 @@ import { computeDedupeKey } from './dedupe-key'
 import {
   calculateFunnelReport,
   compareDedupeKeys,
+  summarizeBookAddedMethods,
   type FunnelReport,
   type FunnelReportQuery,
 } from './funnel-report'
@@ -26,6 +27,7 @@ export class FunnelReportService {
         signups: [],
         events: [],
         crossCheck: { eventOnly: 0, domainOnly: 0 },
+        bookAddedByMethod: summarizeBookAddedMethods([]),
       })
     }
 
@@ -39,7 +41,10 @@ export class FunnelReportService {
       }),
       this.prisma.productEvent.findMany({
         where: { type: 'BOOK_ADDED', occurredAt: { gte: query.from, lt: query.toExclusive } },
-        select: { dedupeKey: true },
+        // 8h-3: той самий запит, що живив cross-check, тепер несе ще й
+        // `properties` — щоб розподіл за методом рахувався рівно за той самий
+        // період і рівно за ті самі рядки, без другого читання таблиці.
+        select: { dedupeKey: true, properties: true },
       }),
       this.prisma.copy.findMany({
         where: { createdAt: { gte: query.from, lt: query.toExclusive } },
@@ -78,6 +83,7 @@ export class FunnelReportService {
         bookEvents.map((event) => event.dedupeKey),
         copies.map((copy) => computeDedupeKey('BOOK_ADDED', copy.id, copy.ownerId)),
       ),
+      bookAddedByMethod: summarizeBookAddedMethods(bookEvents.map((event) => event.properties)),
     })
   }
 }

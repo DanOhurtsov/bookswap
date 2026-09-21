@@ -1,4 +1,4 @@
-import type { ProductEventType } from './product-event.types'
+import { PRODUCT_EVENT_PROPERTIES_SCHEMA, type ProductEventType } from './product-event.types'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -33,11 +33,30 @@ export interface FunnelCrossCheck {
   domainOnly: number
 }
 
+type BookAddedMethod = ReturnType<
+  (typeof PRODUCT_EVENT_PROPERTIES_SCHEMA)['BOOK_ADDED']['parse']
+>['method']
+
+/**
+ * 8h-3: розподіл `BOOK_ADDED` за способом додавання, за той самий період
+ * `[from, toExclusive)`, що й наявний cross-check.
+ *
+ * `invalidProperties` — не помилка звіту, а окрема категорія: `properties` —
+ * нетипізований JSON, тож рядок, записаний майбутньою (чи зламаною) версією,
+ * має бути порахований, а не втрачений і не здатний повалити звіт. Лічильник
+ * навмисно не несе жодної інформації про сам рядок: ні `dedupeKey`, ні сирих
+ * `properties` (§7 — нічого приватного в output).
+ */
+export interface BookAddedMethodBreakdown extends Record<BookAddedMethod, number> {
+  invalidProperties: number
+}
+
 export interface FunnelReportInput extends FunnelReportQuery {
   earliestEventAt: Date | null
   signups: FunnelSignup[]
   events: FunnelEvent[]
   crossCheck: FunnelCrossCheck
+  bookAddedByMethod: BookAddedMethodBreakdown
 }
 
 interface InstrumentedStep {
@@ -76,6 +95,7 @@ export interface PopulatedFunnelReport {
     successfulReturnedLoansPerActiveUser: number | null
     activeUsers: number
   }
+  bookAddedByMethod: BookAddedMethodBreakdown
   crossCheck: { bookAdded: FunnelCrossCheck }
 }
 
@@ -219,6 +239,36 @@ export function compareDedupeKeys(eventKeys: string[], domainKeys: string[]): Fu
   }
 }
 
+/**
+ * 8h-3: єдине місце, де сирі `properties` взагалі читаються. Викликач передає
+ * рівно ті рядки `BOOK_ADDED`, які вже прочитані для cross-check, і далі —
+ * і в `FunnelReportInput`, і в presenter — їде тільки результат: чотири числа.
+ *
+ * Валідація — наявна strict-схема `PRODUCT_EVENT_PROPERTIES_SCHEMA.BOOK_ADDED`,
+ * тож `null`, масив, рядок, відсутній чи невідомий `method` і зайве поле всі
+ * потрапляють в `invalidProperties` однаково: `safeParse` не кидає, і нічого
+ * не логується — інакше сирий JSON витік би в логи в обхід §7.
+ */
+export function summarizeBookAddedMethods(
+  properties: readonly unknown[],
+): BookAddedMethodBreakdown {
+  const breakdown: BookAddedMethodBreakdown = {
+    MANUAL: 0,
+    BARCODE: 0,
+    CSV: 0,
+    invalidProperties: 0,
+  }
+
+  for (const value of properties) {
+    const parsed = PRODUCT_EVENT_PROPERTIES_SCHEMA.BOOK_ADDED.safeParse(value)
+
+    if (parsed.success) breakdown[parsed.data.method] += 1
+    else breakdown.invalidProperties += 1
+  }
+
+  return breakdown
+}
+
 export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
   if (input.earliestEventAt === null) {
     return { status: 'empty', messages: EMPTY_ANALYTICS_MESSAGES }
@@ -264,6 +314,7 @@ export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
         activeUsers === 0 ? null : Number((returnedLoans / activeUsers).toFixed(2)),
       activeUsers,
     },
+    bookAddedByMethod: input.bookAddedByMethod,
     crossCheck: { bookAdded: input.crossCheck },
   }
 }
