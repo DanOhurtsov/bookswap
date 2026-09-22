@@ -2,6 +2,7 @@ import type { Client } from 'pg'
 import {
   applyMigrations,
   createScratchDatabase,
+  SCRATCH_CLEANUP_TIMEOUT_MS,
   listMigrationDirs,
   type ScratchDatabase,
 } from './migration-scratch'
@@ -78,7 +79,7 @@ describe('Stage 8e-1 rollback runbook, scenarios A and B — verified against re
 
   afterAll(async () => {
     await scratch.cleanup()
-  })
+  }, SCRATCH_CLEANUP_TIMEOUT_MS)
 
   it('§B: an old-app-shaped WorkAuthor/Translation insert (no position/createdById) fails on the required migration', async () => {
     await expect(

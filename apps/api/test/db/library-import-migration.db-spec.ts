@@ -3,6 +3,7 @@ import {
   applyMigration,
   applyMigrations,
   createScratchDatabase,
+  SCRATCH_CLEANUP_TIMEOUT_MS,
   listMigrationDirs,
   type ScratchDatabase,
 } from './migration-scratch'
@@ -100,7 +101,7 @@ describe('Stage 8f-1: library_import migration upgrades a populated database', (
 
   afterAll(async () => {
     await scratch.cleanup()
-  })
+  }, SCRATCH_CLEANUP_TIMEOUT_MS)
 
   it('every pre-existing row in every table survives unchanged', async () => {
     for (const table of PRESERVED_TABLES) {
