@@ -51,6 +51,29 @@ export interface BookAddedMethodBreakdown extends Record<BookAddedMethod, number
   invalidProperties: number
 }
 
+/**
+ * 8h-5: how long it takes to go from signup to the first and the tenth book.
+ *
+ * Stage 8's DoD (`docs/plan/roadmap-v2.md`) names `time to first book` and
+ * `time to first 10 books`. This is an aggregate and nothing but an aggregate:
+ * `sampleSize` is how many people in the cohort reached that mark inside their
+ * own conversion window, `medianSeconds` the median of their times. No
+ * `subjectUserId`, no raw event (§7 of the 8a plan: nothing about an individual
+ * reaches the output).
+ *
+ * `medianSeconds === null` exactly when `sampleSize === 0`: an empty sample has
+ * no median, and `0` here would be a lie — it would read as "instantly".
+ */
+export interface ActivationTimingStat {
+  sampleSize: number
+  medianSeconds: number | null
+}
+
+export interface ActivationTiming {
+  firstBook: ActivationTimingStat
+  tenthBook: ActivationTimingStat
+}
+
 export interface FunnelReportInput extends FunnelReportQuery {
   earliestEventAt: Date | null
   signups: FunnelSignup[]
@@ -96,6 +119,7 @@ export interface PopulatedFunnelReport {
     activeUsers: number
   }
   bookAddedByMethod: BookAddedMethodBreakdown
+  activationTiming: ActivationTiming
   crossCheck: { bookAdded: FunnelCrossCheck }
 }
 
@@ -269,6 +293,76 @@ export function summarizeBookAddedMethods(
   return breakdown
 }
 
+/** The rank of the book whose arrival closes «time to first 10 books». */
+const ACTIVATION_BOOK_TARGET = 10
+
+/**
+ * One member of the cohort, as activation timing needs them.
+ *
+ * `bookAddedAt` holds `BOOK_ADDED` moments already restricted to THIS person's
+ * own conversion window (`activityFor`): events before the signup and after the
+ * window's end never arrive here at all, so this function neither knows nor
+ * decides anything about those boundaries. Order is not assumed — see
+ * `summarizeActivationTiming`.
+ */
+export interface ActivationMember {
+  signupAt: Date
+  bookAddedAt: readonly Date[]
+}
+
+/**
+ * A median defined the same way for an odd and an even number of values: odd
+ * takes the middle element of the sorted array, even the mean of the two middle
+ * ones. Computed on whole milliseconds, so the order values arrived in cannot
+ * change the result.
+ */
+function medianOf(values: readonly number[]): number | null {
+  if (values.length === 0) return null
+
+  const sorted = [...values].sort((a, b) => a - b)
+  const half = Math.floor(sorted.length / 2)
+  const upper = sorted[half]
+
+  if (upper === undefined) return null
+  if (sorted.length % 2 === 1) return upper
+
+  const lower = sorted[half - 1]
+
+  return lower === undefined ? upper : (lower + upper) / 2
+}
+
+function statOf(elapsedMs: readonly number[]): ActivationTimingStat {
+  const median = medianOf(elapsedMs)
+
+  return {
+    sampleSize: elapsedMs.length,
+    // The median is computed in milliseconds and converted to seconds only
+    // here: rounding once at the end rather than per value, otherwise an even
+    // median would depend on how its two halves happened to round.
+    medianSeconds: median === null ? null : Math.round(median / 1000),
+  }
+}
+
+export function summarizeActivationTiming(members: readonly ActivationMember[]): ActivationTiming {
+  const firstBook: number[] = []
+  const tenthBook: number[] = []
+
+  for (const member of members) {
+    // Sorted here rather than assumed: neither the events query nor
+    // `activityFor` imposes an order. «The first book» is the earliest moment,
+    // not whichever row PostgreSQL happened to return first.
+    const moments = [...member.bookAddedAt].sort((a, b) => a.getTime() - b.getTime())
+    const signupMs = member.signupAt.getTime()
+    const first = moments[0]
+    const tenth = moments[ACTIVATION_BOOK_TARGET - 1]
+
+    if (first !== undefined) firstBook.push(first.getTime() - signupMs)
+    if (tenth !== undefined) tenthBook.push(tenth.getTime() - signupMs)
+  }
+
+  return { firstBook: statOf(firstBook), tenthBook: statOf(tenthBook) }
+}
+
 export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
   if (input.earliestEventAt === null) {
     return { status: 'empty', messages: EMPTY_ANALYTICS_MESSAGES }
@@ -315,6 +409,17 @@ export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
       activeUsers,
     },
     bookAddedByMethod: input.bookAddedByMethod,
+    // Computed from the same `activity` the funnel steps are — the same cohort
+    // and the same per-member conversion windows. No second read of the table,
+    // no new entity, no new event type.
+    activationTiming: summarizeActivationTiming(
+      activity.map((member) => ({
+        signupAt: member.signup.occurredAt,
+        bookAddedAt: member.events
+          .filter((event) => event.type === 'BOOK_ADDED')
+          .map((event) => event.occurredAt),
+      })),
+    ),
     crossCheck: { bookAdded: input.crossCheck },
   }
 }

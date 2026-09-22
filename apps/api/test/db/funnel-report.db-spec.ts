@@ -172,3 +172,151 @@ describe('FunnelReportService — BOOK_ADDED method breakdown (8h-3)', () => {
     })
   })
 })
+
+/**
+ * Stage 8h-5: time to first book / time to first 10 books over real
+ * `ProductEvent` rows with real `occurredAt`, through the real
+ * `FunnelReportService`.
+ *
+ * Why this belongs in a db test: the elapse is measured from `SIGNUP_COMPLETED`
+ * to the Nth `BOOK_ADDED` of the same person, and both sides of that difference
+ * are timestamps that travelled through PostgreSQL and the driver. Nothing
+ * fixes the order rows come back in (the report's query has no `ORDER BY`), so
+ * «the first book» must stay the earliest one rather than whichever the
+ * database returned first.
+ */
+describe('FunnelReportService — activation timing (8h-5)', () => {
+  let prisma: PrismaClient
+  let service: FunnelReportService
+  let prismaService: PrismaService
+
+  const SIGNUP_A = new Date('2026-03-02T00:00:00.000Z')
+  const SIGNUP_B = new Date('2026-03-03T00:00:00.000Z')
+  const WINDOW_MS = QUERY.windowDays * 24 * 60 * 60 * 1000
+
+  beforeAll(() => {
+    prisma = createTestPrismaClient()
+    prismaService = new PrismaService(new ConfigService())
+    service = new FunnelReportService(prismaService)
+  })
+
+  beforeEach(async () => {
+    await truncateAll(prisma)
+  })
+
+  afterAll(async () => {
+    await prisma.$disconnect()
+    await prismaService.$disconnect()
+  })
+
+  async function signup(name: string, occurredAt: Date): Promise<string> {
+    const userId = await createUser(prisma, name)
+
+    await prisma.productEvent.create({
+      data: {
+        type: 'SIGNUP_COMPLETED',
+        properties: {},
+        dedupeKey: computeDedupeKey('SIGNUP_COMPLETED', userId, userId),
+        subjectUserId: userId,
+        occurredAt,
+      },
+    })
+
+    return userId
+  }
+
+  /** Books are given as millisecond offsets from the signup — and inserted OUT of order. */
+  async function addBooks(userId: string, signupAt: Date, offsetsMs: number[]): Promise<void> {
+    await prisma.productEvent.createMany({
+      data: offsetsMs.map((offset, index) => ({
+        type: 'BOOK_ADDED',
+        properties: { method: 'MANUAL' },
+        dedupeKey: computeDedupeKey('BOOK_ADDED', `${userId}-copy-${String(index)}`, userId),
+        subjectUserId: userId,
+        occurredAt: new Date(signupAt.getTime() + offset),
+      })),
+    })
+  }
+
+  it('measures the elapse to the 1st and the 10th book from real occurredAt values', async () => {
+    const userA = await signup('Ten books', SIGNUP_A)
+    const userB = await signup('Three books', SIGNUP_B)
+
+    // Deliberately shuffled insertion order: the 10th book is the first row.
+    await addBooks(
+      userA,
+      SIGNUP_A,
+      [3_600_000, 540_000, 60_000, 480_000, 120_000, 420_000, 180_000, 360_000, 240_000, 300_000],
+    )
+    await addBooks(userB, SIGNUP_B, [360_000, 120_000, 240_000])
+
+    const report = await service.generate(QUERY)
+
+    expect(report.status).toBe('ok')
+    if (report.status === 'empty') throw new Error('Expected a populated report')
+
+    // firstBook: 60 s and 120 s → even median 90 s. tenthBook: user A only.
+    expect(report.activationTiming).toEqual({
+      firstBook: { sampleSize: 2, medianSeconds: 90 },
+      tenthBook: { sampleSize: 1, medianSeconds: 3600 },
+    })
+  })
+
+  it('ignores books before the signup and outside the personal conversion window', async () => {
+    const userId = await signup('Window edges', SIGNUP_A)
+
+    await addBooks(userId, SIGNUP_A, [
+      // one minute BEFORE the signup — a negative elapse, not counted;
+      -60_000,
+      // exactly on the window edge — counted;
+      WINDOW_MS,
+      // one millisecond past the edge — not counted;
+      WINDOW_MS + 1,
+      // the only «ordinary» event inside the window;
+      900_000,
+    ])
+
+    const report = await service.generate(QUERY)
+
+    expect(report.status).toBe('ok')
+    if (report.status === 'empty') throw new Error('Expected a populated report')
+
+    // The earliest event inside the window is 900 s, not the one before the signup.
+    expect(report.activationTiming.firstBook).toEqual({ sampleSize: 1, medianSeconds: 900 })
+    expect(report.activationTiming.tenthBook).toEqual({ sampleSize: 0, medianSeconds: null })
+  })
+
+  it('a cohort with no books at all — sampleSize 0 and medianSeconds null in text and JSON', async () => {
+    await signup('No books', SIGNUP_A)
+
+    const report = await service.generate(QUERY)
+
+    expect(report.status).toBe('ok')
+    if (report.status === 'empty') throw new Error('Expected a populated report')
+
+    expect(report.activationTiming).toEqual({
+      firstBook: { sampleSize: 0, medianSeconds: null },
+      tenthBook: { sampleSize: 0, medianSeconds: null },
+    })
+
+    const text = formatFunnelReportText(report)
+    const json = formatFunnelReportJson(report)
+
+    expect(text).toContain('median: —   вибірка: 0')
+    expect(json).toContain('"medianSeconds": null')
+  })
+
+  it('never prints a user id in a report carrying activation timing', async () => {
+    const userId = await signup('Private', SIGNUP_A)
+
+    await addBooks(userId, SIGNUP_A, [60_000])
+
+    const report = await service.generate(QUERY)
+    const text = formatFunnelReportText(report)
+    const json = formatFunnelReportJson(report)
+
+    expect(text).toContain('Activation timing')
+    expect(text).not.toContain(userId)
+    expect(json).not.toContain(userId)
+  })
+})
