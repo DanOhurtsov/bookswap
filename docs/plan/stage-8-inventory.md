@@ -7,8 +7,70 @@
 ISBNdb), на які спирається 8f-2. 8f-2 (batched preview API, коміт `ae0b54d`) і
 8f-3 (preview UI, коміт `47088b2`) завершені й у main. 8f-4 (завантаження
 `.xlsx` у наявний preview, коміт `08d3612`) теж завершено. 8g (atomic import
-commit) виконується за погодженими рішеннями R6c; 8h (onboarding і закриття
-етапу) ще не розпочато.
+commit, коміт `5efc567`) виконано за погодженими рішеннями R6c.
+
+8h **у роботі** на гілці `codex/8h-onboarding-qa` і повністю поза main:
+
+- 8h-1 — `GET /me/activation`, shared contract і сервіс. Коміт `8b0432a`;
+- 8h-2 — server-first чекліст у `/library`, після add і після import.
+  Коміт `17d79d0`;
+- 8h-3 — розподіл `BOOK_ADDED` за `MANUAL`/`BARCODE`/`CSV` у funnel-звіті.
+  Коміт `4c104de`;
+- 8h-4 — документація, acceptance-аудит і manual QA runbook
+  ([`docs/runbooks/stage-8-manual-qa.md`](../runbooks/stage-8-manual-qa.md)).
+  Реалізовано в цій гілці;
+- 8h-5 — activation timing (`time to first book` / `time to first 10 books`) у
+  тому самому funnel-звіті, плюс test-only hardening scratch cleanup.
+  Реалізовано в цій гілці.
+
+**Етап 8 не закритий, і 8h не завершено.** Відкрито два пункти:
+
+1. **Manual camera matrix — NOT RUN.** Release gate §7 вимагає її проходження;
+   у середовищі виконання немає реального Android/iOS пристрою з камерою й
+   HTTPS-адреси. Це єдиний змістовний release blocker, що лишився.
+2. **8h не в main — очікує commit/PR/merge.** Увесь підетап, від 8h-1 до 8h-5,
+   лишається на гілці `codex/8h-onboarding-qa`.
+
+Root gate зелений (exit 0) — фактичний прогін після 8h-5 і hardening, деталі в
+[runbook](../runbooks/stage-8-manual-qa.md).
+
+DoD «вимірюються `time to first book` і `time to first 10 books`» більше не
+відкритий — реалізовано в 8h-5, контракт нижче.
+
+### Контракт activation timing (8h-5)
+
+Розширення наявного `funnel:report`: без нової таблиці, міграції, endpoint і
+без нових типів product events. Рахується з того самого `activity`, що й кроки
+funnel — тобто за тією самою когортою та індивідуальними вікнами конверсії.
+
+Для кожного **identified** signup (`subjectUserId !== null`) у когорті:
+
+- беруться його події `BOOK_ADDED`, уже обмежені власним вікном конверсії
+  (`elapsed >= 0 && elapsed <= windowDays`): подія до signup і подія після кінця
+  вікна не враховуються взагалі;
+- події сортуються за `occurredAt` (порядок у вході не припускається);
+- `firstBook` — елапс від `SIGNUP_COMPLETED` до 1-ї події;
+- `tenthBook` — елапс до 10-ї події, лише для тих, у кого подій ≥ 10.
+
+У populated report додається:
+
+```jsonc
+"activationTiming": {
+  "firstBook":  { "sampleSize": 2, "medianSeconds": 90 },
+  "tenthBook":  { "sampleSize": 1, "medianSeconds": 3600 }
+}
+```
+
+- `sampleSize` — скільки людей когорти досягли позначки;
+- `medianSeconds` — медіана їхнього часу; `null` **рівно тоді**, коли
+  `sampleSize === 0` (медіани порожньої вибірки не існує, а `0` читався б як
+  «миттєво»);
+- медіана детермінована: непарна кількість — середній елемент, парна — середнє
+  двох середніх; рахується на цілих мілісекундах і округлюється до секунд один
+  раз, наприкінці, тож не залежить від порядку значень;
+- text і JSON подають ту саму модель: текст друкує те саме `medianSeconds` плюс
+  його людський вигляд у дужках;
+- у вивід не потрапляють ні `subjectUserId`, ні сирі події.
 
 **Передумова:** Етап 8a (product analytics) завершено.
 
@@ -1098,7 +1160,9 @@ JSON не замінює shared contract. Жодного historical backfill aud
 - Оновити roadmap status, functional specification, user guide/API inventory та
   known limitations за фактичною реалізацією.
 - **DoD:** progress 0/1/9/10+, repeat/import refresh і empty/error states tested;
-  funnel report відрізняє MANUAL/BARCODE/CSV; усі Stage 8 acceptance criteria green.
+  funnel report відрізняє MANUAL/BARCODE/CSV; `time to first book` і
+  `time to first 10 books` вимірюються (8h-5, контракт вище); усі Stage 8
+  acceptance criteria green.
 
 ## 7. Наскрізна test matrix і release gate
 
@@ -1114,6 +1178,60 @@ JSON не замінює shared contract. Жодного historical backfill aud
 
 Stage 8 завершено лише коли всі підетапи merged, root gate green, production-like
 migration і manual camera matrix пройдені, а docs описують фактичну поведінку.
+
+### Фактичний стан release gate (21.09.2026, гілка `codex/8h-onboarding-qa`)
+
+| Пункт gate                         | Стан         | Чим підтверджено                                                                 |
+| ---------------------------------- | ------------ | -------------------------------------------------------------------------------- |
+| Shared: boundaries, DTO parity, шаблон CSV/XLSX | ✅ | `packages/shared/src/contracts/*.spec.ts`, `library-import-template.spec.ts`      |
+| API: positive/negative/permission/idempotency/concurrency/rollback | ✅ | `library-import-*.e2e-spec.ts`, `catalog-correction.e2e-spec.ts`, `activation.e2e-spec.ts` |
+| Web: межа route, форми, cleanup сканера, CSV resolution, retry/empty/error | ✅ | `BarcodeScannerPanel.spec.tsx`, `CsvImportDraft.spec.tsx`, `ActivationChecklist.spec.tsx`, `page.server.spec.tsx` |
+| E2E: manual add → repeat; CSV preview → resolve → commit → safe rerun; correction creator/owner/stranger; 10-та книга → friends CTA | ✅ | див. [runbook](../runbooks/stage-8-manual-qa.md), сценарії 4–8                    |
+| E2E: scan → lookup → Copy на реальному пристрої | ❌ **NOT RUN** | немає Android/iOS-пристрою, камери й HTTPS у середовищі — **release blocker**     |
+| Build evidence: `docs/specification.md` не змінений | ✅ | `git diff HEAD -- docs/specification.md` у `gate.sh`                              |
+| Усі підетапи merged                | ❌           | увесь 8h (8h-1 `8b0432a`, 8h-2 `17d79d0`, 8h-3 `4c104de`, 8h-4 і 8h-5) живе на `codex/8h-onboarding-qa` й очікує commit/PR/merge; у main нічого з цього немає |
+| Root gate green                    | ✅ exit 0    | повний `./gate.sh` у quiescent-середовищі: `format:check`, lint, typecheck, build і 2757 тестів (329 shared + 1188 api unit + 467 web + 632 e2e + 141 db) |
+| Production-like migration          | ✅           | усі 14 міграцій чисто застосовані до порожньої disposable-бази, `db:seed` двічі ідемпотентно; dev-база не чіпалася |
+| Manual camera matrix               | ❌ **NOT RUN** | [runbook](../runbooks/stage-8-manual-qa.md), сценарії 2 і 3                       |
+| Docs описують фактичну поведінку   | ✅ (8h-4)    | functional specification, user guide, roadmap, README, цей план                   |
+
+### Падіння db-набору 21.09.2026 і test-only hardening
+
+**Що сталося.** `test/db/catalog-correction-rollback.db-spec.ts` дав
+`Exceeded timeout of 5000 ms for a hook` у `afterAll` → `scratch.cleanup()`.
+Усі 137 тестів набору пройшли; впав саме teardown.
+
+**Що встановлено фактами:**
+
+- `DROP DATABASE` зрештою **виконався** — осиротілих `*_migration_scratch_*`
+  баз після прогону не лишилося;
+- ізольований повторний прогін того самого файла — PASS;
+- db-набір виконується в один потік: `maxWorkers: 1` у `test/jest-db.json`.
+  Версії про «паралельне навантаження вісімнадцяти специфікацій» не було
+  підстав — вони не виконуються паралельно.
+
+**Чого НЕ встановлено.** Точний чинник того одиничного уповільнення. Відомо
+лише, що teardown одного разу не вклався у 5 секунд, а вдруге вклався.
+Називати конкретну причину доведеною — не можна.
+
+**Перевірено окремо:** кожна scratch-специфікація закриває всі створені нею
+з'єднання до `cleanup()`. `catalog-correction-recovery.db-spec.ts` — єдина, що
+відкриває додаткові `Client` та `PrismaClient`; усі вони закриваються у
+`finally` (`client.end()`, `prisma.$disconnect()`). Решта трьох
+(`backfill`, `rollback`, `library-import-migration`) працюють лише зі
+з'єднанням самого `ScratchDatabase`, яке закриває сам `cleanup()`. Витоку
+з'єднань немає.
+
+**Hardening (test-only).** Введено спільну константу
+`SCRATCH_CLEANUP_TIMEOUT_MS = 15_000` (`test/db/migration-scratch.ts`) і
+застосовано другим аргументом до `afterAll` (`afterAll(callback, timeout)`) у
+всіх чотирьох специфікаціях, що
+викликають `scratch.cleanup()`. Це бюджет на реальні операції PostgreSQL —
+закриття клієнта, окреме maintenance-з'єднання й `DROP DATABASE … WITH (FORCE)`
+— а не спосіб приховати assertion failure: у teardown-хуці немає жодного
+`expect`, і на самі тести цей таймаут не діє. Глобальний `testTimeout` у
+`jest-db.json` **не** піднімався, `maxWorkers` не змінювався, жодна перевірка
+не послаблена.
 
 ## 8. Явне «Не робити»
 

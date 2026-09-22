@@ -8,7 +8,7 @@
 
 ## Поточний стан
 
-Повна модель даних зі §4 **плюс акаунт, сесії, профіль, дружба, каталог, особиста бібліотека, позичання зі стейт-машиною §5, історія §6.6, сповіщення §7 з зовнішніми каналами та якість даних каталогу §6.3** — email, Telegram-бот, диспетчер доставки з ретраями й щоденний дайджест; ISBN-lookup, дедуплікація перед створенням, вішлист і мердж дублікатів. Далі — відгуки й ранг перекладів (§6.7, §10), потім розгортання в проді (§13). Див. [Що далі](#що-далі).
+Повна модель даних зі §4 **плюс акаунт, сесії, профіль, дружба, каталог, особиста бібліотека, позичання зі стейт-машиною §5, історія §6.6, сповіщення §7 з зовнішніми каналами, якість даних каталогу §6.3 та inventory activation етапу 8** — email, Telegram-бот, диспетчер доставки з ретраями й щоденний дайджест; ISBN-lookup, дедуплікація перед створенням, вішлист і мердж дублікатів; barcode scan, швидке послідовне додавання, виправлення метаданих з аудитом, import із CSV/XLSX і onboarding до перших 10 книг. Далі — network activation і aggregated discovery (Етап 9), real-world loans (Етап 10), потім private beta та розгортання в проді. Відгуки й ранг перекладів відкладено після Public v1. Див. [Що далі](#що-далі).
 
 **Нумерація етапів.** §14 специфікації рахує п'ять етапів (1 — кістяк, 2 — позичання, 3 — сповіщення назовні, 4 — якість даних, 5 — оцінки). Робочі гілки й `docs/plan/` рахують ширше й зі зсувом на три: `feat/stage-8-ratings` — це етап оцінок, тобто §14.5; `docs/plan/stage-7.md` — якість даних каталогу, §14.4. Тобто «Stage N» у назвах гілок і файлів плану відповідає «§14, етап (N − 3)». Розгортання в проді (§13) специфікація в нумеровані етапи не зводить — тут воно йде за етапом оцінок як «Stage 9».
 
@@ -34,7 +34,8 @@
 - **канали доставки**: `IN_APP`, `EMAIL` (той самий порт `EmailSender`, що й у листів акаунта — dev-заглушка або Resend) і `TELEGRAM` з інлайн-кнопками «Погодити»/«Відмовити» під запитом;
 - **Telegram-бот** (§7.4): прив'язка через одноразовий deep link із TTL 10 хвилин, вебхук із перевіркою `secret_token`, кнопки, що йдуть крізь **той самий** `LoanService`, і перевірка, що `chat_id` належить власнику саме цього примірника;
 - **матриця «тип × канал»** (§7.6) із дефолтами, які рахує спільна функція зі `shared`, і щоденна задача для `LOAN_DUE_SOON` / `LOAN_OVERDUE` (§7.5), що **не змінює** `Loan.status`;
-- `apps/web` — сторінки реєстрації, входу, підтвердження пошти, скидання пароля, захищений профіль, `/friends`, `/catalog`, `/works/[id]`, майстер додавання книжки, `/library`, бібліотека друга з кнопкою «Попросити», `/loans`, `/history`, `/copies/[id]/history`, `/notifications` і `/notifications/settings` (матриця каналів + підключення Telegram);
+- **inventory activation** (Етап 8, `docs/plan/stage-8-inventory.md`): barcode/camera scan із ручним ISBN як постійним fallback, послідовне додавання без повернення на початок майстра, `PATCH` каталогу з `expectedRevision` і `CatalogRevision`-аудитом, import CSV/XLSX через batched preview і atomic commit, `GET /me/activation` із server-first чеклістом до 10 книг, розподіл `BOOK_ADDED` за `MANUAL`/`BARCODE`/`CSV` у `funnel:report`;
+- `apps/web` — сторінки реєстрації, входу, підтвердження пошти, скидання пароля, захищений профіль, `/friends`, `/catalog`, `/works/[id]` (з формами виправлення метаданих за правами), майстер додавання книжки зі сканером, `/library` із чеклістом активації, `/library/imports` і `/library/imports/[id]`, бібліотека друга з кнопкою «Попросити», `/loans`, `/history`, `/copies/[id]/history`, `/notifications` і `/notifications/settings` (матриця каналів + підключення Telegram);
 - `packages/shared` — zod-контракти всіх цих запитів і відповідей, спільні для бекенду й фронтенду.
 
 Схема БД заведена **вся одразу** — так вимагає §14: `NotificationDelivery`, `NotificationPreference`, `TelegramLinkToken` і `User.telegramChatId` лежали в схемі з першої міграції, і саме заради цього їх туди й клали. Етап зовнішніх каналів додав дві міграції:
@@ -389,9 +390,12 @@ POST   /api/v1/works/:id/translations        { translator, lang, sourceLang, yea
 POST   /api/v1/works/:id/editions            { translationId?, publisher?, year?, isbn13?, pageCount?, coverUrl?, format? }
 GET    /api/v1/works/:id/translations        упорядковані за score, з ознаками §10.3
 GET    /api/v1/editions/:id
+PATCH  /api/v1/works/:id                     виправлення metadata + expectedRevision (8e)
+PATCH  /api/v1/translations/:id              те саме для перекладу (8e)
+PATCH  /api/v1/editions/:id                  те саме для видання (8e)
 
 GET    /api/v1/me/library                ?status=&lang=&q=
-POST   /api/v1/me/library                { editionId, condition?, note?, visibility?, acquiredAt? }
+POST   /api/v1/me/library                { editionId, condition?, note?, visibility?, acquiredAt?, entryMethod? }
 PATCH  /api/v1/me/library/:copyId
 DELETE /api/v1/me/library/:copyId
 GET    /api/v1/me/library/out            currentHolderId ≠ ownerId
@@ -401,6 +405,12 @@ GET    /api/v1/users/:id/library
 GET    /api/v1/me/wishlist               список, кожен пункт — з проєкцією Work (7e)
 POST   /api/v1/me/wishlist               { workId } — ідемпотентно, 200 і на повтор
 DELETE /api/v1/me/wishlist/:workId
+
+GET    /api/v1/me/activation             прогрес до 10 книг (8h-1): ownedCopyCount/target/hasReachedTarget/nextAction
+POST   /api/v1/me/library/imports/preview                { format?, contentBase64 } — без доменних записів (8f-2)
+GET    /api/v1/me/library/imports/:id                    власна чернетка; чужий id — 404 (8f-2)
+PATCH  /api/v1/me/library/imports/:id/rows/:rowNumber    EDIT | CHOOSE | SKIP | RESTORE | RETRY + expectedRowVersion
+POST   /api/v1/me/library/imports/:id/commit             atomic, ідемпотентний, 200 (8g)
 ```
 
 `GET /works/:id` і `GET /works/:id/translations` зі старим (змерженим) `workId` не віддають 404 — вони резолвлять канонічний `Work` (§6.3, R4) і відповідають 301 з `Location` та `canonicalWorkId` у тілі; деталі — у розділі [Мерж дублікатів — адмінська команда](#мерж-дублікатів--адмінська-команда).
@@ -1034,7 +1044,7 @@ pnpm db:deploy                          # застосувати
 4. **Якість даних** ✅ — автозаповнення за ISBN (`GET /catalog/lookup`, кеш і рейт-ліміт), пошук дедуп-кандидатів (`/catalog/search/candidates`) з чотиригілковим флоу додавання книжки в web, вішлист (§6.5) з позначкою в чужій бібліотеці, мердж дублікатів адмінською CLI-командою й канонічне розв'язання з 301-редиректом на читанні (R4). Деталі — у розділі [Каталог і бібліотека](#каталог-і-бібліотека).
 
    **Основний функціонал зроблений, але етап лишає підтверджені борги** (перелік — `docs/plan/stage-7.md`, «Винесено з етапу 7»):
-   - **редагування метаданих каталогу** (§6.3, «створює будь-хто; редагує автор запису та адмін») не реалізоване взагалі — ендпоінти лише на створення й читання;
+   - **редагування метаданих каталогу** (§6.3, «створює будь-хто; редагує автор запису та адмін») — борг **закрито на етапі 8e**: є `PATCH /works|translations|editions/:id` із правами «створювач або власник `Copy`», `expectedRevision` і аудитом. Глобальної admin-ролі при цьому не заведено;
    - **позначка «у кого з друзів є цей примірник» під конкретним перекладом** (§10.5) відсутня: `translationSchema` не несе інформації про примірники друзів. Аналог на рівні твору (історія твору, п. 2 вище) є, але саме прив'язка до перекладу — ні;
    - `createWork` **не дедуплікує авторів за іменем** — два твори з однаковим автором дають два рядки `Author`;
    - мерж **не переносить `WorkAuthor`** на канонічний твір і **не дедуплікує однакові `Translation`** — рядки лишаються окремо від канонічного;
@@ -1044,11 +1054,42 @@ pnpm db:deploy                          # застосувати
    доменних транзакцій, а `funnel:report` рахує когорти, conversion windows і
    тимчасові North Star метрики. Деталі — у завершеному
    [execution plan 8a](docs/plan/stage-8-activation.md).
-6. **Inventory activation** 🚧 — наступний пріоритет: barcode/camera scan, CSV
-   import із preview, послідовне додавання, безпечне виправлення metadata й
-   onboarding до перших десяти книг.
+6. **Inventory activation** — увесь функціональний scope реалізований:
+   - **barcode/camera scan** у майстрі додавання: `@zxing/browser` вантажиться
+     dynamic import лише після натискання, камера стартує тільки з user gesture
+     і лише в secure context, декодується EAN-13, кадри нікуди не йдуть, треки
+     зупиняються на успіху/cancel/error/unmount. Ручне поле ISBN видиме завжди;
+   - **швидке послідовне додавання**: «ще один такий примірник» / «наступна
+     книга» / «сканувати наступну»; між книжками переносяться лише `condition` і
+     `visibility`, `note` та `acquiredAt` очищаються, нічого не лягає в
+     localStorage;
+   - **виправлення метаданих** — `PATCH /works|translations|editions/:id`
+     (створювач запису або власник `Copy`), `expectedRevision` проти тихого
+     перезапису й незмінний `CatalogRevision` із повним before/after у тій самій
+     транзакції;
+   - **import бібліотеки** з CSV v1 і локального `.xlsx`: шаблони в
+     `apps/web/public`, batched preview без доменних записів, порядкові
+     виправлення/skip, atomic commit і безпечний повтор (повторний commit і
+     повторне завантаження того самого файла не створюють других примірників);
+   - **onboarding** — `GET /me/activation` (`ownedCopyCount`/`target`/
+     `hasReachedTarget`/`nextAction`), server-first чекліст у `/library` і після
+     add/import, CTA до `/friends` з десятої книжки;
+   - **funnel breakdown** `BOOK_ADDED` за `MANUAL` / `BARCODE` / `CSV`
+     у `funnel:report`;
+   - **activation timing** там само: `time to first book` і `time to first 10
+books` як `sampleSize` + `medianSeconds`, рахуються від `SIGNUP_COMPLETED`
+     до 1-ї та 10-ї `BOOK_ADDED` у власному вікні конверсії людини, без нової
+     сутності, endpoint чи типу події.
+
+   **Етап ще не закритий, 8h не в main**: manual camera matrix на реальних
+   Android/iOS пристроях — NOT RUN (release blocker). Root gate зелений.
+   Фактичний стан —
+   [`docs/runbooks/stage-8-manual-qa.md`](docs/runbooks/stage-8-manual-qa.md),
+   план — [execution plan 8b–8h](docs/plan/stage-8-inventory.md).
+
 7. **Network activation, real-world loans і private beta** — наступні етапи після
-   inventory activation. Точний scope і release gates визначає
+   inventory activation. Invite links, aggregated friend search і «Who has this?»
+   належать Етапу 9 і в коді відсутні. Точний scope і release gates визначає
    [активний roadmap](docs/plan/roadmap-v2.md).
 
 Reviews, ratings і Bayesian ranking відкладено після Public v1. Колишній
@@ -1057,8 +1098,10 @@ Reviews, ratings і Bayesian ranking відкладено після Public v1. 
 
 Реєстрація вебхука Telegram (`setWebhook`) — операція розгортання, а не коду: локально вона потребує публічної адреси (тунель), у проді робиться один раз після деплою. Команда — в `.env.example` поруч зі змінними бота.
 
-**Застосунок не production-ready.** Ще не завершені inventory/network activation,
-real-world loan flows і production-інфраструктура з активного roadmap; auth має
+**Застосунок не production-ready.** Етап 8 функціонально реалізований, але не
+закритий (manual camera matrix NOT RUN); не
+розпочаті network activation, real-world loan flows і production-інфраструктура з
+активного roadmap; auth має
 задокументовану межу гарантії при вичерпаному shutdown-бюджеті
 ([Пошта](#пошта)), а rate limiting усюди в проєкті — in-memory й не переживає
 рестарт чи горизонтальне масштабування.
