@@ -106,6 +106,14 @@ function OwnLibrary() {
   )
 }
 
+/** What `/me/activation` answers for the checklist the committed screen shows. */
+const ACTIVATION_PROGRESS = {
+  ownedCopyCount: 3,
+  target: 10,
+  hasReachedTarget: false,
+  nextAction: 'ADD_BOOKS',
+} as const
+
 beforeEach(() => {
   mockApiRequest.mockReset()
 })
@@ -116,9 +124,13 @@ it('після коміту бібліотека, відкрита наново,
   })
   const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 1 })
 
-  mockApiRequest.mockImplementation((path: string) =>
-    Promise.resolve(String(path).includes('/commit') ? committed : ready),
-  )
+  mockApiRequest.mockImplementation((path: string) => {
+    // The committed screen carries the activation checklist (Stage 8h-2), and
+    // it reads through this same mocked transport.
+    if (String(path) === '/me/activation') return Promise.resolve(ACTIVATION_PROGRESS)
+
+    return Promise.resolve(String(path).includes('/commit') ? committed : ready)
+  })
 
   const queryClient = createTestQueryClient()
 

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ActivationChecklist } from '@/features/library/activation/index.client'
 
 type AddBookSuccessProps = {
   title: string
@@ -31,6 +32,12 @@ export function AddBookSuccess({
           Сканувати наступну
         </button>
       </div>
+      {/* Stage 8h-2 (R11): the same checklist as the library page, reading the
+          same `['activation']` query — the copy just added has already
+          invalidated it, so this shows the new count rather than a private
+          recount of its own. */}
+      <ActivationChecklist />
+
       <p className="form__aside">
         <Link href="/library">До бібліотеки</Link> ·{' '}
         <Link href={`/works/${workId}`}>Сторінка твору</Link>

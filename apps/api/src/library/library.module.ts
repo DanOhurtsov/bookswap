@@ -3,6 +3,8 @@ import { AccessModule } from '../access/access.module'
 import { AnalyticsModule } from '../analytics/analytics.module'
 import { AuthModule } from '../auth/auth.module'
 import { CatalogModule } from '../catalog/catalog.module'
+import { ActivationController } from './activation.controller'
+import { ActivationService } from './activation.service'
 import { LibraryController } from './library.controller'
 import { LibraryService } from './library.service'
 
@@ -13,7 +15,7 @@ import { LibraryService } from './library.service'
  */
 @Module({
   imports: [AuthModule, AccessModule, AnalyticsModule, CatalogModule],
-  controllers: [LibraryController],
-  providers: [LibraryService],
+  controllers: [LibraryController, ActivationController],
+  providers: [LibraryService, ActivationService],
 })
 export class LibraryModule {}

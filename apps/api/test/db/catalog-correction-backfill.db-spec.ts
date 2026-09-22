@@ -3,6 +3,7 @@ import {
   applyMigration,
   applyMigrations,
   createScratchDatabase,
+  SCRATCH_CLEANUP_TIMEOUT_MS,
   listMigrationDirs,
   type ScratchDatabase,
 } from './migration-scratch'
@@ -141,7 +142,7 @@ describe('Stage 8e-1: real migration files replayed on a scratch DB (legacy data
 
   afterAll(async () => {
     await scratch.cleanup()
-  })
+  }, SCRATCH_CLEANUP_TIMEOUT_MS)
 
   it('Translation.createdById backfills from the parent Work.createdById', async () => {
     const { rows } = await client.query<{ createdById: string }>(

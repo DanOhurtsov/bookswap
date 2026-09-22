@@ -44,6 +44,33 @@ import {
 
 const MIGRATIONS_DIR = join(__dirname, '../../prisma/migrations')
 
+/**
+ * An explicit budget for `afterAll(() => scratch.cleanup())` — and for nothing
+ * else. Jest takes it as the second argument: `afterAll(callback, timeout)`.
+ *
+ * `cleanup()` asserts nothing. It closes the client to the scratch database,
+ * opens a separate maintenance connection and runs
+ * `DROP DATABASE … WITH (FORCE)`. Those are three operations of a real
+ * PostgreSQL server rather than computation in memory, and none of them has a
+ * guaranteed upper bound on a loaded machine.
+ *
+ * Why this is not a way to hide a failure: the timeout sits on a teardown hook,
+ * where there is no `expect`. It neither defers nor softens a failed assertion
+ * inside an `it(...)` — it does not apply to the tests at all. The global
+ * `testTimeout` in `jest-db.json` is deliberately NOT raised: a test that hangs
+ * must still fail at five seconds.
+ *
+ * A precondition, verified separately: every `*.db-spec.ts` that opens its own
+ * `Client`/`PrismaClient` against the scratch database closes it in a `finally`
+ * BEFORE `cleanup()` runs. `WITH (FORCE)` here guards against somebody else's
+ * connection; it is not permission to leave our own open.
+ *
+ * 15 seconds is the same value `jest-e2e.json` already sets as its
+ * `testTimeout`, for the same reason: `gate.sh` runs lint, typecheck, build and
+ * seed before this, so the machine underneath is not idle.
+ */
+export const SCRATCH_CLEANUP_TIMEOUT_MS = 15_000
+
 const DEFAULT_KEY = 'default'
 const KEY_PATTERN = /^[a-z0-9_]+$/
 const RUN_ID_PATTERN = /^[a-z0-9]+$/

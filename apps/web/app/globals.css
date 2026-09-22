@@ -908,3 +908,40 @@ button:not([data-ui='button']):disabled {
   display: block;
   font-weight: 600;
 }
+
+/* --- Активація: прогрес до перших 10 книжок (Етап 8h) --------------------- */
+.activation {
+  margin-bottom: 2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+.activation__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.activation__meter {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.6rem;
+}
+
+.activation__bar {
+  flex: 1;
+  height: 0.5rem;
+}
+
+.activation__cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.65rem 1.1rem;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--fg);
+  border-radius: 0.4rem;
+  text-decoration: none;
+}

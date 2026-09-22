@@ -9,6 +9,8 @@ const KNOWN_FEATURES = [
   'features/catalog/add-book',
   'features/catalog/correction',
   'features/library/csv-import',
+  'features/library/activation',
+  'features/library/own-library',
 ]
 
 export default [

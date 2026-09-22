@@ -104,6 +104,14 @@ function rowCard(rowNumber: number): HTMLElement {
   return screen.getByText(`№${String(rowNumber)}`).closest('li') as HTMLElement
 }
 
+/** What `/me/activation` answers for the checklist the committed screen shows. */
+const ACTIVATION_PROGRESS = {
+  ownedCopyCount: 3,
+  target: 10,
+  hasReachedTarget: false,
+  nextAction: 'ADD_BOOKS',
+} as const
+
 beforeEach(() => {
   mockApiRequest.mockReset()
   mockReplace.mockReset()
@@ -140,9 +148,13 @@ it('commits the draft the user is looking at, and only once per click', async ()
   })
   const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 3 })
 
-  mockApiRequest.mockImplementation((path: string) =>
-    Promise.resolve(String(path).includes('/commit') ? committed : ready),
-  )
+  mockApiRequest.mockImplementation((path: string) => {
+    // The committed screen carries the activation checklist (Stage 8h-2), and
+    // it reads through this same mocked transport.
+    if (String(path) === '/me/activation') return Promise.resolve(ACTIVATION_PROGRESS)
+
+    return Promise.resolve(String(path).includes('/commit') ? committed : ready)
+  })
   renderDraft()
 
   const commit = await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' })
@@ -173,9 +185,13 @@ it('keeps the confirmed commit on screen when a later read actually fails', asyn
   })
   const committed = buildDraft({ rows: [], status: 'COMMITTED', createdCopyCount: 2 })
 
-  mockApiRequest.mockImplementation((path: string) =>
-    Promise.resolve(String(path).includes('/commit') ? committed : ready),
-  )
+  mockApiRequest.mockImplementation((path: string) => {
+    // The committed screen carries the activation checklist (Stage 8h-2), and
+    // it reads through this same mocked transport.
+    if (String(path) === '/me/activation') return Promise.resolve(ACTIVATION_PROGRESS)
+
+    return Promise.resolve(String(path).includes('/commit') ? committed : ready)
+  })
 
   const { refreshInBackground, cachedDraft } = renderDraft()
 

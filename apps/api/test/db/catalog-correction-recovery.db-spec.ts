@@ -5,6 +5,7 @@ import {
   applyMigration,
   applyMigrations,
   createScratchDatabase,
+  SCRATCH_CLEANUP_TIMEOUT_MS,
   listMigrationDirs,
   type ScratchDatabase,
 } from './migration-scratch'
@@ -210,7 +211,7 @@ describe('Stage 8e-1 rollback runbook §B step 3 — locked, position-preserving
 
   afterAll(async () => {
     await scratch.cleanup()
-  })
+  }, SCRATCH_CLEANUP_TIMEOUT_MS)
 
   it('waits for an in-flight writer to finish, then blocks new writers, before recovery proceeds', async () => {
     // The row this writer inserts still needs a real Author to join against

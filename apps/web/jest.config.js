@@ -20,6 +20,12 @@ module.exports = {
   modulePathIgnorePatterns: ['<rootDir>/\\.next/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    // `server-only` resolves to a module that THROWS unless the bundler asks
+    // for it under React's `react-server` condition — which is exactly its
+    // job, and exactly what Jest cannot provide. The stub is the same empty
+    // module Next resolves on the server, so importing the marker keeps
+    // meaning "server code" without making that code untestable.
+    '^server-only$': '<rootDir>/test/server-only.stub.js',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }],
