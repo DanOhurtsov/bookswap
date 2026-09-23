@@ -237,7 +237,9 @@ function ErrorAlert({ error }: { error: unknown }) {
   if (error === undefined || error === null) return null
 
   const constraints = error instanceof ApiRequestError ? error.constraints : []
-  const message = error instanceof Error ? error.message : String(error)
+  // §0.3 no-base-to-string: `String(unknown)` на об'єкті давало «[object Object]».
+  const message =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : 'Невідома помилка'
 
   return (
     <div
