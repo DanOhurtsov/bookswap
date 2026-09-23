@@ -362,7 +362,7 @@ async function lookupByIsbnSearch(
     )
   }
 
-  const body = await response.json().catch(() => undefined)
+  const body: unknown = await response.json().catch(() => undefined)
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new BookLookupProviderError('Open Library ISBN search повернув не JSON-об’єкт')
   }
@@ -444,7 +444,7 @@ async function fetchBooks(
     throw new BookLookupProviderError(`Open Library відповів HTTP ${String(response.status)}`)
   }
 
-  const body = await response.json().catch(() => undefined)
+  const body: unknown = await response.json().catch(() => undefined)
 
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new BookLookupProviderError('Open Library повернув тіло, що не є JSON-об’єктом')
@@ -594,7 +594,7 @@ export class OpenLibraryLookupProvider implements BookLookupProvider {
       )
     }
 
-    const body = await response.json().catch(() => undefined)
+    const body: unknown = await response.json().catch(() => undefined)
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       throw new BookLookupProviderError('Open Library work search повернув не JSON-об’єкт')
     }
