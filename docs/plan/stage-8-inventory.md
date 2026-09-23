@@ -9,7 +9,8 @@ ISBNdb), на які спирається 8f-2. 8f-2 (batched preview API, ко�
 `.xlsx` у наявний preview, коміт `08d3612`) теж завершено. 8g (atomic import
 commit, коміт `5efc567`) виконано за погодженими рішеннями R6c.
 
-8h **у роботі** на гілці `codex/8h-onboarding-qa` і повністю поза main:
+8h **завершено й у main** — змерджено через PR #41, коміт `1958655`
+(`feat: complete Stage 8 inventory activation`):
 
 - 8h-1 — `GET /me/activation`, shared contract і сервіс. Коміт `8b0432a`;
 - 8h-2 — server-first чекліст у `/library`, після add і після import.
@@ -17,22 +18,23 @@ commit, коміт `5efc567`) виконано за погодженими рі�
 - 8h-3 — розподіл `BOOK_ADDED` за `MANUAL`/`BARCODE`/`CSV` у funnel-звіті.
   Коміт `4c104de`;
 - 8h-4 — документація, acceptance-аудит і manual QA runbook
-  ([`docs/runbooks/stage-8-manual-qa.md`](../runbooks/stage-8-manual-qa.md)).
-  Реалізовано в цій гілці;
+  ([`docs/runbooks/stage-8-manual-qa.md`](../runbooks/stage-8-manual-qa.md));
 - 8h-5 — activation timing (`time to first book` / `time to first 10 books`) у
   тому самому funnel-звіті, плюс test-only hardening scratch cleanup.
-  Реалізовано в цій гілці.
 
-**Етап 8 не закритий, і 8h не завершено.** Відкрито два пункти:
+**Етап 8 ще не закритий.** Відкрито один пункт:
 
-1. **Manual camera matrix — NOT RUN.** Release gate §7 вимагає її проходження;
-   у середовищі виконання немає реального Android/iOS пристрою з камерою й
-   HTTPS-адреси. Це єдиний змістовний release blocker, що лишився.
-2. **8h не в main — очікує commit/PR/merge.** Увесь підетап, від 8h-1 до 8h-5,
-   лишається на гілці `codex/8h-onboarding-qa`.
+1. **Manual camera matrix — PARTIAL.** iOS Safari перевірено на фізичному
+   пристрої (iPhone 17 Pro, iOS 27.0, Safari, єдиний HTTPS-origin через
+   Cloudflare Tunnel, 23.09.2026) — **PASS**. Android Chrome на фізичному
+   пристрої — **NOT RUN**. Release gate §7 вимагає всієї матриці, тож
+   **єдиний release blocker, що лишився, — фізичний Android Chrome**.
+   Стенд для відтворення описано в
+   [runbook](../runbooks/stage-8-manual-qa.md), «Як відтворити стенд для
+   Android QA».
 
-Root gate зелений (exit 0) — фактичний прогін після 8h-5 і hardening, деталі в
-[runbook](../runbooks/stage-8-manual-qa.md).
+Root gate зелений (exit 0) — повторно підтверджено фактичним прогоном 23.09.2026,
+деталі в [runbook](../runbooks/stage-8-manual-qa.md).
 
 DoD «вимірюються `time to first book` і `time to first 10 books`» більше не
 відкритий — реалізовано в 8h-5, контракт нижче.
@@ -1179,7 +1181,7 @@ JSON не замінює shared contract. Жодного historical backfill aud
 Stage 8 завершено лише коли всі підетапи merged, root gate green, production-like
 migration і manual camera matrix пройдені, а docs описують фактичну поведінку.
 
-### Фактичний стан release gate (21.09.2026, гілка `codex/8h-onboarding-qa`)
+### Фактичний стан release gate (автоматизація — 21.09.2026; manual iOS — 23.09.2026)
 
 | Пункт gate                         | Стан         | Чим підтверджено                                                                 |
 | ---------------------------------- | ------------ | -------------------------------------------------------------------------------- |
@@ -1187,12 +1189,12 @@ migration і manual camera matrix пройдені, а docs описують ф�
 | API: positive/negative/permission/idempotency/concurrency/rollback | ✅ | `library-import-*.e2e-spec.ts`, `catalog-correction.e2e-spec.ts`, `activation.e2e-spec.ts` |
 | Web: межа route, форми, cleanup сканера, CSV resolution, retry/empty/error | ✅ | `BarcodeScannerPanel.spec.tsx`, `CsvImportDraft.spec.tsx`, `ActivationChecklist.spec.tsx`, `page.server.spec.tsx` |
 | E2E: manual add → repeat; CSV preview → resolve → commit → safe rerun; correction creator/owner/stranger; 10-та книга → friends CTA | ✅ | див. [runbook](../runbooks/stage-8-manual-qa.md), сценарії 4–8                    |
-| E2E: scan → lookup → Copy на реальному пристрої | ❌ **NOT RUN** | немає Android/iOS-пристрою, камери й HTTPS у середовищі — **release blocker**     |
+| E2E: scan → lookup → Copy на реальному пристрої | ✅ **PASS (iOS)** | iPhone 17 Pro / iOS 27.0 / Safari, єдиний HTTPS-origin через Cloudflare Tunnel, 23.09.2026: скан друкованого EAN-13 → lookup → `Copy` → «Сканувати наступну». [runbook](../runbooks/stage-8-manual-qa.md), сценарій 3 |
 | Build evidence: `docs/specification.md` не змінений | ✅ | `git diff HEAD -- docs/specification.md` у `gate.sh`                              |
-| Усі підетапи merged                | ❌           | увесь 8h (8h-1 `8b0432a`, 8h-2 `17d79d0`, 8h-3 `4c104de`, 8h-4 і 8h-5) живе на `codex/8h-onboarding-qa` й очікує commit/PR/merge; у main нічого з цього немає |
-| Root gate green                    | ✅ exit 0    | повний `./gate.sh` у quiescent-середовищі: `format:check`, lint, typecheck, build і 2757 тестів (329 shared + 1188 api unit + 467 web + 632 e2e + 141 db) |
-| Production-like migration          | ✅           | усі 14 міграцій чисто застосовані до порожньої disposable-бази, `db:seed` двічі ідемпотентно; dev-база не чіпалася |
-| Manual camera matrix               | ❌ **NOT RUN** | [runbook](../runbooks/stage-8-manual-qa.md), сценарії 2 і 3                       |
+| Усі підетапи merged                | ✅           | 8h (8h-1 `8b0432a`, 8h-2 `17d79d0`, 8h-3 `4c104de`, 8h-4 і 8h-5) змерджено в `main` через PR #41, коміт `1958655` |
+| Root gate green                    | ✅ exit 0    | повторний повний `./gate.sh` 23.09.2026, Node 22.23.2, quiescent-середовище (dev/watch, Caddy і `cloudflared` зупинені): `format:check`, lint+typecheck 8/8, test+build 7/7, git hygiene і 2773 тести (329 shared + 1188 api unit + 483 web + 632 e2e + 141 db) |
+| Production-like migration          | ✅ (21.09.2026) | усі 14 міграцій чисто застосовані до порожньої disposable-бази, `db:seed` двічі ідемпотентно; dev-база не чіпалася. Повторний gate 23.09 цього **не** дублює: там `db:deploy` лише підтвердив 14 міграцій без pending на dev-базі `bookswap`, а тести йшли по `bookswap_test` |
+| Manual camera matrix               | ⚠️ **PARTIAL** | iOS Safari — PASS (сценарій 3); Android Chrome — **NOT RUN** (сценарій 2, **release blocker**). [runbook](../runbooks/stage-8-manual-qa.md) |
 | Docs описують фактичну поведінку   | ✅ (8h-4)    | functional specification, user guide, roadmap, README, цей план                   |
 
 ### Падіння db-набору 21.09.2026 і test-only hardening

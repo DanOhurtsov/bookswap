@@ -1081,8 +1081,10 @@ books` як `sampleSize` + `medianSeconds`, рахуються від `SIGNUP_CO
      до 1-ї та 10-ї `BOOK_ADDED` у власному вікні конверсії людини, без нової
      сутності, endpoint чи типу події.
 
-   **Етап ще не закритий, 8h не в main**: manual camera matrix на реальних
-   Android/iOS пристроях — NOT RUN (release blocker). Root gate зелений.
+   **8h у main** — змерджено через PR #41, коміт `1958655`. **Етап ще не
+   закритий**: manual camera matrix — PARTIAL, iOS Safari PASS (iPhone 17 Pro,
+   iOS 27.0, фізичний пристрій, 23.09.2026), Android Chrome NOT RUN
+   (release blocker). Root gate зелений — повторний прогін 23.09.2026, exit 0.
    Фактичний стан —
    [`docs/runbooks/stage-8-manual-qa.md`](docs/runbooks/stage-8-manual-qa.md),
    план — [execution plan 8b–8h](docs/plan/stage-8-inventory.md).
@@ -1098,8 +1100,9 @@ Reviews, ratings і Bayesian ranking відкладено після Public v1. 
 
 Реєстрація вебхука Telegram (`setWebhook`) — операція розгортання, а не коду: локально вона потребує публічної адреси (тунель), у проді робиться один раз після деплою. Команда — в `.env.example` поруч зі змінними бота.
 
-**Застосунок не production-ready.** Етап 8 функціонально реалізований, але не
-закритий (manual camera matrix NOT RUN); не
+**Застосунок не production-ready.** Етап 8 функціонально реалізований і
+змерджений у main (#41, `1958655`), але не закритий: manual camera matrix —
+PARTIAL (iOS Safari PASS, Android Chrome NOT RUN); не
 розпочаті network activation, real-world loan flows і production-інфраструктура з
 активного roadmap; auth має
 задокументовану межу гарантії при вичерпаному shutdown-бюджеті
