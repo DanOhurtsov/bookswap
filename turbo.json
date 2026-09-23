@@ -51,7 +51,14 @@
     },
     "dev": {
       "dependsOn": ["^build", "generate"],
-      "env": ["PORT", "WEB_ORIGIN", "NEXT_PUBLIC_API_URL", "DATABASE_URL", "DIRECT_DATABASE_URL"],
+      "env": [
+        "PORT",
+        "WEB_ORIGIN",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_ALLOWED_DEV_ORIGINS",
+        "DATABASE_URL",
+        "DIRECT_DATABASE_URL"
+      ],
       "cache": false,
       "persistent": true
     },

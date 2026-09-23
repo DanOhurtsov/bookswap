@@ -73,17 +73,19 @@ private beta для кожного переходу фіксується фак�
 архітектурна межа wizard, швидке послідовне додавання і barcode/camera scan
 (8b–8d), metadata correction (8e), CSV/XLSX import із preview та atomic commit
 (8f–8g), onboarding-чекліст, funnel breakdown за методом і activation timing
-(8h). Етап **не завершений**. Відкриті два пункти:
+(8h). Увесь 8h змерджено в `main` через PR #41, коміт `1958655`. Етап **не
+завершений** — лишився один відкритий пункт:
 
-1. **Manual camera matrix на реальних Android/iOS пристроях — NOT RUN**
-   ([runbook Етапу 8](../runbooks/stage-8-manual-qa.md)). Єдиний змістовний
-   release blocker, що лишився.
-2. **8h ще не в main — очікує commit/PR/merge.** 8h-1 (`8b0432a`), 8h-2
-   (`17d79d0`) і 8h-3 (`4c104de`) мають коміти на гілці
-   `codex/8h-onboarding-qa`; 8h-4 і 8h-5 реалізовані в тій самій гілці. Увесь
-   8h лишається поза main.
+1. **Manual camera matrix — PARTIAL.** iOS Safari перевірено на фізичному
+   пристрої (iPhone 17 Pro, iOS 27.0, Safari, єдиний HTTPS-origin через
+   Cloudflare Tunnel, 23.09.2026) — **PASS**: скан друкованого EAN-13 → lookup
+   → `Copy` → «Сканувати наступну», плюс fallback після Deny і звільнення
+   камери. Android Chrome на фізичному пристрої — **NOT RUN**
+   ([runbook Етапу 8](../runbooks/stage-8-manual-qa.md)). Саме незавершена
+   Android-перевірка й тримає Етап 8 відкритим; це єдиний release blocker, що
+   лишився.
 
-Root gate зелений (exit 0) — деталі в
+Root gate зелений (exit 0) — повторно підтверджено прогоном 23.09.2026; деталі в
 [runbook Етапу 8](../runbooks/stage-8-manual-qa.md).
 
 Детальна послідовність і затверджені рішення —

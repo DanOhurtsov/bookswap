@@ -81,14 +81,14 @@ function deferred<T>() {
   }
 }
 
-function renderSearch(initialQuery = '', entryMode: 'manual' | 'scan' = 'manual') {
+function renderSearch(initialQuery = '') {
   const callbacks = {
     onFoundEdition: jest.fn(),
     onFoundWork: jest.fn(),
     onCreateNew: jest.fn(),
   }
 
-  render(<SearchStep initialQuery={initialQuery} entryMode={entryMode} {...callbacks} />)
+  render(<SearchStep initialQuery={initialQuery} {...callbacks} />)
 
   return callbacks
 }
@@ -176,20 +176,30 @@ it('keeps the validated query for a retry and then creates a new work from its r
   })
 })
 
-describe('entryMode="scan"', () => {
-  it('shows the scanner alongside the always-visible manual field', async () => {
-    renderSearch('', 'scan')
+/**
+ * Регресія: сканер висів за `?mode=scan`, тому вхід у нього вимагав навігації —
+ * перший раз узагалі лише ручною правкою адреси. Тепер панель на місці завжди,
+ * а її кнопка старту вмикає камеру тим самим натисканням, без переходу.
+ */
+describe('вхід у сканування', () => {
+  it('offers the scanner on the default page, with no mode parameter and no navigation', async () => {
+    renderSearch()
+
+    expect(await screen.findByRole('button', { name: 'Simulate scan' })).toBeInTheDocument()
+    // Жодного посилання-переходу: вхід — це кнопка самої панелі.
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('keeps the manual ISBN/title search available alongside it', async () => {
+    renderSearch()
 
     expect(screen.getByLabelText('Назва або ISBN')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Шукати' })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Simulate scan' })).toBeInTheDocument()
   })
+})
 
-  it('does not show the scanner in manual mode', () => {
-    renderSearch('', 'manual')
-
-    expect(screen.queryByRole('button', { name: 'Simulate scan' })).not.toBeInTheDocument()
-  })
-
+describe('скановане ISBN', () => {
   it('routes a scanned ISBN through the same search orchestration and tags the result BARCODE', async () => {
     mockApiRequest.mockImplementation((path: string) => {
       return path.startsWith('/catalog/search/candidates')
@@ -197,7 +207,7 @@ describe('entryMode="scan"', () => {
         : Promise.resolve({ result: lookup })
     })
 
-    const callbacks = renderSearch('', 'scan')
+    const callbacks = renderSearch()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Simulate scan' }))
 
@@ -219,7 +229,7 @@ describe('entryMode="scan"', () => {
   it('a manual submit after a successful scan resets the tag to MANUAL and stops the scanner', async () => {
     mockApiRequest.mockResolvedValue({ candidates: [candidate] })
 
-    const callbacks = renderSearch('', 'scan')
+    const callbacks = renderSearch()
     const user = userEvent.setup()
 
     const scanButton = screen.getByRole('button', { name: 'Simulate scan' })

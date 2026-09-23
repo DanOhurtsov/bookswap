@@ -237,9 +237,15 @@ it('drops a GET that was already in flight when the commit was confirmed', async
 
   await screen.findByRole('button', { name: 'Імпортувати до бібліотеки' })
 
-  mockApiRequest.mockImplementation((path: string) =>
-    String(path).includes('/commit') ? pendingCommit.promise : staleGet.promise,
-  )
+  mockApiRequest.mockImplementation((path: string) => {
+    // The committed screen carries the activation checklist (Stage 8h-2), and it
+    // reads through this same mocked transport. Without its own branch the
+    // checklist would be answered with `staleGet` — an import draft, which
+    // `activationResponseSchema` would never let past in the browser.
+    if (String(path) === '/me/activation') return Promise.resolve(ACTIVATION_PROGRESS)
+
+    return String(path).includes('/commit') ? pendingCommit.promise : staleGet.promise
+  })
 
   // The exact ordering from the report: a commit is in flight, a GET starts
   // while it is, the commit is confirmed, and only then does that GET answer —
@@ -262,6 +268,12 @@ it('drops a GET that was already in flight when the commit was confirmed', async
     staleGet.resolve(ready)
     await staleGet.promise
   })
+
+  const checklist = screen.getByRole('region', { name: 'Прогрес до перших 10 книжок' })
+  expect(await within(checklist).findByRole('link', { name: 'Додати книжку' })).toHaveAttribute(
+    'href',
+    '/catalog/new',
+  )
 
   // Neither in the DOM…
   expect(screen.getByText(/Цей імпорт уже завершено/)).toBeInTheDocument()
