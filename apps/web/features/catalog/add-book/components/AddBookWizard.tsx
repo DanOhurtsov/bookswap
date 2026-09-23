@@ -108,7 +108,6 @@ export function AddBookWizard() {
         <SearchStep
           key={`${entryMode}:${initialQuery}`}
           initialQuery={initialQuery}
-          entryMode={entryMode}
           onFoundEdition={(selection) => {
             setStep(selectExistingEdition(selection))
           }}

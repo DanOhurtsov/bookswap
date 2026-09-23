@@ -945,3 +945,107 @@ button:not([data-ui='button']):disabled {
   border-radius: 0.4rem;
   text-decoration: none;
 }
+
+/* --- Сканер штрих-коду ---------------------------------------------------- */
+.scanner {
+  display: grid;
+  justify-items: start;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Дія лишається натисною пальцем: 2.75rem = 44px при типовому корені. */
+.scanner button {
+  min-height: 2.75rem;
+}
+
+/*
+ * Без обмежень `<video>` розкладається в intrinsic-розмір потоку (на iPhone це
+ * 1280×720 і більше) — звідси горизонтальний overflow і прокрутка на пів екрана
+ * вниз. Обмежуємо і по ширині контейнера, і по висоті viewport, щоб status із
+ * кнопкою «Скасувати» лишались на екрані в portrait без прокрутки.
+ */
+.scanner__viewport {
+  position: relative;
+  justify-self: stretch;
+  width: 100%;
+  max-width: min(100%, 24rem);
+  /* Штрих-код широкий і низький, тому портретне вікно було марною висотою:
+     на iPhone воно з'їдало пів екрана й відсувало «Скасувати» під згин. */
+  aspect-ratio: 4 / 3;
+  max-height: 38vh;
+  max-height: 38svh;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
+/*
+ * `object-fit: cover` масштабує лише CSS-бокс, не сам MediaStream: ZXing читає
+ * кадри з intrinsic-відео (`videoWidth`/`videoHeight`), тому обрізка на екрані
+ * не змінює того, що передається декодеру.
+ */
+.scanner__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/*
+ * Підпис і рамка лежать поверх кадру однією центрованою колонкою: підпис
+ * тримається прямо над рамкою через `gap`, а не через підібраний зсув, тому
+ * зв'язка не роз'їжджається при зміні висоти тексту в два рядки.
+ * `pointer-events: none` стоїть тут, на всьому оверлеї, — це єдина гарантія,
+ * що ні підпис, ні рамка не перехоплюють тап по preview.
+ */
+.scanner__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  pointer-events: none;
+}
+
+/*
+ * Підпис читається поверх відео, а не поверх сторінки, тому власний темний
+ * фон із білим текстом, а не `.status` — той успадковує колір теми й на
+ * світлому кадрі зникає.
+ */
+.scanner__hint {
+  flex: none;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  max-width: 100%;
+  color: #fff;
+  background: rgb(0 0 0 / 0.7);
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/*
+ * Рамка наведення. Подвійний контур — світлий усередині, темний назовні —
+ * лишає її видимою і на світлому, і на темному кадрі, незалежно від теми
+ * інтерфейсу. Декодування рамка не обмежує: ZXing обробляє весь кадр.
+ */
+.scanner__frame {
+  /* `flex: none` — інакше flex-shrink стиснув би рамку по висоті й зламав
+     її пропорцію на низькому вікні. */
+  flex: none;
+  width: 84%;
+  aspect-ratio: 5 / 2;
+  border: 2px solid rgb(255 255 255 / 0.95);
+  border-radius: 0.35rem;
+  box-shadow:
+    0 0 0 2px rgb(0 0 0 / 0.55),
+    inset 0 0 0 2px rgb(0 0 0 / 0.55);
+}

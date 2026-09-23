@@ -13,7 +13,6 @@ import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { searchAddBookCandidates, type AddBookSearchResult } from '../api/search-add-book'
-import type { AddBookEntryMode } from '../model/add-book-entry-mode'
 import { loadBarcodeScannerPanel } from '../lib/load-barcode-scanner-panel'
 import type { ExistingEditionInput, ExistingWorkInput, NewWorkInput } from '../model/add-book-step'
 import { SearchResults } from './SearchResults'
@@ -31,7 +30,6 @@ const BarcodeScannerPanel = dynamic(loadBarcodeScannerPanel, { ssr: false })
 
 type SearchStepProps = {
   initialQuery: string
-  entryMode: AddBookEntryMode
   onFoundEdition: (selection: ExistingEditionInput) => void
   onFoundWork: (selection: ExistingWorkInput) => void
   onCreateNew: (selection: NewWorkInput) => void
@@ -41,7 +39,6 @@ type ScanState = { result: AddBookSearchResult; entryMethod: CopyEntryMethod }
 
 export function SearchStep({
   initialQuery,
-  entryMode,
   onFoundEdition,
   onFoundWork,
   onCreateNew,
@@ -100,14 +97,18 @@ export function SearchStep({
         </button>
       </form>
 
-      {entryMode === 'scan' && (
-        <BarcodeScannerPanel
-          key={scannerResetToken}
-          onValidIsbn={(isbn) => {
-            void runSearch(isbn, 'BARCODE')
-          }}
-        />
-      )}
+      {/* Панель рендериться завжди, в обох режимах, і її власна кнопка старту
+          і є входом у сканування. Раніше вона висіла за `?mode=scan`, тому вхід
+          вимагав навігації: клік → інша сторінка → друге натискання. Тут
+          `startBarcodeScanner` викликається синхронно в обробнику кліку — той
+          самий user gesture, що вимагає R2, лише без проміжного кроку. Саме для
+          цього `<video>` усередині панелі монтується заздалегідь. */}
+      <BarcodeScannerPanel
+        key={scannerResetToken}
+        onValidIsbn={(isbn) => {
+          void runSearch(isbn, 'BARCODE')
+        }}
+      />
 
       {failure !== undefined && <FormStatus error={new Error(describeAddBookError(failure))} />}
       {scanState?.result.lookupFailure !== undefined && (

@@ -92,30 +92,42 @@ export function BarcodeScannerPanel({ onValidIsbn, loadScannerModules }: Barcode
 
   return (
     <div className="scanner">
-      <video
-        ref={videoRef}
-        aria-label="Перегляд камери для сканування штрих-коду"
-        hidden={!isActive}
-        playsInline
-        muted
-      />
+      {/* Обгортка існує лише поки камера активна: інакше вона забирала б висоту
+          порожнім чорним прямокутником. `<video>` при цьому НЕ розмонтовується —
+          `videoRef` мусить бути доступний до першого кліку (R2). */}
+      <div className="scanner__viewport" hidden={!isActive}>
+        <video
+          ref={videoRef}
+          className="scanner__video"
+          aria-label="Перегляд камери для сканування штрих-коду"
+          playsInline
+          muted
+        />
+        {/* Підпис і рамка — одна центрована колонка, тому підпис тримається
+            прямо над рамкою сам, без магічних відступів. Оверлей не перехоплює
+            взаємодію; рамка — суто орієнтир для наведення, і текст ніде не
+            обіцяє, що її зона щось обмежує: ZXing декодує весь кадр. */}
+        <div className="scanner__overlay">
+          {isActive && (
+            <p className="scanner__hint" role="status">
+              {phase.kind === 'invalid-code'
+                ? 'Це не схоже на ISBN-13. Спробуйте ще раз.'
+                : 'Наведіть штрих-код у рамку'}
+            </p>
+          )}
+          <div className="scanner__frame" aria-hidden="true" />
+        </div>
+      </div>
 
       {isActive && (
-        <>
-          <p className="status status--pending" role="status">
-            {phase.kind === 'invalid-code'
-              ? 'Це не схоже на ISBN-13. Спробуйте ще раз.'
-              : 'Наведіть камеру на штрих-код…'}
-          </p>
-          <button type="button" onClick={handleCancel}>
-            Скасувати
-          </button>
-        </>
+        <button type="button" onClick={handleCancel}>
+          Скасувати
+        </button>
       )}
 
       {(phase.kind === 'idle' || phase.kind === 'error') && (
         <button type="button" onClick={handleStart}>
-          {phase.kind === 'error' ? 'Спробувати знову' : 'Увімкнути камеру'}
+          {phase.kind === 'error' ? 'Спробувати знову' : 'Сканувати штрихкод'}
         </button>
       )}
 
