@@ -8,22 +8,22 @@ import type { NextConfig } from 'next'
  * власної теки. Тому читаємо кореневий файл вручну.
  *
  * Свідомо `dotenv.parse`, а НЕ `dotenv.config`: другий залив би в `process.env`
- * геть усе, включно з `DATABASE_URL`. Далі пропускаємо лише префікс `NEXT_PUBLIC_` —
- * єдине, що Next має право інлайнити в клієнтський бандл. Наслідок: серверні
- * секрети не потрапляють навіть у процес складання, не кажучи про бандл.
+ * геть усе, включно з `DATABASE_URL`. Читаємо лише `NEXT_PUBLIC_*` та явне
+ * налаштування dev-сервера `NEXT_ALLOWED_DEV_ORIGINS`. Останнє не додається
+ * до `nextConfig.env`, тому не експортується у клієнтський бандл.
  */
-function loadPublicEnvFromRoot(): void {
+function loadWebEnvFromRoot(): void {
   const envPath = resolve(process.cwd(), '../../.env')
   if (!existsSync(envPath)) return
 
   for (const [key, value] of Object.entries(parse(readFileSync(envPath)))) {
-    if (!key.startsWith('NEXT_PUBLIC_')) continue
+    if (!key.startsWith('NEXT_PUBLIC_') && key !== 'NEXT_ALLOWED_DEV_ORIGINS') continue
     // Справжнє оточення (CI, docker) має пріоритет над файлом.
     process.env[key] ??= value
   }
 }
 
-loadPublicEnvFromRoot()
+loadWebEnvFromRoot()
 
 const allowedDevOrigins = process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(',')
   .map((origin) => origin.trim())
