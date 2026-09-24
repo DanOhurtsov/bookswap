@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common'
-import { isLanguageCode, type BookLookupResult } from '@bookswap/shared'
+import { comparableText } from '@bookswap/shared'
+import type { BookLookupResult } from '@bookswap/shared'
 import { BookLookupProviderError, type BookLookupProvider } from './book-lookup-provider'
 import { lookupUserAgentHeaders } from './lookup.config'
+import { iso6391FromMarc } from './marc-language'
 import {
   editionFormatFromBinding,
   exactIsbn13,
@@ -44,243 +46,22 @@ interface OpenLibraryBookRecord {
 }
 
 /**
- * Open Library кодує мову виданнями MARC (= ISO 639-2, здебільшого форма /B):
- * `/languages/eng`, `/languages/ukr`. Домен репозиторію (§4.4, `languageCodeSchema`)
- * прийняв ISO 639-1 — двобуквені коди, — тому мапа нижче переводить трибуквені
- * MARC-коди на дволітерні. Обидві форми (bibliographic/terminologic), де вони
- * розходяться, ведуть до того самого ISO 639-1, напр. `ger`/`deu` → `de`.
+ * `/languages/eng` → `eng` → `en`. Таблиця відповідності MARC ↔ ISO 639-1
+ * живе в `./marc-language.ts`: нею користується й пошук за назвою.
  *
- * Список — таблиця ISO 639-2 ↔ ISO 639-1, а не здогад: мова, якої тут немає
- * (напр. `mul` — «кілька мов», `und` — «не визначено»), лишається
- * ненормалізованою — див. §6.3 п.7: «невідоме значення залишай порожнім, а не
- * підміняй випадковим default».
- */
-const ISO_639_2_TO_1: Readonly<Record<string, string>> = {
-  aar: 'aa',
-  abk: 'ab',
-  ave: 'ae',
-  afr: 'af',
-  aka: 'ak',
-  amh: 'am',
-  arg: 'an',
-  ara: 'ar',
-  asm: 'as',
-  ava: 'av',
-  aym: 'ay',
-  aze: 'az',
-  bak: 'ba',
-  bel: 'be',
-  bul: 'bg',
-  bih: 'bh',
-  bis: 'bi',
-  bam: 'bm',
-  ben: 'bn',
-  tib: 'bo',
-  bod: 'bo',
-  bre: 'br',
-  bos: 'bs',
-  cat: 'ca',
-  che: 'ce',
-  cha: 'ch',
-  cos: 'co',
-  cre: 'cr',
-  cze: 'cs',
-  ces: 'cs',
-  chu: 'cu',
-  chv: 'cv',
-  wel: 'cy',
-  cym: 'cy',
-  dan: 'da',
-  ger: 'de',
-  deu: 'de',
-  div: 'dv',
-  dzo: 'dz',
-  ewe: 'ee',
-  gre: 'el',
-  ell: 'el',
-  eng: 'en',
-  epo: 'eo',
-  spa: 'es',
-  est: 'et',
-  baq: 'eu',
-  eus: 'eu',
-  per: 'fa',
-  fas: 'fa',
-  ful: 'ff',
-  fin: 'fi',
-  fij: 'fj',
-  fao: 'fo',
-  fre: 'fr',
-  fra: 'fr',
-  fry: 'fy',
-  gle: 'ga',
-  gla: 'gd',
-  glg: 'gl',
-  grn: 'gn',
-  guj: 'gu',
-  glv: 'gv',
-  hau: 'ha',
-  heb: 'he',
-  hin: 'hi',
-  hmo: 'ho',
-  hrv: 'hr',
-  hat: 'ht',
-  hun: 'hu',
-  arm: 'hy',
-  hye: 'hy',
-  her: 'hz',
-  ina: 'ia',
-  ind: 'id',
-  ile: 'ie',
-  ibo: 'ig',
-  iii: 'ii',
-  ipk: 'ik',
-  ido: 'io',
-  ice: 'is',
-  isl: 'is',
-  ita: 'it',
-  iku: 'iu',
-  jpn: 'ja',
-  jav: 'jv',
-  geo: 'ka',
-  kat: 'ka',
-  kon: 'kg',
-  kik: 'ki',
-  kua: 'kj',
-  kaz: 'kk',
-  kal: 'kl',
-  khm: 'km',
-  kan: 'kn',
-  kor: 'ko',
-  kau: 'kr',
-  kas: 'ks',
-  kur: 'ku',
-  kom: 'kv',
-  cor: 'kw',
-  kir: 'ky',
-  lat: 'la',
-  ltz: 'lb',
-  lug: 'lg',
-  lim: 'li',
-  lin: 'ln',
-  lao: 'lo',
-  lit: 'lt',
-  lub: 'lu',
-  lav: 'lv',
-  mlg: 'mg',
-  mah: 'mh',
-  mao: 'mi',
-  mri: 'mi',
-  mac: 'mk',
-  mkd: 'mk',
-  mal: 'ml',
-  mon: 'mn',
-  mar: 'mr',
-  may: 'ms',
-  msa: 'ms',
-  mlt: 'mt',
-  bur: 'my',
-  mya: 'my',
-  nau: 'na',
-  nob: 'nb',
-  nde: 'nd',
-  nep: 'ne',
-  ndo: 'ng',
-  dut: 'nl',
-  nld: 'nl',
-  nno: 'nn',
-  nor: 'no',
-  nbl: 'nr',
-  nav: 'nv',
-  nya: 'ny',
-  oci: 'oc',
-  oji: 'oj',
-  orm: 'om',
-  ori: 'or',
-  oss: 'os',
-  pan: 'pa',
-  pli: 'pi',
-  pol: 'pl',
-  pus: 'ps',
-  por: 'pt',
-  que: 'qu',
-  roh: 'rm',
-  run: 'rn',
-  rum: 'ro',
-  ron: 'ro',
-  rus: 'ru',
-  kin: 'rw',
-  san: 'sa',
-  srd: 'sc',
-  snd: 'sd',
-  sme: 'se',
-  sag: 'sg',
-  sin: 'si',
-  slo: 'sk',
-  slk: 'sk',
-  slv: 'sl',
-  smo: 'sm',
-  sna: 'sn',
-  som: 'so',
-  alb: 'sq',
-  sqi: 'sq',
-  srp: 'sr',
-  ssw: 'ss',
-  sot: 'st',
-  sun: 'su',
-  swe: 'sv',
-  swa: 'sw',
-  tam: 'ta',
-  tel: 'te',
-  tgk: 'tg',
-  tha: 'th',
-  tir: 'ti',
-  tuk: 'tk',
-  tgl: 'tl',
-  tsn: 'tn',
-  ton: 'to',
-  tur: 'tr',
-  tso: 'ts',
-  tat: 'tt',
-  twi: 'tw',
-  tah: 'ty',
-  uig: 'ug',
-  ukr: 'uk',
-  urd: 'ur',
-  uzb: 'uz',
-  ven: 've',
-  vie: 'vi',
-  vol: 'vo',
-  wln: 'wa',
-  wol: 'wo',
-  xho: 'xh',
-  yid: 'yi',
-  yor: 'yo',
-  zha: 'za',
-  chi: 'zh',
-  zho: 'zh',
-  zul: 'zu',
-}
-
-/**
- * `/languages/eng` → `eng` → `en`. Невідомий, відсутній чи неочікуваного типу
- * (Open Library — зовнішній сервіс, тіло не типізоване рантаймом) код →
- * `undefined`, а не кинутий виняток: одне зіпсоване поле не має валити весь
- * lookup, коли решта відповіді придатна.
+ * Невідомий, відсутній чи неочікуваного типу (Open Library — зовнішній сервіс,
+ * тіло не типізоване рантаймом) код → `undefined`, а не кинутий виняток: одне
+ * зіпсоване поле не має валити весь lookup, коли решта відповіді придатна.
+ *
+ * Береться ПЕРШИЙ елемент: `jscmd=data` описує одне конкретне видання, і його
+ * `languages` — мови саме цього тиражу, а не всіх видань твору.
  */
 export function normalizeOpenLibraryLanguage(languages: unknown): string | undefined {
   if (!Array.isArray(languages)) return undefined
 
   const first = languages[0] as OpenLibraryLanguage | undefined
-  const key = first?.key
-  if (typeof key !== 'string') return undefined
 
-  const marc = key.split('/').pop()?.trim().toLowerCase()
-  if (marc === undefined || marc === '') return undefined
-
-  const code = ISO_639_2_TO_1[marc]
-
-  return code !== undefined && isLanguageCode(code) ? code : undefined
+  return iso6391FromMarc(first?.key)
 }
 
 /** Open Library повертає всі bibkeys одним об'єктом, ключ — `ISBN:<isbn>`. */
@@ -302,15 +83,6 @@ interface OpenLibrarySearchDocument {
   title?: unknown
   author_name?: unknown
   isbn?: unknown
-}
-
-function comparableText(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()
 }
 
 function workIdFromKey(value: unknown): string | undefined {

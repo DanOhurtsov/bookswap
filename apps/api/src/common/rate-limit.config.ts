@@ -45,6 +45,26 @@ export const CATALOG_LOOKUP_RATE_LIMIT = fromEnv('CATALOG_LOOKUP_RATE_LIMIT', 20
 export const CATALOG_LOOKUP_RATE_WINDOW_MS = fromEnv('CATALOG_LOOKUP_RATE_WINDOW_MS', 60_000)
 
 /**
+ * Пошук за назвою в зовнішніх каталогах — власний бакет, суворіший за
+ * ISBN-lookup.
+ *
+ * Один такий запит коштує ДВОХ зовнішніх викликів (Open Library + Google
+ * Books) замість одного, а сам запит за назвою значно різноманітніший за
+ * ISBN: та сама книжка набирається щоразу трохи інакше, тож кеш допомагає
+ * помітно менше. Десять за хвилину — це десять різних спроб сформулювати
+ * назву, чого людині за очі, і водночас удвічі менше зовнішніх викликів, ніж
+ * дозволяє ISBN-бакет.
+ *
+ * Це ліміт НА КЛІЄНТА й тому не обмежує сумарний потік до провайдера — за
+ * дотримання чужих лімітів відповідає `ProviderRateLimiter`.
+ */
+export const CATALOG_EXTERNAL_SEARCH_RATE_LIMIT = fromEnv('CATALOG_EXTERNAL_SEARCH_RATE_LIMIT', 10)
+export const CATALOG_EXTERNAL_SEARCH_RATE_WINDOW_MS = fromEnv(
+  'CATALOG_EXTERNAL_SEARCH_RATE_WINDOW_MS',
+  60_000,
+)
+
+/**
  * §4, Stage 8f-2: a CSV preview is throttled on its own — 5 per minute per
  * authenticated client.
  *

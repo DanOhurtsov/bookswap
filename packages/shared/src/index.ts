@@ -71,6 +71,13 @@ export {
 export { LANGUAGE_CODES, isLanguageCode, languageCodeSchema } from './domain/language'
 export { isValidIsbn13, isbn13Schema, normalizeIsbn13 } from './domain/isbn'
 export {
+  comparableText,
+  comparableTokens,
+  relevanceOf,
+  type Relevance,
+  type RelevanceSubject,
+} from './domain/search-relevance'
+export {
   FRIENDSHIP_STATUS,
   FRIEND_RELATION,
   friendRelationSchema,
@@ -429,6 +436,24 @@ export {
   type BookLookupResult,
   type BookLookupSource,
 } from './contracts/lookup'
+export {
+  EXTERNAL_SEARCH_LIMIT,
+  EXTERNAL_SEARCH_RECORD_KINDS,
+  EXTERNAL_SEARCH_SOURCE_STATUSES,
+  externalSearchRecordKindSchema,
+  externalSearchRequestSchema,
+  externalSearchResponseSchema,
+  externalSearchResultSchema,
+  externalSearchResultToLookup,
+  externalSearchSourceReportSchema,
+  externalSearchSourceStatusSchema,
+  type ExternalSearchRecordKind,
+  type ExternalSearchRequest,
+  type ExternalSearchResponse,
+  type ExternalSearchResult,
+  type ExternalSearchSourceReport,
+  type ExternalSearchSourceStatus,
+} from './contracts/external-search'
 export {
   WISHLIST_LIMITS,
   addWishlistItemRequestSchema,

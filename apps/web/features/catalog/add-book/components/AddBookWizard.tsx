@@ -19,6 +19,7 @@ import {
   type AddBookStep,
 } from '../model/add-book-step'
 import { readAddBookEntryMode } from '../model/add-book-entry-mode'
+import { useExternalSelectionHandoff } from '../model/external-handoff'
 import { DEFAULT_COPY_DEFAULTS, type CopyDefaults } from '../model/copy-defaults'
 import { AddBookShell } from './AddBookShell'
 import { AddBookSuccess } from './AddBookSuccess'
@@ -41,6 +42,12 @@ export function AddBookWizard() {
   const presetWorkId = parameters.get('workId')
   const initialQuery = parameters.get('q') ?? ''
   const entryMode = readAddBookEntryMode(parameters.get('mode'))
+  // `/catalog` names the handover in the URL; the record itself travels in
+  // session storage and is resumed only when both the token and the query it
+  // was chosen under match — see `useExternalSelectionHandoff`.
+  const externalToken = parameters.get('external')
+
+  const externalSelection = useExternalSelectionHandoff(externalToken, initialQuery)
 
   const [step, setStep] = useState<AddBookStep>(createSearchStep)
   const [copyDefaults, setCopyDefaults] = useState<CopyDefaults>(DEFAULT_COPY_DEFAULTS)
@@ -108,6 +115,7 @@ export function AddBookWizard() {
         <SearchStep
           key={`${entryMode}:${initialQuery}`}
           initialQuery={initialQuery}
+          initialExternalSelection={externalSelection}
           onFoundEdition={(selection) => {
             setStep(selectExistingEdition(selection))
           }}
@@ -124,6 +132,7 @@ export function AddBookWizard() {
         <WorkStep
           initialTitle={step.initialTitle}
           lookup={step.lookup}
+          firstPubYear={step.firstPubYear}
           onCreated={(workId, title) => {
             setStep(continueAfterWork(step, { workId, title }))
           }}

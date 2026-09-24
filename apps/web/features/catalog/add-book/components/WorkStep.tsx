@@ -27,6 +27,8 @@ import { nullableNumber, nullableText } from '../model/form-values'
 type WorkStepProps = {
   initialTitle: string
   lookup?: BookLookupResult
+  /** Work-level year from an external source; never an edition's printing year. */
+  firstPubYear?: number
   onCreated: (workId: string, title: string) => void
 }
 
@@ -43,9 +45,16 @@ function messageOf(error: unknown): string | undefined {
   return 'name' in error ? messageOf(error.name) : undefined
 }
 
+/**
+ * `firstPubYear` is prefilled only from the work-level year passed in beside
+ * the lookup draft. `mapLookupResultToDraft` deliberately never produces one:
+ * its input describes an edition, and a reprint's year is not the year the work
+ * first appeared. The field stays editable either way.
+ */
 function defaultValues(
   initialTitle: string,
   lookup: BookLookupResult | undefined,
+  firstPubYear: number | undefined,
 ): CreateWorkRequest {
   const draft = mapLookupResultToDraft(lookup)
   const names = draft.work.authors.length === 0 ? [''] : draft.work.authors
@@ -53,7 +62,7 @@ function defaultValues(
   return {
     title: draft.work.title === '' ? initialTitle : draft.work.title,
     origLang: 'uk',
-    firstPubYear: null,
+    firstPubYear: firstPubYear ?? null,
     description: draft.work.description === '' ? null : draft.work.description,
     authors: names.map((name) => ({ name, role: 'AUTHOR' })),
   }
@@ -128,7 +137,7 @@ function AuthorsFieldset({ control, errors }: Omit<WorkFieldsProps, 'register'>)
   )
 }
 
-export function WorkStep({ initialTitle, lookup, onCreated }: WorkStepProps) {
+export function WorkStep({ initialTitle, lookup, firstPubYear, onCreated }: WorkStepProps) {
   const [failure, setFailure] = useState<unknown>()
   const {
     control,
@@ -137,7 +146,7 @@ export function WorkStep({ initialTitle, lookup, onCreated }: WorkStepProps) {
     formState: { errors, isSubmitting },
   } = useForm<CreateWorkRequest>({
     resolver: zodResolver(createWorkRequestSchema),
-    defaultValues: defaultValues(initialTitle, lookup),
+    defaultValues: defaultValues(initialTitle, lookup, firstPubYear),
   })
 
   async function submit(request: CreateWorkRequest): Promise<void> {

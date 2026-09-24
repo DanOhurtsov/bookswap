@@ -1,10 +1,12 @@
 /** @jest-environment jsdom */
 
+import { StrictMode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Edition, Translation, Work, WorkAuthor, WorkDetailResponse } from '@bookswap/shared'
 import { createTestQueryClient, withQueryClient } from '@/app/lib/test-query-client'
+import { stashExternalSelection } from '../model/external-handoff'
 import { AddBookWizard } from './AddBookWizard'
 
 /**
@@ -167,6 +169,7 @@ beforeEach(() => {
   mockApiRequest.mockReset()
   push.mockReset()
   replace.mockReset()
+  sessionStorage.clear()
 })
 
 async function search(query: string): Promise<void> {
@@ -581,6 +584,12 @@ describe('гілка «немає збігів»', () => {
   it('веде повним ланцюгом Work → Translation → Edition → Copy', async () => {
     routeApiRequest({
       '/catalog/search/candidates': () => ({ candidates: [] }),
+      // Зовнішні джерела відповіли й нічого не знайшли. Це не те саме, що
+      // «не відповіли»: лише в першому випадку можна сказати «нічого схожого».
+      '/catalog/search/external': () => ({
+        results: [],
+        sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+      }),
       '/works': ({ body }) => {
         expect(body).toMatchObject({ title: 'Новий твір' })
         return {
@@ -974,5 +983,206 @@ describe('картка кандидата', () => {
     const item = (await screen.findByText('Кобзар')).closest('li')
     expect(item).not.toBeNull()
     expect(within(item as HTMLElement).getByText(/КСД/)).toBeInTheDocument()
+  })
+})
+
+describe('прихід із каталогу з уже обраним зовнішнім записом', () => {
+  const chosen = {
+    id: 'GOOGLE_BOOKS:v1',
+    kind: 'EDITION' as const,
+    sources: ['GOOGLE_BOOKS' as const],
+    title: 'Тигролови',
+    authors: ['Іван Багряний'],
+    publishedYear: 2021,
+    publisher: 'Смолоскип',
+  }
+
+  /** Кладе вибір і відкриває майстер САМЕ за тим переходом, який його породив. */
+  function arrive(): void {
+    const token = stashExternalSelection(chosen, 'Тигролови')
+
+    expect(token).toBeDefined()
+    searchParams = new URLSearchParams(`q=Тигролови&external=${String(token)}`)
+    render(withQueryClient(<AddBookWizard />))
+  }
+
+  it('одразу перевіряє дублікати й веде у форму — без повторного пошуку', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    arrive()
+
+    // Людина нічого не вводила й не натискала: майстер продовжив саме з тим
+    // записом, який вона обрала в каталозі.
+    expect(await screen.findByText('Твір')).toBeInTheDocument()
+    expect(screen.getByLabelText('Назва твору')).toHaveValue('Тигролови')
+  })
+
+  it('знайдені дублікати показуються для обраного запису', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [candidate()] }),
+    })
+
+    arrive()
+
+    // Спершу чекаємо на РЕЗУЛЬТАТ перевірки: стан «перевіряю» теж пише
+    // «Обрано: …», тож сам цей рядок ще нічого не доводить.
+    expect(
+      await screen.findByText(
+        'Схожі твори вже є у BookSwap. Якщо це одна з цих книжок — оберіть її.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Обрано: Тигролови')).toBeInTheDocument()
+  })
+
+  it('до підтвердження нічого не створюється', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    arrive()
+
+    await screen.findByText('Твір')
+
+    // Перевірка дублікатів — це читання. Жодного запису до підтвердження форми.
+    const written = mockApiRequest.mock.calls.filter(
+      ([, options]: [string, { body?: unknown } | undefined]) => options?.body !== undefined,
+    )
+    expect(written).toEqual([])
+  })
+
+  it('перевірка дублікатів доходить до кінця і під подвійним монтуванням', async () => {
+    // Регресія: StrictMode монтує, розмонтовує й монтує той самий компонент.
+    // Поки розмонтування «відв'язувало» перевірку лічильником, відповідь на
+    // неї відкидалася, повторно ніхто не питав — і крок назавжди лишався на
+    // «Перевіряю, чи така книжка вже є у BookSwap…».
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    const token = stashExternalSelection(chosen, 'Тигролови')
+
+    searchParams = new URLSearchParams(`q=Тигролови&external=${String(token)}`)
+    render(<StrictMode>{withQueryClient(<AddBookWizard />)}</StrictMode>)
+
+    expect(await screen.findByText('Твір')).toBeInTheDocument()
+    expect(screen.queryByText(/Перевіряю, чи така книжка вже є/)).not.toBeInTheDocument()
+  })
+
+  it('без позначки в адресі збережений запис не підхоплюється', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    stashExternalSelection(chosen, 'Тигролови')
+    searchParams = new URLSearchParams('q=Тигролови')
+    render(withQueryClient(<AddBookWizard />))
+
+    // Адреса вирішує, а не сховище: інакше запис із давнього вибору сам собою
+    // перехоплював би звичайний вхід у майстер.
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Тигролови')
+    expect(screen.queryByText('Обрано: Тигролови')).not.toBeInTheDocument()
+  })
+
+  // --- вибір прив'язаний до ОДНОГО переходу -------------------------------
+
+  it('чужий токен не підхоплює збереженого вибору', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    // Обрано книжку А…
+    stashExternalSelection(chosen, 'Тигролови')
+    // …а відкривають перехід, якого ніхто не створював.
+    searchParams = new URLSearchParams('q=Тигролови&external=not-the-token-that-was-minted')
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Тигролови')
+    expect(screen.queryByText('Обрано: Тигролови')).not.toBeInTheDocument()
+  })
+
+  it('той самий токен під іншим запитом не підхоплює вибору', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    const token = stashExternalSelection(chosen, 'Тигролови')
+
+    // Той самий перехід, але адреса каже про інший пошук. Порівнювати назви
+    // тут не можна: два тиражі однієї книжки звуться однаково.
+    searchParams = new URLSearchParams(`q=Кобзар&external=${String(token)}`)
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Кобзар')
+    expect(screen.queryByText('Обрано: Тигролови')).not.toBeInTheDocument()
+  })
+
+  it('вибір книжки А не відкривається переходом, створеним для Б', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    // Перехід для Б створено ПЕРШИМ, далі людина повернулася й обрала А.
+    const tokenForB = stashExternalSelection(
+      { ...chosen, id: 'GOOGLE_BOOKS:v2', title: 'Сад Гетсиманський' },
+      'Сад',
+    )
+    stashExternalSelection(chosen, 'Тигролови')
+
+    searchParams = new URLSearchParams(`q=Сад&external=${String(tokenForB)}`)
+    render(withQueryClient(<AddBookWizard />))
+
+    // Саме той дефект: без прив'язки тут відкрилася б форма для А.
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Сад')
+    expect(screen.queryByText('Обрано: Тигролови')).not.toBeInTheDocument()
+    expect(screen.queryByText('Обрано: Сад Гетсиманський')).not.toBeInTheDocument()
+  })
+
+  it('порожнє сховище дає звичайний пошук', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    searchParams = new URLSearchParams('q=Тигролови&external=some-token')
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Тигролови')
+    expect(screen.queryByText(/Обрано:/)).not.toBeInTheDocument()
+  })
+
+  it('пошкоджене сховище дає звичайний пошук, а не аварію', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    const token = stashExternalSelection(chosen, 'Тигролови')
+
+    // Той самий ключ, але вміст уже не той, що ми писали.
+    for (const key of Object.keys(sessionStorage)) sessionStorage.setItem(key, '{ not json')
+
+    searchParams = new URLSearchParams(`q=Тигролови&external=${String(token)}`)
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Тигролови')
+    expect(screen.queryByText(/Обрано:/)).not.toBeInTheDocument()
+  })
+
+  it('недоступне сховище дає звичайний пошук', async () => {
+    routeApiRequest({
+      '/catalog/search/candidates': () => ({ candidates: [] }),
+    })
+
+    const getItem = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage disabled')
+    })
+
+    searchParams = new URLSearchParams('q=Тигролови&external=some-token')
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(await screen.findByLabelText('Назва або ISBN')).toHaveValue('Тигролови')
+    expect(screen.queryByText(/Обрано:/)).not.toBeInTheDocument()
+
+    getItem.mockRestore()
   })
 })
