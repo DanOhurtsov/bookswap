@@ -3,7 +3,10 @@ import type { INestApplication } from '@nestjs/common'
 import request from 'supertest'
 import type { App } from 'supertest/types'
 import {
+  API_ERROR_CODES,
   API_PREFIX,
+  apiErrorSchema,
+  catalogSearchResponseSchema,
   externalSearchResponseSchema,
   type ExternalSearchResult,
 } from '@bookswap/shared'
@@ -11,6 +14,7 @@ import { ExternalSearchCache } from '../src/catalog/search/external/external-sea
 import { EXTERNAL_SEARCH_PROVIDERS } from '../src/catalog/search/external/external-search-provider'
 import { ProviderRateLimiter } from '../src/catalog/search/external/provider-rate-limiter'
 import { VALID_PASSWORD, createTestApp, sessionCookie, uniqueEmail } from './auth.helpers'
+import { uniqueIsbn13 } from './helpers/unique-isbn'
 import { FakeExternalSearchProvider } from './lookup/fake-external-search-provider'
 
 /**
@@ -252,5 +256,252 @@ describe('GET /catalog/search/external (e2e)', () => {
       .expect(200)
 
     expect(openLibrary.queries).toHaveLength(1)
+  })
+
+  describe('сторінки', () => {
+    /** `count` творів з назвами однакової довжини — порядок вирішує стрічка. */
+    const series = (count: number): ExternalSearchResult[] =>
+      Array.from({ length: count }, (_, index) =>
+        work(`OL${String(index).padStart(2, '0')}W`, `Книжка ${String(index).padStart(2, '0')}`),
+      )
+
+    // Унікальний запит: локальні збіги спільної бази не мають потрапити в
+    // розрахунок сторінки, тож `L = 0` і вся сторінка — зовнішня.
+    const QUERY = `тестовасерія${String(process.pid)}`
+
+    async function page(query: string, number?: number, size?: number) {
+      const suffix =
+        (number === undefined ? '' : `&page=${String(number)}`) +
+        (size === undefined ? '' : `&pageSize=${String(size)}`)
+      const response = await request(app.getHttpServer())
+        .get(url(`/catalog/search/external?q=${encodeURIComponent(query)}${suffix}`))
+        .set('Cookie', cookie)
+        .expect(200)
+
+      return externalSearchResponseSchema.parse(response.body)
+    }
+
+    it('друга сторінка — наступні записи стрічки, а не ті самі', async () => {
+      openLibrary.streams(series(25))
+
+      const first = await page(QUERY, 1)
+      const second = await page(QUERY, 2)
+
+      expect(first.results).toHaveLength(10)
+      expect(second.results).toHaveLength(10)
+      expect(first.results.map((result) => result.id)).not.toEqual(
+        second.results.map((result) => result.id),
+      )
+
+      const overlap = first.results.filter((result) =>
+        second.results.some((other) => other.id === result.id),
+      )
+
+      expect(overlap).toEqual([])
+    })
+
+    it('адреса без page — це перша сторінка', async () => {
+      openLibrary.streams(series(25))
+
+      const implicit = await page(QUERY)
+      const explicit = await page(QUERY, 1)
+
+      expect(implicit.page).toBe(1)
+      expect(implicit.results.map((result) => result.id)).toEqual(
+        explicit.results.map((result) => result.id),
+      )
+    })
+
+    it('«Далі» обіцяють лише за доказом наступного запису', async () => {
+      openLibrary.streams(series(10))
+
+      await expect(page(QUERY, 1)).resolves.toMatchObject({ more: 'NO', complete: true })
+
+      app.get(ExternalSearchCache).clear()
+      openLibrary.streams(series(11))
+
+      await expect(page(QUERY, 1)).resolves.toMatchObject({ more: 'YES' })
+    })
+
+    it('pageSize=20 — двадцять карток, а не «10 + 10»; довантаження за complete', async () => {
+      openLibrary.streams(series(45))
+
+      let response = await page(QUERY, 1, 20)
+      let asks = 1
+
+      while (!response.complete && asks < 10) {
+        response = await page(QUERY, 1, 20)
+        asks += 1
+      }
+
+      expect(response.results).toHaveLength(20)
+      expect(response.pageSize).toBe(20)
+      expect(response.more).toBe('YES')
+    })
+
+    it('глибока сторінка на холодному кеші не хибно порожня: complete=false, потім записи', async () => {
+      openLibrary.streams(series(60))
+
+      let response = await page(QUERY, 4, 10)
+
+      expect(response).toMatchObject({ results: [], complete: false, more: 'UNKNOWN' })
+
+      let asks = 1
+
+      while (!response.complete && asks < 10) {
+        response = await page(QUERY, 4, 10)
+        asks += 1
+      }
+
+      expect(response.results).toHaveLength(10)
+      expect(response.results[0]?.title).toBe('Книжка 30')
+    })
+
+    it('недопустимий pageSize — 400 і жодного звернення до провайдера', async () => {
+      await request(app.getHttpServer())
+        .get(url(`/catalog/search/external?q=${QUERY}&pageSize=15`))
+        .set('Cookie', cookie)
+        .expect(400)
+
+      expect(openLibrary.queries).toEqual([])
+    })
+
+    it('повернення на вже відкриту сторінку не витрачає нових звернень', async () => {
+      openLibrary.streams(series(25))
+
+      await page(QUERY, 1)
+      await page(QUERY, 2)
+      const spent = openLibrary.blocks.length
+
+      // Назад на першу — і жодного нового звернення назовні.
+      await page(QUERY, 1)
+
+      expect(openLibrary.blocks).toHaveLength(spent)
+    })
+
+    it('частковий збій не заважає гортати живе джерело', async () => {
+      googleBooks.fails('HTTP 503')
+      openLibrary.streams(series(25))
+
+      const second = await page(QUERY, 2)
+
+      expect(second.results).toHaveLength(10)
+      expect(second.sources).toEqual(
+        expect.arrayContaining([{ source: 'GOOGLE_BOOKS', status: 'ERROR' }]),
+      )
+    })
+
+    it('поламаний номер сторінки — 400 і жодного звернення до провайдера', async () => {
+      const response = await request(app.getHttpServer())
+        .get(url('/catalog/search/external?q=тигролови&page=0'))
+        .set('Cookie', cookie)
+        .expect(400)
+
+      expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
+      expect(openLibrary.queries).toEqual([])
+      expect(googleBooks.queries).toEqual([])
+    })
+  })
+
+  describe('спільна сторінка з нашим каталогом', () => {
+    async function createLocalWorks(token: string, count: number, isbns: string[] = []) {
+      for (let index = 0; index < count; index += 1) {
+        const created = await request(app.getHttpServer())
+          .post(url('/works'))
+          .set('Cookie', cookie)
+          .send({
+            title: `Змішана ${token} ${String(index)}`,
+            origLang: 'uk',
+            authors: [{ name: `Автор ${token}` }],
+          })
+          .expect(201)
+
+        const isbn13 = isbns[index]
+
+        if (isbn13 !== undefined) {
+          await request(app.getHttpServer())
+            .post(url(`/works/${(created.body as { work: { id: string } }).work.id}/editions`))
+            .set('Cookie', cookie)
+            .send({ publisher: 'КСД', year: 2019, isbn13 })
+            .expect(201)
+        }
+      }
+    }
+
+    async function both(query: string, number: number, size: number) {
+      const suffix = `&page=${String(number)}&pageSize=${String(size)}`
+      const q = encodeURIComponent(query)
+      const [local, external] = await Promise.all([
+        request(app.getHttpServer())
+          .get(url(`/catalog/search?q=${q}${suffix}`))
+          .set('Cookie', cookie)
+          .expect(200),
+        request(app.getHttpServer())
+          .get(url(`/catalog/search/external?q=${q}${suffix}`))
+          .set('Cookie', cookie)
+          .expect(200),
+      ])
+
+      return {
+        local: catalogSearchResponseSchema.parse(local.body),
+        external: externalSearchResponseSchema.parse(external.body),
+      }
+    }
+
+    it('локальна й зовнішня частини разом дають рівно pageSize карток, без повторів між сторінками', async () => {
+      const token = `змш${String(process.pid)}${String(Date.now() % 100_000)}`
+      await createLocalWorks(token, 3)
+      openLibrary.streams(
+        Array.from({ length: 30 }, (_, index) =>
+          work(
+            `OL${String(index).padStart(2, '0')}W`,
+            `Змішана ${token} зовн ${String(index).padStart(2, '0')}`,
+          ),
+        ),
+      )
+
+      const query = `Змішана ${token}`
+      const first = await both(query, 1, 10)
+
+      expect(first.local.total).toBeGreaterThanOrEqual(3)
+      expect(first.local.results.length + first.external.results.length).toBe(10)
+
+      // Друга сторінка починається з того місця пулу, де скінчилася перша.
+      const second = await both(query, 2, 10)
+      const ids = [...first.external.results, ...second.external.results].map((result) => result.id)
+
+      expect(new Set(ids).size).toBe(ids.length)
+    })
+
+    it('зовнішній запис з ISBN нашого збігу відкидається на КОЖНІЙ сторінці', async () => {
+      const token = `дед${String(process.pid)}${String(Date.now() % 100_000)}`
+      const known = '9786177585113'
+      // Свій ISBN: e2e ділять базу, тож чужий міг би вже існувати.
+      const isbn = uniqueIsbn13('catalog-external-search')
+
+      await createLocalWorks(token, 1, [isbn])
+      openLibrary.returns([])
+      googleBooks.streams([
+        edition('dup', `Змішана ${token} дубль`, isbn),
+        edition('other', `Змішана ${token} інша`, known),
+      ])
+
+      const result = await both(`Змішана ${token}`, 1, 10)
+
+      expect(result.external.results.map((record) => record.id)).toEqual(['GOOGLE_BOOKS:other'])
+    })
+
+    it('сторінка з самих локальних рядків не питає зовнішні джерела', async () => {
+      const token = `лок${String(process.pid)}${String(Date.now() % 100_000)}`
+      await createLocalWorks(token, 12)
+
+      const { external, local } = await both(`Змішана ${token}`, 1, 10)
+
+      expect(local.results).toHaveLength(10)
+      expect(external.results).toEqual([])
+      expect(external.sources).toEqual([])
+      expect(openLibrary.queries).toEqual([])
+      expect(googleBooks.queries).toEqual([])
+    })
   })
 })

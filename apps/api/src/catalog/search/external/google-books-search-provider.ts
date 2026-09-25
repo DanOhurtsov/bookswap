@@ -11,6 +11,9 @@ import {
 } from '../../lookup/lookup-provider.utils'
 import {
   ExternalSearchProviderError,
+  ExternalSearchTimeoutError,
+  type ExternalSearchBlock,
+  type ExternalSearchBlockResult,
   type ExternalSearchContext,
   type ExternalSearchProvider,
 } from './external-search-provider'
@@ -20,8 +23,9 @@ const API_ROOT = 'https://www.googleapis.com/books/v1/volumes'
 
 /**
  * The documented `maxResults` ceiling is 40
- * (https://developers.google.com/books/docs/v1/using). We ask for no more than
- * we display, and never above the API's own cap.
+ * (https://developers.google.com/books/docs/v1/using). A block wider than this
+ * is clamped, and the clamped width is also what `startIndex` advances by — so
+ * the blocks stay adjacent instead of leaving a hole in the stream.
  */
 const MAX_RESULTS_CAP = 40
 
@@ -157,35 +161,57 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
    * biographies. Both readings are therefore always asked and shown together;
    * `mergeResults` orders them by relevance afterwards.
    *
-   * A query that fails does not sink the ones that worked: the error is only
-   * re-thrown when NOTHING came back, because that is the one case where
-   * "found nothing" and "could not ask" would otherwise be confused.
+   * A query that fails does not sink the ones that worked: the error is
+   * re-thrown when NOTHING came back (the one case where "found nothing" and
+   * "could not ask" would otherwise be confused), and otherwise handed to the
+   * service as `partialFailure` so the block is not reported `OK` or cached.
    */
   async search(
     query: string,
-    limit: number,
+    block: ExternalSearchBlock,
     context: ExternalSearchContext,
-  ): Promise<ExternalSearchResult[]> {
+  ): Promise<ExternalSearchBlockResult> {
     const terms = searchTerms(query)
 
     // Pure punctuation: there is no field to restrict to, and an empty query
     // would be the unrestricted full-text search this provider must not run.
-    if (terms.length === 0) return []
+    if (terms.length === 0) return { results: [], exhausted: true }
+
+    const maxResults = Math.min(block.size, MAX_RESULTS_CAP)
+    const startIndex = block.index * maxResults
 
     const seen = new Set<string>()
     const found: ExternalSearchResult[] = []
     let failure: Error | undefined
+    // Only a query that came back SHORT proves its own end. Anything else —
+    // a failed query, one skipped past the deadline, one that filled its window
+    // — leaves the stream possibly longer, and the plan as a whole is exhausted
+    // only when every one of its queries is.
+    let exhausted = true
 
     for (const planned of queryPlan(terms)) {
       // The deadline belongs to the whole source, so once it has passed there
       // is nobody left to answer: returning what we already have beats
       // spending a rate-limit slot on a response nobody will read.
-      if (context.signal.aborted) break
-
-      await context.acquire()
+      if (context.signal.aborted) {
+        exhausted = false
+        failure ??= new ExternalSearchTimeoutError('deadline passed before the plan finished')
+        break
+      }
 
       try {
-        for (const result of await this.fetchVolumes(planned, limit, context.signal)) {
+        // Inside the `try` on purpose: a refused slot (our own limiter) on the
+        // second query must not throw away what the first one already found —
+        // it is a partial failure like any other.
+        await context.acquire()
+
+        const page = await this.fetchVolumes(planned, startIndex, maxResults, context.signal)
+
+        // Judged on RAW volumes: a window the gate emptied is not the end of
+        // the stream, and counting the survivors would make it look like one.
+        if (page.returned >= maxResults) exhausted = false
+
+        for (const result of page.results) {
           if (seen.has(result.id) || !relevanceOf(query, result).matched) continue
 
           seen.add(result.id)
@@ -195,22 +221,47 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
         // `fetchVolumes` only ever throws `ExternalSearchProviderError`; the
         // wrap is here so the rethrow below is typed as an error, not `unknown`.
         failure ??= error instanceof Error ? error : new ExternalSearchProviderError(String(error))
+        exhausted = false
       }
     }
 
     if (found.length === 0 && failure !== undefined) throw failure
 
-    return found.slice(0, limit)
+    // Nothing is truncated here. Every gated volume of the block goes into the
+    // service's pool and gets a page; dropping the tail would lose it for good,
+    // because the next block starts at a deeper `startIndex`.
+    //
+    // A failure with survivors is reported, not swallowed: the block is missing
+    // part of its plan, so it is neither "fully OK" nor cacheable as complete.
+    return {
+      results: found,
+      exhausted,
+      ...(failure === undefined ? {} : { partialFailure: failure }),
+    }
   }
 
+  /**
+   * One query of the plan, at one depth.
+   *
+   * The SAME `startIndex` goes to every query of the plan: the provider's
+   * visible stream is their union, and a union has no single cursor to advance.
+   *
+   * `returned` is the count of RAW volumes, kept apart from `results` (those
+   * that parsed) on purpose — it is what decides whether the window was full,
+   * and the survivors' count would answer a different question. Google's own
+   * `totalItems` is not consulted at all: it is documented as an estimate and
+   * changes between identical requests.
+   */
   private async fetchVolumes(
     query: string,
-    limit: number,
+    startIndex: number,
+    maxResults: number,
     signal: AbortSignal,
-  ): Promise<ExternalSearchResult[]> {
+  ): Promise<{ results: ExternalSearchResult[]; returned: number }> {
     const url = new URL(API_ROOT)
     url.searchParams.set('q', query)
-    url.searchParams.set('maxResults', String(Math.min(limit, MAX_RESULTS_CAP)))
+    url.searchParams.set('maxResults', String(maxResults))
+    url.searchParams.set('startIndex', String(startIndex))
     url.searchParams.set('printType', 'books')
     url.searchParams.set('projection', 'full')
 
@@ -238,11 +289,14 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
 
     // Empty results arrive with no `items` at all — that is "found nothing",
     // not a broken answer.
-    if (!Array.isArray(body.items)) return []
+    if (!Array.isArray(body.items)) return { results: [], returned: 0 }
 
-    return body.items
-      .map((item) => this.toResult(item))
-      .filter((result): result is ExternalSearchResult => result !== undefined)
+    return {
+      results: body.items
+        .map((item) => this.toResult(item))
+        .filter((result): result is ExternalSearchResult => result !== undefined),
+      returned: body.items.length,
+    }
   }
 
   /** A volume with no title or no id is skipped — the rest of the results are unaffected. */

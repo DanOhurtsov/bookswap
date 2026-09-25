@@ -1,23 +1,13 @@
-import { Transform } from 'class-transformer'
-import { IsString, MaxLength, MinLength } from 'class-validator'
-import { CATALOG_LIMITS } from '@bookswap/shared'
-
-const trimmed = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim() : value
+import { PagedSearchQueryDto } from '../../../dto/paged-search-query.dto'
 
 /**
- * The same input as `/catalog/search/candidates`: one "title or ISBN" field.
- * The bounds match deliberately — both requests come from ONE form field, and a
- * divergence would mean the local search accepts a string the external one
- * rejects with a 400.
+ * The same input as `/catalog/search`: one "title or ISBN" field and one page
+ * number. Inherited rather than repeated on purpose — both requests come from
+ * ONE form and ONE set of page controls, and a divergence would mean the local
+ * search accepts an address the external one rejects with a 400, leaving half a
+ * list on screen.
  *
- * Validated here rather than in the service, for the same reason as
- * `LookupQueryDto`: a too-short query must answer 400 BEFORE any external call.
+ * Validated in the DTO rather than in the service, same as `LookupQueryDto`: a
+ * too-short query or a malformed page must answer 400 BEFORE any external call.
  */
-export class ExternalSearchQueryDto {
-  @Transform(trimmed)
-  @IsString()
-  @MinLength(CATALOG_LIMITS.queryMin, { message: 'Мінімум два символи' })
-  @MaxLength(CATALOG_LIMITS.queryMax)
-  q!: string
-}
+export class ExternalSearchQueryDto extends PagedSearchQueryDto {}

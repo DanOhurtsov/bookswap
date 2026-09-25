@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { AuthModule } from '../../../auth/auth.module'
+import { LocalMatchesModule } from '../local-matches.module'
 import { ExternalSearchCache } from './external-search.cache'
 import { ExternalSearchController } from './external-search.controller'
 import { EXTERNAL_SEARCH_PROVIDERS } from './external-search-provider'
@@ -27,7 +28,7 @@ import { ProviderRateLimiter } from './provider-rate-limiter'
  * traffic. That state is lost on restart (see `external-search.cache.ts`).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, LocalMatchesModule],
   controllers: [ExternalSearchController],
   providers: [
     ExternalSearchService,

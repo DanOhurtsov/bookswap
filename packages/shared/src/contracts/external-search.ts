@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { editionFormatSchema } from '../domain/catalog'
 import { isbn13Schema } from '../domain/isbn'
 import { languageCodeSchema } from '../domain/language'
-import { catalogSearchRequestSchema } from './catalog'
+import { SEARCH_PAGE_SIZES, catalogSearchRequestSchema } from './catalog'
 import { bookLookupSourceSchema, type BookLookupResult } from './lookup'
 
 /**
@@ -23,17 +23,11 @@ import { bookLookupSourceSchema, type BookLookupResult } from './lookup'
  */
 
 /**
- * How many external candidates to show.
- *
- * This is a "maybe your book is one of these" hint, not a catalog to page
- * through, so there is no pagination — the same reason as for
- * {@link SEARCH_CANDIDATES_LIMIT}. The cap also applies outwards: it becomes
- * the provider's `limit`/`maxResults`, so we never ask for more than we intend
- * to display.
+ * The same `q`, `page` and `pageSize` as the local search — one input field and
+ * one set of page controls. A divergence would mean the two halves of a single
+ * list disagree about which page the address bar is asking for. How the page is
+ * divided between the halves is `splitSearchPage`.
  */
-export const EXTERNAL_SEARCH_LIMIT = 12
-
-/** The same `q` (min. 2 characters) as the local search — one input field. */
 export const externalSearchRequestSchema = catalogSearchRequestSchema
 
 export type ExternalSearchRequest = z.infer<typeof externalSearchRequestSchema>
@@ -179,9 +173,41 @@ export type ExternalSearchSourceReport = z.infer<typeof externalSearchSourceRepo
  * down must not take another one's results with it, let alone block manual
  * entry.
  */
+/**
+ * Is there a further external record beyond this page?
+ *
+ * Three answers, because "no proof" is not "no":
+ *
+ * - `YES` — PROOF: a record past the page is already in hand (read from a
+ *   source, past the relevance gate and duplicate merging).
+ * - `NO` — every source that answered is exhausted (or the depth limit is
+ *   reached) and nothing lies beyond the page.
+ * - `UNKNOWN` — no proof, but the streams are not exhausted: the per-request
+ *   budget (one uncached block) ran out. The next page may or may not exist.
+ */
+export const EXTERNAL_SEARCH_MORE = ['YES', 'NO', 'UNKNOWN'] as const
+
+export const externalSearchMoreSchema = z.enum(EXTERNAL_SEARCH_MORE)
+
+export type ExternalSearchMore = z.infer<typeof externalSearchMoreSchema>
+
 export const externalSearchResponseSchema = z.object({
-  results: z.array(externalSearchResultSchema).max(EXTERNAL_SEARCH_LIMIT),
+  results: z.array(externalSearchResultSchema).max(Math.max(...SEARCH_PAGE_SIZES)),
   sources: z.array(externalSearchSourceReportSchema),
+  /** Which page this answers (1-based) — the one that was asked for. */
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  more: externalSearchMoreSchema,
+  /**
+   * Is the content of this page final?
+   *
+   * `false` only when the page is short SOLELY because the request's budget ran
+   * out (a deep page on a cold cache): asking again for the same page reads the
+   * next block and continues. A page is complete when it is full or when the
+   * pool has ended. This is the honest "keep loading" signal that replaces a
+   * falsely empty page.
+   */
+  complete: z.boolean(),
 })
 
 export type ExternalSearchResponse = z.infer<typeof externalSearchResponseSchema>

@@ -17,10 +17,13 @@ import {
 } from 'class-validator'
 import {
   AUTHOR_ROLE,
+  CATALOG_DISCOVERY_SCOPES,
   CATALOG_LIMITS,
   EDITION_FORMAT,
   normalizeIsbn13,
   type AuthorRole,
+  type CatalogDiscoveryScope,
+  type SearchPageSize,
   type EditionFormat,
 } from '@bookswap/shared'
 import {
@@ -29,6 +32,7 @@ import {
   IsLanguageCode,
   IsOptionalNotNull,
 } from '../../common/validators'
+import { PagedSearchQueryDto } from './paged-search-query.dto'
 
 // Експортовані: `catalog-correction.dto.ts` (PATCH) повторює ці ж перетворення
 // на тих самих полях, і саме тому бере їх звідси, а не переписує вдруге.
@@ -44,12 +48,20 @@ export const normalizeLanguage = ({ value }: { value: unknown }): unknown =>
 export const normalizeIsbn = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? normalizeIsbn13(value.trim()) : value
 
-export class CatalogSearchDto {
-  @Transform(trimmed)
-  @IsString()
-  @MinLength(CATALOG_LIMITS.queryMin, { message: 'Мінімум два символи' })
-  @MaxLength(CATALOG_LIMITS.queryMax)
-  q!: string
+/**
+ * `q` і `page` цілком успадковані: у `/catalog/search` і
+ * `/catalog/search/external` вхід один і той самий, бо це дві половини одного
+ * списку на одній адресі.
+ */
+export class CatalogSearchDto extends PagedSearchQueryDto {}
+
+/** The browsing scope is independent of metadata search used by the add-book wizard. */
+export class CatalogDiscoveryDto extends PagedSearchQueryDto {
+  declare pageSize: SearchPageSize
+
+  @IsOptional()
+  @IsIn(CATALOG_DISCOVERY_SCOPES)
+  scope: CatalogDiscoveryScope = 'CIRCLE'
 }
 
 /**

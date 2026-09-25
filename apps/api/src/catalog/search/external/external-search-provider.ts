@@ -10,11 +10,12 @@ import type { ExternalSearchResult } from '@bookswap/shared'
  * would force every provider to implement both — and ISBNdb takes no part in
  * title search at all.
  *
- * An implementation returns at most `limit` records and does NOT throw on
- * "found nothing" — that is an empty array. Throwing is for an answer we cannot
- * use (network, 5xx, a body of the wrong shape): the difference between "it is
- * not there" and "we could not ask" reaches the user, and collapsing the second
- * into the first is not allowed.
+ * An implementation reads ONE block of its own stream (see
+ * {@link ExternalSearchBlock}) and does NOT throw on "found nothing" — that is
+ * an empty array. Throwing is for an answer we cannot use (network, 5xx, a body
+ * of the wrong shape): the difference between "it is not there" and "we could
+ * not ask" reaches the user, and collapsing the second into the first is not
+ * allowed.
  *
  * Two obligations beyond that, both about searching by TITLE AND AUTHOR rather
  * than by the book's text:
@@ -33,9 +34,73 @@ export interface ExternalSearchProvider {
 
   search(
     query: string,
-    limit: number,
+    block: ExternalSearchBlock,
     context: ExternalSearchContext,
-  ): Promise<ExternalSearchResult[]>
+  ): Promise<ExternalSearchBlockResult>
+}
+
+/**
+ * Which slice of the provider's own stream to read — in RAW records, before the
+ * relevance gate.
+ *
+ * Deliberately a block of the source stream rather than a page of the result
+ * list, and the difference is the whole of `docs/plan/stage-9-search-pagination.md`:
+ *
+ * - **The offset must be a pure function of the page number.** The address bar
+ *   carries `?page=3`, and a direct link to it has no cursor from page 2 to
+ *   continue from. An opaque cursor is therefore impossible here, not merely
+ *   unnecessary.
+ * - **A block is much wider than a page.** Cutting the outbound request down to
+ *   a page's worth would leave 2–3 raw records per query across four queries,
+ *   and the relevance gate would routinely reduce that to nothing. Wider blocks
+ *   also mean the pages inside one block cost no outbound call at all — they
+ *   come from the cache.
+ * - **Nothing read is ever discarded.** Every gated record of a block enters the
+ *   pool and gets a page; the provider does not truncate.
+ *
+ * A provider whose stream is several queries (Google Books has no boolean OR,
+ * so one search is up to three) applies the SAME offset to each of them: a union
+ * has no single cursor.
+ */
+export interface ExternalSearchBlock {
+  /** 0-based: which block of `size` raw records to read. */
+  readonly index: number
+  /** How many raw records ONE outbound query of this block reads. */
+  readonly size: number
+}
+
+export interface ExternalSearchBlockResult {
+  /** What survived the relevance gate, in the provider's own order. */
+  results: ExternalSearchResult[]
+  /**
+   * Does the provider's stream end at or before this block's end?
+   *
+   * An OBSERVATION, never an estimate: Open Library reports an exact `numFound`,
+   * and Google Books is judged by whether it returned fewer records than asked —
+   * its own `totalItems` is known to be unstable between identical requests and
+   * is not consulted at all.
+   *
+   * `false` when unknown (a query of the block failed): the service may then
+   * spend a block it did not have to, which is cheaper than stopping a page
+   * short because one query happened to fail.
+   *
+   * This is NOT the user-facing "has more": raw records existing says nothing
+   * about any of them passing the relevance gate. That answer is computed by the
+   * service, from records it is already holding.
+   */
+  exhausted: boolean
+  /**
+   * Set when the block is INCOMPLETE: a sub-request of the provider's plan failed
+   * (or was skipped past the deadline) while its siblings answered. The records
+   * that did arrive are kept in `results`, but the block must not pass for a full
+   * answer — the service reports the source as not `OK` for this request and the
+   * cache refuses to store the block, so the next attempt asks again instead of
+   * serving a half-answer for an hour.
+   *
+   * Absent means every sub-request answered. A provider whose sub-requests ALL
+   * failed does not use this; it throws, as before.
+   */
+  partialFailure?: Error
 }
 
 /**
@@ -61,6 +126,9 @@ export interface ExternalSearchContext {
 
 /** DI token: a TypeScript interface does not exist at runtime. */
 export const EXTERNAL_SEARCH_PROVIDERS = 'EXTERNAL_SEARCH_PROVIDERS'
+
+/** The deadline ran out — as opposed to the provider failing. Classified as `TIMEOUT`. */
+export class ExternalSearchTimeoutError extends Error {}
 
 /** The provider answered, but not with something we can rely on (network, 5xx, broken JSON). */
 export class ExternalSearchProviderError extends Error {

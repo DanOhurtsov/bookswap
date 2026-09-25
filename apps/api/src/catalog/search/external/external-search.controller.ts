@@ -41,6 +41,6 @@ export class ExternalSearchController {
   @UseGuards(ThrottlerGuard)
   @Throttle(CATALOG_EXTERNAL_SEARCH_LIMIT)
   external(@Query() dto: ExternalSearchQueryDto): Promise<ExternalSearchResponse> {
-    return this.search.search(dto.q)
+    return this.search.search(dto.q, dto.page, dto.pageSize)
   }
 }

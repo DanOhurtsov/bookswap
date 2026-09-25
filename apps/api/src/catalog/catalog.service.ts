@@ -1,9 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
-  CATALOG_SEARCH_LIMIT,
-  isValidIsbn13,
-  normalizeIsbn13,
+  splitSearchPage,
   type AuthorMatch,
   type AuthorRole,
   type CatalogMatchKind,
@@ -39,8 +37,7 @@ import {
   toWorkAuthors,
   toWorkRevisionSnapshot,
 } from './catalog.mapper'
-import { pinSimilarityThreshold, rankAuthors, rankWorks } from './catalog.search'
-import { escapeLikePattern } from './search-text'
+import { LocalMatches } from './search/local-matches.service'
 import { TextNormalizer } from './text-normalizer'
 
 /** Проєкції, які повторюються в кількох запитах. Один опис — одна форма даних. */
@@ -66,45 +63,48 @@ export class CatalogService {
     private readonly prisma: PrismaService,
     private readonly normalizer: TextNormalizer,
     private readonly canonical: CanonicalWorkService,
+    private readonly local: LocalMatches,
   ) {}
 
   /**
    * §6.3, крок 1–2: «вводить назву або ISBN» → «Можливо, це одна з цих?».
    *
-   * ISBN обробляється окремою гілкою й точним збігом: номер або той самий, або
-   * ні, і «схожий ISBN» — це не схожа книжка, а інша книжка. Зовнішнього API тут
-   * немає (§14.4) — шукаємо у власній базі.
+   * ISBN — окрема гілка з точним збігом: номер або той самий, або ні, і «схожий
+   * ISBN» — це не схожа книжка, а інша книжка. Зовнішнього API тут немає
+   * (§14.4) — шукаємо у власній базі.
+   *
+   * **Ранжування матеріалізується цілком** (`LocalMatches`, до 200 збігів), а
+   * сторінка нарізається тут за `splitSearchPage`: локальна частина спільного
+   * списку — це рядки `[localFrom, localFrom + localCount)`. Один індексований
+   * запит дає і сторінку, і ТОЧНІ `total`/`hasMore` (перелічені рядки, а не
+   * оцінка). Зовнішній ендпоінт рахує той самий `total` сам, тож обидві
+   * половини узгоджено ділять сторінку, не чекаючи одна на одну.
+   *
+   * `docs/plan/stage-9-search-pagination.md` — чому саме так і де межі.
    */
-  async search(query: string): Promise<CatalogSearchResponse> {
-    if (isValidIsbn13(query)) return this.searchByIsbn(normalizeIsbn13(query))
-
-    const term = await this.normalizer.normalize(query)
-
-    if (term === '') return { results: [], authorMatches: [] }
-
-    const pattern = `%${escapeLikePattern(term)}%`
-
-    // Обидва запити — в одній транзакції, бо поріг схожості фіксується саме на
-    // транзакцію (`set_config(..., true)`).
-    const ranked = await this.prisma.$transaction(async (tx) => {
-      await pinSimilarityThreshold(tx)
-
-      const works = await rankWorks(tx, term, pattern, CATALOG_SEARCH_LIMIT)
-      const authors = await rankAuthors(tx, term, pattern, CATALOG_SEARCH_LIMIT)
-
-      return { works, authors }
-    })
+  async search(query: string, page: number, pageSize: number): Promise<CatalogSearchResponse> {
+    const matches = await this.local.rank(query, { authors: true })
+    const total = matches.works.length
+    const { localFrom, localCount } = splitSearchPage({ page, pageSize, localTotal: total })
+    const pageRows = matches.works.slice(localFrom, localFrom + localCount)
 
     const matchKinds = new Map<string, CatalogMatchKind>(
-      ranked.works.map((row) => [row.id, row.titleScore >= row.authorScore ? 'TITLE' : 'AUTHOR']),
+      pageRows.map((row) => [
+        row.id,
+        matches.byIsbn ? 'ISBN' : row.titleScore >= row.authorScore ? 'TITLE' : 'AUTHOR',
+      ]),
     )
 
     return {
       results: await this.hydrateWorks(
-        ranked.works.map((row) => row.id),
+        pageRows.map((row) => row.id),
         (id) => matchKinds.get(id) ?? 'TITLE',
       ),
-      authorMatches: await this.hydrateAuthors(ranked.authors.map((row) => row.id)),
+      authorMatches: await this.hydrateAuthors(matches.authors.map((row) => row.id)),
+      page,
+      pageSize,
+      total,
+      hasMore: total > page * pageSize,
     }
   }
 
@@ -684,18 +684,6 @@ export class CatalogService {
       }
 
       throw error
-    }
-  }
-
-  private async searchByIsbn(isbn13: string): Promise<CatalogSearchResponse> {
-    const edition = await this.prisma.edition.findUnique({
-      where: { isbn13 },
-      select: { workId: true },
-    })
-
-    return {
-      results: edition === null ? [] : await this.hydrateWorks([edition.workId], () => 'ISBN'),
-      authorMatches: [],
     }
   }
 

@@ -41,8 +41,13 @@ describe('GoogleBooksSearchProvider', () => {
     }
   }
 
-  async function search(query = 'тигролови', limit = 5) {
-    return provider.search(query, limit, context())
+  /** A block of the stream; the tests below care about what survived the gate. */
+  async function searchBlock(query = 'тигролови', size = 5, index = 0) {
+    return provider.search(query, { index, size }, context())
+  }
+
+  async function search(query = 'тигролови', size = 5) {
+    return (await searchBlock(query, size)).results
   }
 
   /** The `q` of the n-th outbound call. */
@@ -81,6 +86,130 @@ describe('GoogleBooksSearchProvider', () => {
 
     const [url] = fetchMock.mock.calls[0] as [URL]
     expect(url.searchParams.get('maxResults')).toBe('40')
+  })
+
+  // --- Блоки стрічки --------------------------------------------------------
+
+  it('той самий startIndex іде в КОЖЕН запит плану — в обʼєднання курсора немає', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }))
+
+    await searchBlock('тигролови багряний', 24, 2)
+
+    const starts = fetchMock.mock.calls.map(
+      ([url]: [URL]) => url.searchParams.get('startIndex') ?? '',
+    )
+
+    expect(starts.length).toBeGreaterThan(1)
+    expect(new Set(starts)).toEqual(new Set(['48']))
+  })
+
+  it('коли блок ширший за стелю API, зсув рахується від обрізаної ширини', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }))
+
+    await searchBlock('тигролови', 200, 1)
+
+    const [url] = fetchMock.mock.calls[0] as [URL]
+    // Інакше між блоками лишилася б діра: просили 40, а зсунулися на 200.
+    expect(url.searchParams.get('maxResults')).toBe('40')
+    expect(url.searchParams.get('startIndex')).toBe('40')
+  })
+
+  it('повне вікно означає, що стрічка триває', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        items: Array.from({ length: 2 }, (_, index) =>
+          volume(`v${String(index)}`, { title: 'Тигролови' }),
+        ),
+      }),
+    )
+
+    await expect(searchBlock('тигролови', 2)).resolves.toMatchObject({ exhausted: false })
+  })
+
+  it('коротке вікно в усіх запитах плану означає кінець стрічки', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ items: [volume('v0', { title: 'Тигролови' })], totalItems: 99_999 }),
+    )
+
+    // `totalItems` навмисно ігнорується: він оцінковий і міняється між
+    // однаковими запитами. Вирішує спостереження — вікно повернулося коротким.
+    await expect(searchBlock('тигролови', 4)).resolves.toMatchObject({ exhausted: true })
+  })
+
+  it('невдалий запит плану не дозволяє оголосити стрічку вичерпаною', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [volume('v0', { title: 'Тигролови', authors: ['Іван Багряний'] })],
+        }),
+      )
+      .mockResolvedValue(jsonResponse({}, 503))
+
+    const block = await searchBlock('тигролови багряний', 4)
+
+    expect(block.results).toHaveLength(1)
+    // Про глибину запиту, який упав, ми не знаємо нічого — і не вдаємо, що знаємо.
+    expect(block.exhausted).toBe(false)
+  })
+
+  it('№5: збій одного підзапиту при успішних сусідніх — partialFailure, а не повний блок', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [volume('v0', { title: 'Тигролови', authors: ['Іван Багряний'] })],
+        }),
+      )
+      .mockResolvedValue(jsonResponse({}, 503))
+
+    const block = await searchBlock('тигролови багряний', 0)
+
+    expect(block.results).toHaveLength(1)
+    expect(block.partialFailure).toBeInstanceOf(ExternalSearchProviderError)
+  })
+
+  it('№5: усі підзапити відповіли — partialFailure немає', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ items: [volume('v0', { title: 'Тигролови', authors: ['Іван Багряний'] })] }),
+    )
+
+    const block = await searchBlock('тигролови багряний', 0)
+
+    expect(block.partialFailure).toBeUndefined()
+  })
+
+  it('№5: відмова власного ліміту на другому запиті не губить уже знайдене', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ items: [volume('v0', { title: 'Тигролови', authors: ['Іван Багряний'] })] }),
+    )
+
+    let slots = 0
+    const stingy: ExternalSearchContext = {
+      signal: new AbortController().signal,
+      acquire: () => {
+        slots += 1
+
+        return slots === 1 ? Promise.resolve() : Promise.reject(new Error('ліміт'))
+      },
+    }
+
+    const block = await provider.search('тигролови багряний', { index: 0, size: 24 }, stingy)
+
+    expect(block.results).toHaveLength(1)
+    expect(block.partialFailure?.message).toBe('ліміт')
+  })
+
+  it('нічого не обрізає: блок віддає все, що пройшло ворота', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        items: Array.from({ length: 9 }, (_, index) =>
+          volume(`v${String(index)}`, { title: 'Книжка' }),
+        ),
+      }),
+    )
+
+    // Обрізати тут означало б загубити томи назавжди: наступний блок починається
+    // з дальшого startIndex.
+    await expect(search('книжка', 3)).resolves.toHaveLength(9)
   })
 
   // --- Поля пошуку ----------------------------------------------------------

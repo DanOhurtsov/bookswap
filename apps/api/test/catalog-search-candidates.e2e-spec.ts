@@ -76,9 +76,16 @@ describe('GET /catalog/search/candidates (e2e)', () => {
     return workDetailResponseSchema.parse(response.body)
   }
 
-  async function candidates(query: string): Promise<SearchCandidatesResponse> {
+  async function candidates(
+    query: string,
+    page?: number,
+    pageSize?: number,
+  ): Promise<SearchCandidatesResponse> {
+    const suffix =
+      (page === undefined ? '' : `&page=${String(page)}`) +
+      (pageSize === undefined ? '' : `&pageSize=${String(pageSize)}`)
     const response = await request(app.getHttpServer())
-      .get(url(`/catalog/search/candidates?q=${encodeURIComponent(query)}`))
+      .get(url(`/catalog/search/candidates?q=${encodeURIComponent(query)}${suffix}`))
       .set('Cookie', cookie)
       .expect(200)
 
@@ -243,5 +250,71 @@ describe('GET /catalog/search/candidates (e2e)', () => {
     const results = await candidates(`Серія кандидатів ${token} том`)
 
     expect(results.candidates.length).toBeLessThanOrEqual(SEARCH_CANDIDATES_LIMIT)
+  })
+
+  it('без page і pageSize — перший екран (топ-10): так кличе його перевірка дублікатів', async () => {
+    const token = marker()
+
+    for (let index = 0; index < 12; index += 1) {
+      await createWork({
+        title: `Гортана серія ${token} том ${String(index).padStart(2, '0')}`,
+        origLang: 'uk',
+        authors: [{ name: `Плідний автор ${token}` }],
+      })
+    }
+
+    const query = `Гортана серія ${token} том`
+    const top = await candidates(query)
+    const first = await candidates(query, 1, 10)
+
+    expect(top.candidates.map((candidate) => candidate.work.id)).toEqual(
+      first.candidates.map((candidate) => candidate.work.id),
+    )
+    expect(top).toMatchObject({ page: 1, pageSize: 10, hasMore: true })
+  })
+
+  it('гортається: сторінки не повторюють і не гублять твори, pageSize міняє розмір', async () => {
+    const token = marker()
+
+    for (let index = 0; index < 23; index += 1) {
+      await createWork({
+        title: `Довга серія ${token} том ${String(index).padStart(2, '0')}`,
+        origLang: 'uk',
+        authors: [{ name: `Плідний автор ${token}` }],
+      })
+    }
+
+    const query = `Довга серія ${token} том`
+    const size10: string[] = []
+
+    for (let page = 1; page <= 4; page += 1) {
+      const response = await candidates(query, page, 10)
+
+      size10.push(...response.candidates.map((candidate) => candidate.work.id))
+      if (!response.hasMore) break
+    }
+
+    const size20: string[] = []
+
+    for (let page = 1; page <= 2; page += 1) {
+      const response = await candidates(query, page, 20)
+
+      if (page === 1) expect(response.candidates).toHaveLength(20)
+      size20.push(...response.candidates.map((candidate) => candidate.work.id))
+      if (!response.hasMore) break
+    }
+
+    expect(new Set(size10).size).toBe(size10.length)
+    // Той самий тотальний порядок при будь-якому розмірі сторінки.
+    // (обидва обходи читають рівно по 40 рядків: 4×10 і 2×20)
+    expect(size20).toEqual(size10.slice(0, size20.length))
+    expect(size10.length).toBeGreaterThanOrEqual(23)
+  })
+
+  it('недопустимий pageSize — 400', async () => {
+    await request(app.getHttpServer())
+      .get(url('/catalog/search/candidates?q=шантарам&pageSize=7'))
+      .set('Cookie', cookie)
+      .expect(400)
   })
 })

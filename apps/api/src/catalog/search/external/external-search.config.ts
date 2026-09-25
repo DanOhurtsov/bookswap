@@ -20,8 +20,25 @@ const DEFAULT_TIMEOUT_MS = 4_000
  */
 const DEFAULT_CACHE_TTL_MS = 60 * 60_000
 
-/** How many distinct queries to keep. Entries are evicted LRU. */
+/** How many distinct blocks to keep. Entries are evicted LRU. */
 const DEFAULT_CACHE_MAX_ENTRIES = 500
+
+/**
+ * How many RAW records one outbound query of one block reads.
+ *
+ * Not the page size, and deliberately several times larger. A page's worth per
+ * query would be 2–3 records across the four queries one search costs, and the
+ * relevance gate would routinely leave nothing at all; a block this wide usually
+ * covers two or three pages, and those pages then cost no outbound call — they
+ * come out of the cache.
+ *
+ * Not the API ceiling either (Google Books documents `maxResults` = 40): with
+ * `projection=full` a 40-volume answer is heavy, the deadline is a single 4s for
+ * the whole source, and three such queries run behind a 1s outbound interval.
+ * 24 is 2.4 pages — enough depth to keep the seam out of sight, small enough to
+ * arrive in time. See `docs/plan/stage-9-search-pagination.md`.
+ */
+const DEFAULT_BLOCK_SIZE = 24
 
 /**
  * Minimum interval between two calls to ONE source from this process.
@@ -55,6 +72,10 @@ export function externalSearchCacheTtlMs(): number {
 
 export function externalSearchCacheMaxEntries(): number {
   return fromEnv('CATALOG_EXTERNAL_SEARCH_CACHE_MAX_ENTRIES', DEFAULT_CACHE_MAX_ENTRIES)
+}
+
+export function externalSearchBlockSize(): number {
+  return fromEnv('CATALOG_EXTERNAL_SEARCH_BLOCK_SIZE', DEFAULT_BLOCK_SIZE)
 }
 
 export function externalSearchMinIntervalMs(): number {

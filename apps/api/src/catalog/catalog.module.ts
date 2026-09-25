@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common'
+import { AccessModule } from '../access/access.module'
 import { AuthModule } from '../auth/auth.module'
 import { CanonicalWorkModule } from './canonical/canonical-work.module'
 import { CatalogController } from './catalog.controller'
 import { CatalogService } from './catalog.service'
 import { LookupModule } from './lookup/lookup.module'
+import { LocalMatchesModule } from './search/local-matches.module'
+import { CatalogDiscoveryService } from './search/catalog-discovery.service'
 import { ExternalSearchModule } from './search/external/external-search.module'
 import { SearchCandidatesModule } from './search/search-candidates.module'
 import { TextNormalizer } from './text-normalizer'
@@ -21,14 +24,16 @@ import { TextNormalizer } from './text-normalizer'
  */
 @Module({
   imports: [
+    AccessModule,
     AuthModule,
     CanonicalWorkModule,
     LookupModule,
     SearchCandidatesModule,
     ExternalSearchModule,
+    LocalMatchesModule,
   ],
   controllers: [CatalogController],
-  providers: [CatalogService, TextNormalizer],
+  providers: [CatalogService, CatalogDiscoveryService, TextNormalizer],
   exports: [TextNormalizer],
 })
 export class CatalogModule {}

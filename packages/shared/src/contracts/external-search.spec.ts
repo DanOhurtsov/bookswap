@@ -79,6 +79,10 @@ describe('externalSearchResponseSchema', () => {
   it('несе статус кожного опитаного джерела, включно з тим, що впало', () => {
     const parsed = externalSearchResponseSchema.parse({
       results: [],
+      page: 1,
+      pageSize: 10,
+      more: 'NO',
+      complete: true,
       sources: [
         { source: 'OPEN_LIBRARY', status: 'ERROR' },
         { source: 'GOOGLE_BOOKS', status: 'TIMEOUT' },
@@ -91,19 +95,63 @@ describe('externalSearchResponseSchema', () => {
   it('розрізняє власне обмеження частоти й збій провайдера', () => {
     const parsed = externalSearchResponseSchema.parse({
       results: [],
+      page: 1,
+      pageSize: 10,
+      more: 'NO',
+      complete: true,
       sources: [{ source: 'OPEN_LIBRARY', status: 'RATE_LIMITED' }],
     })
 
     expect(parsed.sources[0]?.status).toBe('RATE_LIMITED')
   })
 
-  it('не приймає більше за EXTERNAL_SEARCH_LIMIT результатів', () => {
-    const results = Array.from({ length: 13 }, (_, index) => ({
+  it('не приймає більше за найбільший розмір сторінки', () => {
+    const results = Array.from({ length: 50 + 1 }, (_, index) => ({
       ...EDITION,
       id: `GOOGLE_BOOKS:v${String(index)}`,
     }))
 
-    expect(externalSearchResponseSchema.safeParse({ results, sources: [] }).success).toBe(false)
+    expect(
+      externalSearchResponseSchema.safeParse({
+        results,
+        sources: [],
+        page: 1,
+        pageSize: 10,
+        more: 'NO',
+        complete: true,
+      }).success,
+    ).toBe(false)
+  })
+
+  it('сторінка й ознака «є ще» обовʼязкові: без них список не має керування', () => {
+    expect(externalSearchResponseSchema.safeParse({ results: [], sources: [] }).success).toBe(false)
+  })
+
+  it('несе номер сторінки й доказ, що є наступні записи; «невідомо» — окремий стан', () => {
+    const parsed = externalSearchResponseSchema.parse({
+      results: [],
+      sources: [],
+      page: 3,
+      pageSize: 10,
+      more: 'YES',
+      complete: true,
+    })
+
+    expect(parsed).toMatchObject({ page: 3, more: 'YES' })
+  })
+
+  it('«невідомо» — окремий стан, не «немає»', () => {
+    const parsed = externalSearchResponseSchema.parse({
+      results: [],
+      sources: [],
+      page: 3,
+      pageSize: 10,
+      more: 'UNKNOWN',
+      complete: false,
+    })
+
+    expect(parsed).toMatchObject({ more: 'UNKNOWN', complete: false })
+    expect(externalSearchResponseSchema.safeParse({ ...parsed, more: true }).success).toBe(false)
   })
 })
 

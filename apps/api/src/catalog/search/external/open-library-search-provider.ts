@@ -5,6 +5,8 @@ import { nonEmptyString, stringArray } from '../../lookup/lookup-provider.utils'
 import { iso6391FromMarc } from '../../lookup/marc-language'
 import {
   ExternalSearchProviderError,
+  type ExternalSearchBlock,
+  type ExternalSearchBlockResult,
   type ExternalSearchContext,
   type ExternalSearchProvider,
 } from './external-search-provider'
@@ -20,6 +22,22 @@ const SEARCH_API_ROOT = 'https://openlibrary.org/search.json'
  * NOT among them — see `toResult`.
  */
 const FIELDS = 'key,title,author_name,first_publish_year,language,cover_i'
+
+/** Open Library sometimes stores numeric HTML references in title and author names. */
+function decodeNumericEntities(value: string): string {
+  return value.replace(
+    /&#(?:([0-9]{1,7})|[xX]([0-9a-fA-F]{1,6}));/gu,
+    (entity, decimal: string | undefined, hex: string | undefined) => {
+      const codePoint = decimal === undefined ? Number.parseInt(hex ?? '', 16) : Number(decimal)
+
+      if (codePoint < 1 || codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+        return entity
+      }
+
+      return String.fromCodePoint(codePoint)
+    },
+  )
+}
 
 /** `cover_i` → URL. `M` is the medium size, the one Open Library itself shows. */
 function coverUrlFrom(coverId: unknown): string | undefined {
@@ -75,6 +93,34 @@ function crossFieldQuery(terms: readonly string[]): string {
 }
 
 /**
+ * Has this block reached the end of the result set?
+ *
+ * `numFound` is authoritative when `numFoundExact` is not explicitly `false` —
+ * the API returns both, and the field exists precisely to say when the count is
+ * an approximation. Without a trustworthy count the question is answered by
+ * observation instead: a block that came back shorter than it asked for has no
+ * successor.
+ *
+ * Note what this does NOT claim: it is about RAW documents. Whether any of them
+ * would survive the relevance gate is a different question, answered by the
+ * service from records it already holds.
+ */
+function streamEnded(
+  body: Record<string, unknown>,
+  offset: number,
+  size: number,
+  returned: number,
+): boolean {
+  const numFound = body.numFound
+
+  if (body.numFoundExact !== false && typeof numFound === 'number' && Number.isInteger(numFound)) {
+    return offset + returned >= numFound
+  }
+
+  return returned < size
+}
+
+/**
  * Title search through the Open Library Search API.
  *
  * Every document is a `WORK`, not an edition, and everything else follows from
@@ -103,20 +149,26 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
 
   async search(
     query: string,
-    limit: number,
+    block: ExternalSearchBlock,
     context: ExternalSearchContext,
-  ): Promise<ExternalSearchResult[]> {
+  ): Promise<ExternalSearchBlockResult> {
     const terms = searchTerms(query)
 
     // No terms at all means the query was pure punctuation. There is nothing to
     // restrict the search to, and asking with an empty query would be the
     // unrestricted search this provider must not perform.
-    if (terms.length === 0) return []
+    if (terms.length === 0) return { results: [], exhausted: true }
+
+    const offset = block.index * block.size
 
     const url = new URL(SEARCH_API_ROOT)
     url.searchParams.set('q', crossFieldQuery(terms))
     url.searchParams.set('fields', FIELDS)
-    url.searchParams.set('limit', String(limit))
+    url.searchParams.set('limit', String(block.size))
+    // `offset` is Open Library's own paging parameter, and the whole block
+    // position is `index * size` — a pure function of the page number, which is
+    // what makes a direct link to page 3 work without a cursor from page 2.
+    url.searchParams.set('offset', String(offset))
 
     await context.acquire()
 
@@ -141,22 +193,28 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
       throw new ExternalSearchProviderError('Open Library search повернув не JSON-об’єкт')
     }
 
-    const documents = (body as Record<string, unknown>).docs
+    const payload = body as Record<string, unknown>
+    const documents = payload.docs
 
     // Empty results arrive as `docs: []`; a missing `docs` likewise means
     // "nothing", not a reason to fail the whole search.
-    if (!Array.isArray(documents)) return []
+    if (!Array.isArray(documents)) return { results: [], exhausted: true }
 
-    return (
-      documents
-        .map((document) => this.toResult(document))
-        .filter((result): result is ExternalSearchResult => result !== undefined)
-        // The gate, even though the query was field-restricted: Solr matches
-        // stemmed and transliterated forms, so a document can come back whose
-        // title and authors say none of what was asked.
-        .filter((result) => relevanceOf(query, result).matched)
-        .slice(0, limit)
-    )
+    const results = documents
+      .map((document) => this.toResult(document))
+      .filter((result): result is ExternalSearchResult => result !== undefined)
+      // The gate, even though the query was field-restricted: Solr matches
+      // stemmed and transliterated forms, so a document can come back whose
+      // title and authors say none of what was asked.
+      .filter((result) => relevanceOf(query, result).matched)
+
+    // Exhaustion is judged on the RAW documents, not on what the gate let
+    // through: a block where the gate dropped everything is not the end of the
+    // stream, and truncating to `results.length` would make it look like one.
+    return {
+      results,
+      exhausted: streamEnded(payload, offset, block.size, documents.length),
+    }
   }
 
   /** A document with no title, or no recognizable `/works/OL…W`, is skipped. */
@@ -165,11 +223,12 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
 
     const document = value as Record<string, unknown>
     const workExternalId = workIdFromKey(document.key)
-    const title = nonEmptyString(document.title)
+    const rawTitle = nonEmptyString(document.title)
+    const title = rawTitle === undefined ? undefined : decodeNumericEntities(rawTitle)
 
     if (workExternalId === undefined || title === undefined) return undefined
 
-    const authors = stringArray(document.author_name)
+    const authors = stringArray(document.author_name)?.map(decodeNumericEntities)
     const language = unambiguousLanguage(document.language)
     const coverUrl = coverUrlFrom(document.cover_i)
     const firstPublished = document.first_publish_year
