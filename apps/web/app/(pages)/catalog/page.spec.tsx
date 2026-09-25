@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { CatalogSearchResult, Edition, ExternalSearchResult } from '@bookswap/shared'
@@ -47,6 +47,7 @@ function deferred<T>() {
 }
 
 const ISBN = '9786177585113'
+const COVER_URL = 'https://covers.openlibrary.org/b/id/42-M.jpg'
 
 function edition(overrides: Partial<Edition> & { id: string }): Edition {
   return {
@@ -514,5 +515,69 @@ describe('/catalog — передавання зовнішнього запис�
     )
 
     setItem.mockRestore()
+  })
+})
+
+describe('/catalog — обкладинки', () => {
+  /** Заглушка навмисно `aria-hidden`, тож шукаємо її за класом розмітки. */
+  function placeholders(row: HTMLElement): Element[] {
+    return [...row.querySelectorAll('.lookup-card__cover--empty')]
+  }
+
+  it('без обкладинки показує заглушку — і в локальній, і в зовнішній картці', async () => {
+    routeApi({
+      '/catalog/search/external': () =>
+        Promise.resolve({ results: [externalEdition], sources: OK_SOURCES }),
+      '/catalog/search': () => Promise.resolve({ results: [localResult()], authorMatches: [] }),
+    })
+
+    renderAt('Тигролови')
+
+    await screen.findByText('А-БА-БА-ГА-ЛА-МА-ГА', { exact: false })
+
+    // Обидва джерела мовчать про обкладинку — і обидва рядки виглядають однаково.
+    const rows = cards()
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect(placeholders(row)).toHaveLength(1)
+      expect(within(row).queryByRole('img')).toBeNull()
+    }
+  })
+
+  it('наявну обкладинку показує як раніше', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve({ results: [], sources: OK_SOURCES }),
+      '/catalog/search': () =>
+        Promise.resolve({
+          results: [localResult({ editions: [edition({ id: 'edition-1', coverUrl: COVER_URL })] })],
+          authorMatches: [],
+        }),
+    })
+
+    renderAt('Тигролови')
+
+    const cover = await screen.findByAltText('Обкладинка «Тигролови»')
+    expect(cover).toHaveAttribute('src', COVER_URL)
+    expect(placeholders(cards()[0] as HTMLElement)).toHaveLength(0)
+  })
+
+  it('якщо обкладинка не завантажилася, на її місці зʼявляється заглушка', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve({ results: [], sources: OK_SOURCES }),
+      '/catalog/search': () =>
+        Promise.resolve({
+          results: [localResult({ editions: [edition({ id: 'edition-1', coverUrl: COVER_URL })] })],
+          authorMatches: [],
+        }),
+    })
+
+    renderAt('Тигролови')
+
+    fireEvent.error(await screen.findByAltText('Обкладинка «Тигролови»'))
+
+    // Розмір коробки той самий — рядок не стрибає.
+    const [box] = placeholders(cards()[0] as HTMLElement)
+    expect(box).toHaveClass('lookup-card__cover')
+    expect(screen.queryByAltText('Обкладинка «Тигролови»')).toBeNull()
   })
 })

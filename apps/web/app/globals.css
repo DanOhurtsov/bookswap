@@ -450,6 +450,24 @@ button:not([data-ui='button']):disabled {
   background: var(--field-bg);
 }
 
+/* Заглушка для книжки без обкладинки. Та сама клітинка, ті самі розміри й
+   заокруглення, що й у справжньої обкладинки, — рядок не має стрибати через те,
+   що джерело не знало посилання. Тому це не «порожнє місце», а помітно
+   нейтральний прямокутник з іконкою: відсутність обкладинки має читатися як
+   відсутність, а не як зламане зображення. */
+.lookup-card__cover--empty {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--bookswap-muted);
+}
+
+.lookup-card__cover--empty svg {
+  width: 1.75rem;
+  height: 1.75rem;
+  stroke-width: 1.25;
+}
+
 .lookup-card__content {
   display: grid;
   align-content: start;

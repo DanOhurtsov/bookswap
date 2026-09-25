@@ -1,5 +1,5 @@
-import Image from 'next/image'
 import type { ReactNode } from 'react'
+import { BookCover } from '@/components/BookCover'
 
 type ResultCardShellProps = {
   /** Where this record came from: «Наш каталог», «Open Library», «Google Books». */
@@ -26,9 +26,10 @@ type ResultCardShellProps = {
  * Empty fields are omitted rather than filled with a dash or "unknown" (§6.3
  * item 7). A source that said nothing about the year leaves no line.
  *
- * `unoptimized` on every cover, not just the external ones: `next/image` throws
- * on a host absent from `images.remotePatterns` (`next.config.ts`), and one
- * such cover anywhere in this list would take the whole list down with it.
+ * The cover is the one exception, and deliberately so: `BookCover` always
+ * renders a box, a picture or a placeholder. An omitted cover would collapse
+ * the first grid column and re-align every other row in the list around
+ * whichever sources happened to know a cover URL.
  */
 export function ResultCardShell({
   badge,
@@ -43,16 +44,7 @@ export function ResultCardShell({
 
   return (
     <li className="book lookup-card">
-      {coverUrl !== undefined && (
-        <Image
-          className="lookup-card__cover"
-          src={coverUrl}
-          alt={coverAlt}
-          width={72}
-          height={108}
-          unoptimized
-        />
-      )}
+      <BookCover url={coverUrl} alt={coverAlt} />
 
       <div className="lookup-card__content">
         <span className="chip">{badge}</span>

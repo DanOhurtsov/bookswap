@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { BookLookupResult, WorkDetailResponse } from '@bookswap/shared'
@@ -1133,5 +1133,114 @@ describe('спільний список результатів', () => {
 
     expect(await screen.findByText(/чи є там ця книжка, невідомо/)).toBeInTheDocument()
     expect(screen.queryByText(/Нічого схожого не знайшлося/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * `/catalog/new` мусить поводитися з обкладинками так само, як `/catalog`:
+ * той самий `BookCover` під усіма картками — локальними, зовнішніми та
+ * карткою пошуку за ISBN.
+ */
+describe('обкладинки в результатах', () => {
+  const COVER_URL = 'https://covers.openlibrary.org/b/id/42-M.jpg'
+
+  const externalEdition = {
+    id: 'GOOGLE_BOOKS:v1',
+    kind: 'EDITION' as const,
+    sources: ['GOOGLE_BOOKS' as const],
+    title: 'Кобзар',
+    authors: ['Тарас Шевченко'],
+    publishedYear: 2021,
+    publisher: 'А-БА-БА-ГА-ЛА-МА-ГА',
+  }
+
+  const okSources = [
+    { source: 'OPEN_LIBRARY', status: 'OK' },
+    { source: 'GOOGLE_BOOKS', status: 'OK' },
+  ]
+
+  /** Заглушка навмисно `aria-hidden`, тож шукаємо її за класом розмітки. */
+  function placeholders(): Element[] {
+    return [...document.querySelectorAll('.lookup-card__cover--empty')]
+  }
+
+  async function searchFor(query: string) {
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText('Назва або ISBN'), query)
+    await user.click(screen.getByRole('button', { name: 'Шукати' }))
+
+    return user
+  }
+
+  it('без обкладинки показує заглушку — і в локальній, і в зовнішній картці', async () => {
+    routeApi({
+      '/catalog/search/external': () =>
+        Promise.resolve({ results: [externalEdition], sources: okSources }),
+      '/catalog/search/candidates': () => Promise.resolve({ candidates: [candidate] }),
+    })
+
+    renderSearch()
+    await searchFor('Кобзар')
+
+    await screen.findByText('А-БА-БА-ГА-ЛА-МА-ГА', { exact: false })
+
+    expect(placeholders()).toHaveLength(2)
+    expect(screen.queryByRole('img')).toBeNull()
+  })
+
+  it('наявну обкладинку показує як раніше', async () => {
+    const withCover = {
+      ...candidate,
+      editions: [{ ...candidate.editions[0]!, coverUrl: COVER_URL }],
+    }
+
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve({ results: [], sources: okSources }),
+      '/catalog/search/candidates': () => Promise.resolve({ candidates: [withCover] }),
+    })
+
+    renderSearch()
+    await searchFor('Кобзар')
+
+    const cover = await screen.findByAltText('Обкладинка «Кобзар»')
+    expect(cover).toHaveAttribute('src', COVER_URL)
+    expect(placeholders()).toHaveLength(0)
+  })
+
+  it('якщо обкладинка не завантажилася, на її місці зʼявляється заглушка', async () => {
+    const withCover = {
+      ...candidate,
+      editions: [{ ...candidate.editions[0]!, coverUrl: COVER_URL }],
+    }
+
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve({ results: [], sources: okSources }),
+      '/catalog/search/candidates': () => Promise.resolve({ candidates: [withCover] }),
+    })
+
+    renderSearch()
+    await searchFor('Кобзар')
+
+    fireEvent.error(await screen.findByAltText('Обкладинка «Кобзар»'))
+
+    // Та сама коробка: рядок не змінює розмір через збій завантаження.
+    expect(placeholders()).toHaveLength(1)
+    expect(placeholders()[0]).toHaveClass('lookup-card__cover')
+    expect(screen.queryByAltText('Обкладинка «Кобзар»')).toBeNull()
+  })
+
+  it('картка пошуку за ISBN без обкладинки теж показує заглушку', async () => {
+    routeApi({
+      '/catalog/lookup': () => Promise.resolve({ result: lookup }),
+      '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
+    })
+
+    renderSearch()
+    await searchFor(ISBN)
+
+    // Пошук за ISBN зовнішнього пошуку за назвою не запускає — на екрані сама
+    // картка знахідки, і в неї теж є ліва колонка.
+    await screen.findByText('Lookup title')
+    expect(placeholders()).toHaveLength(1)
   })
 })
