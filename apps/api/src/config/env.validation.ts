@@ -114,6 +114,19 @@ export const envSchema = z
       .regex(/^[A-Za-z0-9_]{5,32}$/, 'ім’я бота — 5–32 символи з A-Z, a-z, 0-9, _ і без @')
       .optional(),
     TELEGRAM_WEBHOOK_SECRET: telegramWebhookSecret.optional(),
+
+    /**
+     * Етап 9: ключ HMAC-SHA-256 для `Invitation.recipientEmailHash`. Хеш адреси
+     * без ключа можна зворотно підібрати словником, тож ключ обов'язковий у
+     * production, ≥ 32 символи, і спільний для всіх інстансів — інакше ліміти на
+     * адресу не збігалися б. Поза production без нього береться випадковий ключ
+     * процесу (див. `InviteEmailHasher`): непередбачуваний, але не переживає рестарт.
+     */
+    INVITE_EMAIL_HMAC_SECRET: z
+      .string()
+      .min(32, 'щонайменше 32 символи (openssl rand -hex 32)')
+      .max(256)
+      .optional(),
   })
   .superRefine((env, ctx) => {
     /**
@@ -130,6 +143,14 @@ export const envSchema = z
         message:
           'у production потрібен справжній провайдер (resend): dev нічого не надсилає ' +
           'і пише одноразові токени в лог',
+      })
+    }
+
+    if (env.NODE_ENV === 'production' && env.INVITE_EMAIL_HMAC_SECRET === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['INVITE_EMAIL_HMAC_SECRET'],
+        message: 'обов’язкова в production: ключ HMAC для лімітів email-запрошень',
       })
     }
 

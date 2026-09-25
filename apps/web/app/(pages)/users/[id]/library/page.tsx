@@ -3,19 +3,14 @@
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
-import {
-  createLoanRequestSchema,
-  type VisibleCopy,
-  type VisibleLibraryGroup,
-} from '@bookswap/shared'
+import type { VisibleCopy, VisibleLibraryGroup } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
-import { TextField } from '@/components/Form/FormFields'
+import { RequestCopyForm } from '@/components/RequestCopyForm'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../../../lib/api'
 import { CONDITION_LABELS, COPY_STATUS_LABELS, formatDate } from '../../../../lib/labels'
 import { useFriendLibrary } from '../../../../lib/use-library'
 import { useSession } from '../../../../lib/use-session'
-import { validate, type FieldErrors } from '../../../../lib/validation'
 
 /**
  * §6.5: бібліотека іншої людини.
@@ -202,10 +197,6 @@ function CopyAction({
   onRequest: (copyId: string, body: Record<string, unknown>) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
-  const [message, setMessage] = useState('')
-  const [proposedDueAt, setProposedDueAt] = useState('')
-  const [errors, setErrors] = useState<FieldErrors>({})
-
   const busy = busyKey !== undefined
 
   if (copy.myActiveLoan !== null) {
@@ -263,68 +254,17 @@ function CopyAction({
     )
   }
 
-  function submit(): void {
-    const result = validate(createLoanRequestSchema, {
-      copyId: copy.id,
-      message: message.trim() === '' ? undefined : message,
-      proposedDueAt: proposedDueAt === '' ? undefined : proposedDueAt,
-    })
-
-    if (!result.ok) {
-      setErrors(result.errors)
-      return
-    }
-
-    setErrors({})
-    void onRequest(copy.id, {
-      ...(result.data.message === undefined ? {} : { message: result.data.message }),
-      ...(result.data.proposedDueAt === undefined
-        ? {}
-        : { proposedDueAt: result.data.proposedDueAt }),
-    })
-  }
-
   return (
-    <div className="form">
-      <TextField
-        id={`message-${copy.id}`}
-        label="Повідомлення"
-        hint="Побачить власник разом із запитом."
-        autoComplete="off"
-        value={message}
-        error={errors.message}
-        onChange={(event) => {
-          setMessage(event.target.value)
-        }}
-      />
-
-      <TextField
-        id={`due-${copy.id}`}
-        label="Хочу повернути до"
-        type="date"
-        hint="Побажання: остаточний термін встановить власник."
-        value={proposedDueAt}
-        error={errors.proposedDueAt}
-        onChange={(event) => {
-          setProposedDueAt(event.target.value)
-        }}
-      />
-
-      <div className="person__actions">
-        <button type="button" disabled={busy} onClick={submit}>
-          {busyKey === `request:${copy.id}` ? 'Надсилаю…' : 'Надіслати запит'}
-        </button>
-        <button
-          type="button"
-          className="button--ghost"
-          disabled={busy}
-          onClick={() => {
-            setOpen(false)
-          }}
-        >
-          Скасувати
-        </button>
-      </div>
-    </div>
+    <RequestCopyForm
+      copyId={copy.id}
+      busy={busy}
+      submitting={busyKey === `request:${copy.id}`}
+      onSubmit={(body) => {
+        void onRequest(copy.id, body)
+      }}
+      onCancel={() => {
+        setOpen(false)
+      }}
+    />
   )
 }

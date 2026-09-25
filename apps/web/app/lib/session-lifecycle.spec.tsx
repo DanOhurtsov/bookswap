@@ -30,6 +30,7 @@ const mockPush = jest.fn()
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
+  useSearchParams: () => new URLSearchParams(),
 }))
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('./api')

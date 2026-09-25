@@ -32,6 +32,9 @@ function lastOf<T>(items: readonly T[]): T {
  * the real hook, mocking only the transport.
  */
 
+// Holders have their own component tests; here the work's own fetch sequence is the subject.
+jest.mock('@/features/network/index.client', () => ({ HoldersPanel: () => null }))
+
 jest.mock('@/app/lib/api', () => {
   const actual = jest.requireActual<typeof import('@/app/lib/api')>('@/app/lib/api')
 

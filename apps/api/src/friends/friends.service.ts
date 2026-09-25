@@ -8,6 +8,7 @@ import {
 } from '@bookswap/shared'
 import { AccessService, blocked, type FriendshipReader } from '../access/access.service'
 import { AnalyticsService } from '../analytics/analytics.service'
+import { NetworkActivationService } from '../analytics/network-activation.service'
 import {
   actorRoleOf,
   isMember,
@@ -32,6 +33,7 @@ import {
   type RefusalReason,
 } from './friendship.transitions'
 import type { FriendshipModel } from '../generated/prisma/models'
+import type { Prisma } from '../generated/prisma/client'
 
 /**
  * Чим саме адресована зміна.
@@ -70,6 +72,7 @@ export class FriendsService {
     private readonly prisma: PrismaService,
     private readonly access: AccessService,
     private readonly analytics: AnalyticsService,
+    private readonly network: NetworkActivationService,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -154,6 +157,61 @@ export class FriendsService {
   }
 
   /**
+   * Етап 9: прийняття запрошення. Викликається з `InvitationsService` усередині
+   * ЙОГО транзакції — дружба й запис прийняття мають бути атомарними, інакше
+   * лічильник використань розійшовся б із реальними дружбами.
+   *
+   * Будь-яка відмова (у т.ч. блок) віддається як `null`: вирішує викликач, і
+   * причина назовні не розкривається.
+   */
+  async acceptInviteIn(
+    tx: Prisma.TransactionClient,
+    inviteeId: string,
+    inviterId: string,
+  ): Promise<{
+    relation: FriendRelation
+    accepted: FriendshipTransitionOutcome['accepted']
+  } | null> {
+    try {
+      const outcome = await this.transitionIn(
+        tx,
+        inviteeId,
+        { kind: 'user', userId: inviterId },
+        'invite',
+      )
+
+      return outcome
+    } catch (error) {
+      if (error instanceof ApiException) return null
+
+      throw error
+    }
+  }
+
+  /** Побічні ефекти прийнятої дружби після коміту зовнішньої транзакції. */
+  async afterAccepted(
+    accepted: NonNullable<FriendshipTransitionOutcome['accepted']>,
+  ): Promise<void> {
+    this.notifications.dispatchSoon()
+    await this.recordAccepted(accepted)
+  }
+
+  private async recordAccepted(
+    accepted: NonNullable<FriendshipTransitionOutcome['accepted']>,
+  ): Promise<void> {
+    for (const subjectUserId of [accepted.userAId, accepted.userBId]) {
+      await this.analytics.record({
+        type: 'FRIEND_ACCEPTED',
+        subjectUserId,
+        domainEntityId: accepted.friendshipId,
+        properties: {},
+      })
+    }
+
+    await this.network.onFriendshipAccepted(accepted.userAId, accepted.userBId)
+  }
+
+  /**
    * Єдина точка входу для будь-якої зміни звʼязку.
    *
    * Повтор при `P2002` ловиться **зовні** транзакції, і це не стилістика: порушення
@@ -173,16 +231,7 @@ export class FriendsService {
     // надісланий звідти, розбудив би диспетчер на рядки, яких ще не видно.
     this.notifications.dispatchSoon()
 
-    if (outcome.accepted !== null) {
-      for (const subjectUserId of [outcome.accepted.userAId, outcome.accepted.userBId]) {
-        await this.analytics.record({
-          type: 'FRIEND_ACCEPTED',
-          subjectUserId,
-          domainEntityId: outcome.accepted.friendshipId,
-          properties: {},
-        })
-      }
-    }
+    if (outcome.accepted !== null) await this.recordAccepted(outcome.accepted)
 
     return outcome.relation
   }
@@ -244,89 +293,103 @@ export class FriendsService {
     target: FriendshipTarget,
     action: FriendshipAction,
   ): Promise<FriendshipTransitionOutcome> {
-    return this.prisma.$transaction(async (tx) => {
-      const { friendship, otherId } = await this.locate(actorId, target, tx)
-      const outcome = resolveTransition(
-        stateOf(friendship),
-        action,
-        actorRoleOf(friendship, actorId),
-      )
+    return this.prisma.$transaction((tx) => this.transitionIn(tx, actorId, target, action))
+  }
 
-      if (outcome.kind === 'refused') throw refusal(outcome.reason, action)
+  private async transitionIn(
+    tx: Prisma.TransactionClient,
+    actorId: string,
+    target: FriendshipTarget,
+    action: FriendshipAction,
+  ): Promise<FriendshipTransitionOutcome> {
+    const { friendship, otherId } = await this.locate(actorId, target, tx)
+    const outcome = resolveTransition(stateOf(friendship), action, actorRoleOf(friendship, actorId))
 
-      const now = new Date()
+    if (outcome.kind === 'refused') throw refusal(outcome.reason, action)
 
-      if (outcome.kind === 'create') {
-        const created = await tx.friendship.create({
-          data: {
-            ...normalizePair(actorId, otherId),
-            status: outcome.status,
-            // Колонка NOT NULL навіть для блокування «з незнайомих»: єдине
-            // осмислене значення — той, хто діяв.
-            requestedById: actorId,
-            blockedById: outcome.status === 'BLOCKED' ? actorId : null,
-            respondedAt: outcome.status === 'BLOCKED' ? now : null,
-          },
-        })
+    const now = new Date()
 
-        await this.notify(tx, created, actorId)
-
-        return { relation: relationOf(created, actorId), accepted: null }
-      }
-
-      // Сюди можна дійти лише з наявного стану, тобто рядок є. Перевірка потрібна
-      // компілятору, а не логіці.
-      if (friendship === null) throw new Error('Недосяжно: перехід без рядка мусив бути create')
-
-      if (outcome.kind === 'delete') {
-        // §5.2: активні `Loan` не чіпаються — фізична книжка все одно в когось.
-        const deleted = await tx.friendship.deleteMany({
-          where: { id: friendship.id, status: friendship.status },
-        })
-
-        this.assertSingleRow(deleted.count)
-
-        return { relation: 'NONE', accepted: null }
-      }
-
-      const after: FriendshipRecord = {
-        userAId: friendship.userAId,
-        userBId: friendship.userBId,
-        status: outcome.to,
-        requestedById: outcome.to === 'PENDING' ? actorId : friendship.requestedById,
-        blockedById: outcome.to === 'BLOCKED' ? actorId : friendship.blockedById,
-      }
-
-      // Умова на `status` у самому UPDATE, а не перевірка перед ним: дві паралельні
-      // спроби змінити той самий рядок дають рівно одну з `count = 1`. Той самий
-      // прийом, яким `AuthService` тримає одноразовість токенів із листів.
-      const updated = await tx.friendship.updateMany({
-        where: { id: friendship.id, status: friendship.status },
+    if (outcome.kind === 'create') {
+      const created = await tx.friendship.create({
         data: {
-          status: after.status,
-          requestedById: after.requestedById,
-          blockedById: after.blockedById,
-          // Повторний запит після відмови — це знову «відповіді ще немає».
-          respondedAt: after.status === 'PENDING' ? null : now,
+          ...normalizePair(actorId, otherId),
+          status: outcome.status,
+          // Колонка NOT NULL навіть для блокування «з незнайомих»: єдине
+          // осмислене значення — той, хто діяв. Крім прийняття запрошення:
+          // ініціатор там запрошувач, і саме його сповіщає `notify`.
+          requestedById: action === 'invite' ? otherId : actorId,
+          blockedById: outcome.status === 'BLOCKED' ? actorId : null,
+          respondedAt: outcome.status === 'PENDING' ? null : now,
         },
       })
 
-      this.assertSingleRow(updated.count)
-
-      await this.notify(tx, { ...friendship, ...after }, actorId)
+      await this.notify(tx, created, actorId)
 
       return {
-        relation: relationOf(after, actorId),
+        relation: relationOf(created, actorId),
         accepted:
-          after.status === 'ACCEPTED'
-            ? {
-                friendshipId: friendship.id,
-                userAId: friendship.userAId,
-                userBId: friendship.userBId,
-              }
+          created.status === 'ACCEPTED'
+            ? { friendshipId: created.id, userAId: created.userAId, userBId: created.userBId }
             : null,
       }
+    }
+
+    if (outcome.kind === 'unchanged') {
+      return { relation: relationOf(friendship, actorId), accepted: null }
+    }
+
+    // Сюди можна дійти лише з наявного стану, тобто рядок є. Перевірка потрібна
+    // компілятору, а не логіці.
+    if (friendship === null) throw new Error('Недосяжно: перехід без рядка мусив бути create')
+
+    if (outcome.kind === 'delete') {
+      // §5.2: активні `Loan` не чіпаються — фізична книжка все одно в когось.
+      const deleted = await tx.friendship.deleteMany({
+        where: { id: friendship.id, status: friendship.status },
+      })
+
+      this.assertSingleRow(deleted.count)
+
+      return { relation: 'NONE', accepted: null }
+    }
+
+    const after: FriendshipRecord = {
+      userAId: friendship.userAId,
+      userBId: friendship.userBId,
+      status: outcome.to,
+      requestedById: outcome.to === 'PENDING' ? actorId : friendship.requestedById,
+      blockedById: outcome.to === 'BLOCKED' ? actorId : friendship.blockedById,
+    }
+
+    // Умова на `status` у самому UPDATE, а не перевірка перед ним: дві паралельні
+    // спроби змінити той самий рядок дають рівно одну з `count = 1`. Той самий
+    // прийом, яким `AuthService` тримає одноразовість токенів із листів.
+    const updated = await tx.friendship.updateMany({
+      where: { id: friendship.id, status: friendship.status },
+      data: {
+        status: after.status,
+        requestedById: after.requestedById,
+        blockedById: after.blockedById,
+        // Повторний запит після відмови — це знову «відповіді ще немає».
+        respondedAt: after.status === 'PENDING' ? null : now,
+      },
     })
+
+    this.assertSingleRow(updated.count)
+
+    await this.notify(tx, { ...friendship, ...after }, actorId)
+
+    return {
+      relation: relationOf(after, actorId),
+      accepted:
+        after.status === 'ACCEPTED'
+          ? {
+              friendshipId: friendship.id,
+              userAId: friendship.userAId,
+              userBId: friendship.userBId,
+            }
+          : null,
+    }
   }
 
   /**
@@ -359,9 +422,9 @@ export class FriendsService {
     }
 
     if (friendship.status === 'ACCEPTED') {
-      // Дякуємо тому, хто просив: приймає завжди інша сторона.
+      // Дякуємо тому, хто просив (чи запрошував): діє завжди інша сторона.
       await this.notifications.create(
-        { userId: friendship.requestedById, type: 'FRIEND_ACCEPTED', payload },
+        { userId: otherOf(friendship, actorId), type: 'FRIEND_ACCEPTED', payload },
         tx,
       )
     }

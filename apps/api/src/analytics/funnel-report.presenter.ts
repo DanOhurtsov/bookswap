@@ -38,10 +38,12 @@ function formatActivationStat(label: string, stat: ActivationTimingStat): string
   return `  ${label.padEnd(16)} median: ${median}   вибірка: ${String(stat.sampleSize)}`
 }
 
+function formatPercent(value: number | null): string {
+  return value === null ? '—' : `${String(value)}%`
+}
+
 function formatStep(step: FunnelStep): string {
   const prefix = `${String(step.position).padStart(2)}. ${step.label.padEnd(34)}`
-
-  if (step.count === null) return `${prefix}  —    ${step.note}`
 
   return `${prefix} ${String(step.count).padStart(4)} ${`${String(step.percentage)}%`.padStart(6)}`
 }
@@ -58,7 +60,12 @@ export function formatFunnelReportText(report: FunnelReport): string {
     '',
     ...report.steps.map(formatStep),
     '',
-    'Тимчасові метрики (до Circle/network entity, Stage 9/14):',
+    'Мережа й discovery (Етап 9, лише агрегати когорти):',
+    `  invites: sent ${String(report.network.invites.sent)}, accepted ${String(report.network.invites.accepted)}, acceptance ${formatPercent(report.network.invites.acceptancePercent)}`,
+    `  search → found: ${String(report.network.discovery.foundUsers)} / ${String(report.network.discovery.searchedUsers)} користувачів, ${formatPercent(report.network.discovery.searchToFoundPercent)}`,
+    `  found → request: ${String(report.network.discovery.foundThenRequestedUsers)} / ${String(report.network.discovery.foundAnyUsers)} користувачів, ${formatPercent(report.network.discovery.foundToRequestPercent)}`,
+    '',
+    'Тимчасові метрики (до Circle/network entity, Stage 14):',
     `  successful returned loans, total: ${String(report.temporaryMetrics.successfulReturnedLoansTotal)}`,
     `  successful returned loans, per active user: ${ratio === null ? '—' : ratio.toFixed(2)}  (active users: ${String(report.temporaryMetrics.activeUsers)})`,
     '',

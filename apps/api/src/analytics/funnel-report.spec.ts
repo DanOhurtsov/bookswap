@@ -1,7 +1,6 @@
 import type { ProductEventType } from './product-event.types'
 import {
   EMPTY_ANALYTICS_MESSAGES,
-  NOT_INSTRUMENTED_NOTE,
   calculateFunnelReport,
   compareDedupeKeys,
   summarizeActivationTiming,
@@ -72,9 +71,11 @@ describe('funnel report calculation', () => {
       { key: 'signup', count: 3, percentage: 100 },
       { key: 'book_added_first', count: 2, percentage: 67 },
       { key: 'book_added_tenth', count: 1, percentage: 33 },
+      { key: 'invite_sent', count: 0, percentage: 0 },
+      { key: 'invite_accepted', count: 0, percentage: 0 },
       { key: 'friend_accepted', count: 1, percentage: 33 },
-      { key: 'friend_inventory_became_usable', count: null, percentage: null },
-      { key: 'friend_book_found', count: null, percentage: null },
+      { key: 'friend_inventory_became_usable', count: 0, percentage: 0 },
+      { key: 'friend_book_found', count: 0, percentage: 0 },
       { key: 'loan_requested', count: 1, percentage: 33 },
       { key: 'loan_approved', count: 1, percentage: 33 },
       { key: 'loan_handed_over', count: 1, percentage: 33 },
@@ -95,7 +96,7 @@ describe('funnel report calculation', () => {
     expect(formatFunnelReportText(report)).toBe(EMPTY_ANALYTICS_MESSAGES.join('\n'))
   })
 
-  it('prints the coverage warning and explicit Stage 9 gaps', () => {
+  it('prints the coverage warning', () => {
     const report = calculateFunnelReport(
       input({ earliestEventAt: new Date('2026-01-05T00:00:00.000Z') }),
     )
@@ -106,7 +107,7 @@ describe('funnel report calculation', () => {
         'Funnel counts may be incomplete. No historical backfill was performed.\n' +
         'Use --from 2026-01-05 or later for a fully instrumented cohort.',
     )
-    expect(text.match(new RegExp(NOT_INSTRUMENTED_NOTE, 'g'))).toHaveLength(2)
+    expect(text).not.toContain('not instrumented')
     expect(text).toContain('event-only: 0   domain-only: 0')
   })
 
@@ -488,5 +489,127 @@ describe('activation timing', () => {
 
       expect(formatFunnelReportText(report)).not.toContain('Activation timing')
     })
+  })
+})
+
+/** Етап 9: мережеві кроки воронки та агрегати invite / search → found / found → request. */
+describe('Stage 9 network steps and metrics', () => {
+  const signup = new Date('2026-01-02T00:00:00.000Z')
+  const at = (hours: number): Date => new Date(signup.getTime() + hours * 60 * 60 * 1000)
+  const members = ['u1', 'u2', 'u3', 'u4'].map((id) => ({ subjectUserId: id, occurredAt: signup }))
+
+  function build(events: FunnelEvent[]) {
+    const report = calculateFunnelReport(input({ signups: members, events }))
+
+    if (report.status === 'empty') throw new Error('unexpected empty report')
+
+    return report
+  }
+
+  const count = (report: ReturnType<typeof build>, key: string): number | undefined =>
+    report.steps.find((step) => step.key === key)?.count
+
+  it('renders every roadmap step in order with real counts', () => {
+    const report = build([
+      event('INVITE_SENT', 'u1', at(1)),
+      event('INVITE_SENT', 'u1', at(2)),
+      event('INVITE_ACCEPTED', 'u1', at(3)),
+      event('FRIEND_INVENTORY_USABLE', 'u2', at(1)),
+      event('FRIEND_BOOK_FOUND', 'u2', at(2)),
+      event('WORK_HOLDERS_FOUND', 'u3', at(2)),
+    ])
+
+    expect(report.steps.map((step) => step.position)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+    ])
+    expect(count(report, 'invite_sent')).toBe(1)
+    expect(count(report, 'invite_accepted')).toBe(1)
+    expect(count(report, 'friend_inventory_became_usable')).toBe(1)
+    expect(count(report, 'friend_book_found')).toBe(2)
+  })
+
+  it('invite acceptance counts events over the cohort', () => {
+    const report = build([
+      event('INVITE_SENT', 'u1', at(1)),
+      event('INVITE_SENT', 'u1', at(2)),
+      event('INVITE_SENT', 'u2', at(2)),
+      event('INVITE_SENT', 'u2', at(2)),
+      event('INVITE_ACCEPTED', 'u1', at(3)),
+    ])
+
+    expect(report.network.invites).toEqual({ sent: 4, accepted: 1, acceptancePercent: 25 })
+  })
+
+  it('search → found uses text searches and search-found only; work-page found is separate', () => {
+    const report = build([
+      event('DISCOVERY_SEARCHED', 'u1', at(1)),
+      event('DISCOVERY_SEARCHED', 'u2', at(1)),
+      event('DISCOVERY_SEARCHED', 'u3', at(1)),
+      event('FRIEND_BOOK_FOUND', 'u1', at(1)),
+      event('WORK_HOLDERS_FOUND', 'u4', at(1)),
+    ])
+
+    expect(report.network.discovery).toMatchObject({
+      searchedUsers: 3,
+      foundUsers: 1,
+      searchToFoundPercent: 33,
+      foundAnyUsers: 2,
+    })
+  })
+
+  it('found → request needs a request at or after the first find; an earlier request does not count', () => {
+    const report = build([
+      event('FRIEND_BOOK_FOUND', 'u1', at(2)),
+      event('LOAN_REQUESTED', 'u1', at(3)),
+      event('WORK_HOLDERS_FOUND', 'u2', at(2)),
+      event('LOAN_REQUESTED', 'u2', at(1)),
+      event('FRIEND_BOOK_FOUND', 'u3', at(2)),
+    ])
+
+    expect(report.network.discovery).toMatchObject({
+      foundAnyUsers: 3,
+      foundThenRequestedUsers: 1,
+      foundToRequestPercent: 33,
+    })
+  })
+
+  it('empty denominators give null percentages, never a misleading 0%', () => {
+    const report = build([])
+
+    expect(report.network).toEqual({
+      invites: { sent: 0, accepted: 0, acceptancePercent: null },
+      discovery: {
+        searchedUsers: 0,
+        foundUsers: 0,
+        searchToFoundPercent: null,
+        foundAnyUsers: 0,
+        foundThenRequestedUsers: 0,
+        foundToRequestPercent: null,
+      },
+    })
+
+    const text = formatFunnelReportText(report)
+
+    expect(text).toContain('acceptance —')
+    expect(text).toContain('Мережа й discovery')
+  })
+
+  it('respects each member window: a find outside the window is not counted', () => {
+    const report = build([
+      event('FRIEND_BOOK_FOUND', 'u1', new Date(signup.getTime() + 11 * DAY_MS)),
+    ])
+
+    expect(report.network.discovery.foundAnyUsers).toBe(0)
+  })
+
+  it('the JSON report exposes only aggregates — no ids, no raw events', () => {
+    const report = build([
+      event('INVITE_SENT', 'u1', at(1)),
+      event('FRIEND_BOOK_FOUND', 'u1', at(1)),
+    ])
+    const json = formatFunnelReportJson(report)
+
+    expect(json).not.toContain('u1')
+    expect(json).not.toContain('subjectUserId')
   })
 })

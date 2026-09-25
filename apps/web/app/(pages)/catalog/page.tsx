@@ -4,18 +4,29 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
+  CATALOG_DISCOVERY_AVAILABILITY,
+  CATALOG_DISCOVERY_TRANSLATION,
   DEFAULT_SEARCH_PAGE_SIZE,
   SEARCH_MAX_PAGE,
   catalogQuerySchema,
   type CatalogDiscoveryScope,
 } from '@bookswap/shared'
-import { readSearchAddress, searchHref, type SearchAddress } from '@/app/lib/search-page'
+import {
+  AVAILABILITY_LABELS,
+  DISCOVERY_LANGUAGES,
+  TRANSLATION_LABELS,
+  discoveryHref,
+  readDiscoveryFilters,
+  type DiscoveryFilters,
+} from '@/app/lib/discovery-filters'
+import { readSearchAddress, type SearchAddress } from '@/app/lib/search-page'
 import { useCatalogDiscovery } from '@/app/lib/use-catalog'
 import { useSession } from '@/app/lib/use-session'
 import { FieldErrors, validate } from '@/app/lib/validation'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { TextField } from '@/components/Form/FormFields'
 import { LocalResultCard, SearchPagination } from '@/features/catalog/add-book/index.client'
+import { NetworkOwnerCopies } from '@/features/network/index.client'
 
 export default function CatalogPage() {
   return (
@@ -34,7 +45,7 @@ export default function CatalogPage() {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <main className="page">
-      <h1>Каталог друзів</h1>
+      <h1>Доступні від друзів</h1>
       {children}
     </main>
   )
@@ -45,6 +56,36 @@ const MATCH_LABELS = {
   AUTHOR: 'збіг за автором',
   ISBN: 'точний збіг за ISBN',
 } as const
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly { value: string; label: string }[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="search-pagination__size">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value)
+        }}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 function CatalogDiscovery() {
   const router = useRouter()
@@ -59,11 +100,15 @@ function CatalogDiscovery() {
   const [syncedWith, setSyncedWith] = useState(submitted)
   const [refresh, setRefresh] = useState(0)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const search = useCatalogDiscovery(submitted, page, pageSize, scope, refresh)
+  const { filters, valid: filtersValid } = readDiscoveryFilters(parameters)
+  const search = useCatalogDiscovery(submitted, page, pageSize, scope, filters, refresh)
 
-  function hrefFor(target: SearchAddress, targetScope = scope): string {
-    const base = searchHref('/catalog', parameters, target, ['scope'])
-    return targetScope === 'ALL' ? `${base}&scope=ALL` : base
+  function hrefFor(
+    target: SearchAddress,
+    targetScope = scope,
+    targetFilters: DiscoveryFilters = filters,
+  ): string {
+    return discoveryHref(target, targetScope, targetFilters)
   }
 
   useEffect(() => {
@@ -76,24 +121,24 @@ function CatalogDiscovery() {
   }
 
   useEffect(() => {
-    if ((!address.valid || !scopeValid) && submitted !== '') {
-      const base = searchHref(
-        '/catalog',
-        parameters,
-        {
-          q: submitted,
-          page: 1,
-          pageSize: DEFAULT_SEARCH_PAGE_SIZE,
-        },
-        ['scope'],
+    if (!address.valid || !scopeValid || !filtersValid) {
+      router.replace(
+        discoveryHref(
+          { q: submitted, page: 1, pageSize: DEFAULT_SEARCH_PAGE_SIZE },
+          scopeValid ? scope : 'CIRCLE',
+          filters,
+        ),
       )
-      router.replace(scopeValid && scope === 'ALL' ? `${base}&scope=ALL` : base)
     }
-  }, [address.valid, scopeValid, scope, submitted, parameters, router])
+  }, [address.valid, scopeValid, filtersValid, scope, submitted, filters, router])
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
-    const parsed = validate(catalogQuerySchema, { q: query })
+    // The circle browses without text; the legacy `ALL` scope still needs a query.
+    const browse = scope === 'CIRCLE' && query.trim() === ''
+    const parsed = browse
+      ? { ok: true as const, data: { q: '' } }
+      : validate(catalogQuerySchema, { q: query })
 
     if (!parsed.ok) {
       setErrors(parsed.errors)
@@ -129,15 +174,17 @@ function CatalogDiscovery() {
 
   return (
     <Shell>
-      <p className="lede">Шукайте фізичні книжки, які зараз є вдома у вас або друзів.</p>
+      <p className="lede">Фізичні книжки, які є вдома у вас або друзів. Текст — за бажанням.</p>
 
       <form className="search" onSubmit={submit} noValidate>
         <TextField
           id="catalog-query"
-          label="Назва, автор або ISBN"
+          label={
+            scope === 'CIRCLE' ? 'Назва, автор або ISBN (необовʼязково)' : 'Назва, автор або ISBN'
+          }
           name="q"
           autoComplete="off"
-          hint="Мінімум два символи. Пошук тільки серед доступних примірників користувачів BookSwap."
+          hint="Мінімум два символи. Без тексту показуються всі книжки кола."
           value={query}
           error={errors.q ?? errors.form}
           onChange={(event) => {
@@ -161,6 +208,59 @@ function CatalogDiscovery() {
         </select>
       </label>
 
+      {scope === 'CIRCLE' && (
+        <div className="search-filters">
+          <FilterSelect
+            label="Доступність"
+            value={filters.availability}
+            options={CATALOG_DISCOVERY_AVAILABILITY.map((value) => ({
+              value,
+              label: AVAILABILITY_LABELS[value],
+            }))}
+            onChange={(value) => {
+              router.push(
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
+                  ...filters,
+                  availability: value === 'ANY' ? 'ANY' : 'AVAILABLE',
+                }),
+              )
+            }}
+          />
+          <FilterSelect
+            label="Мова"
+            value={filters.language}
+            options={[
+              { value: '', label: 'Будь-яка' },
+              ...DISCOVERY_LANGUAGES.map((code) => ({ value: code, label: code })),
+            ]}
+            onChange={(value) => {
+              router.push(
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
+                  ...filters,
+                  language: value,
+                }),
+              )
+            }}
+          />
+          <FilterSelect
+            label="Переклад"
+            value={filters.translation}
+            options={CATALOG_DISCOVERY_TRANSLATION.map((value) => ({
+              value,
+              label: TRANSLATION_LABELS[value],
+            }))}
+            onChange={(value) => {
+              router.push(
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
+                  ...filters,
+                  translation: value === 'ORIGINAL' || value === 'TRANSLATED' ? value : 'ANY',
+                }),
+              )
+            }}
+          />
+        </div>
+      )}
+
       {scope === 'ALL' && (
         <p className="form__aside">
           Книжки інших користувачів видно, якщо їхня бібліотека публічна. Позичати можна після
@@ -181,6 +281,12 @@ function CatalogDiscovery() {
               href={`/works/${result.work.id}`}
               note={MATCH_LABELS[result.matchedOn]}
               locations={result.locations}
+              renderLocationActions={(location) => (
+                <NetworkOwnerCopies
+                  owner={location}
+                  onRequested={() => setRefresh((current) => current + 1)}
+                />
+              )}
             />
           ))}
         </ul>

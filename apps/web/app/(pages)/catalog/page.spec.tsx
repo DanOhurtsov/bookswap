@@ -61,6 +61,16 @@ const candidate: CatalogDiscoveryResult = {
       owner: { id: 'friend-1', displayName: 'Олена', avatarUrl: null },
       relation: 'FRIEND',
       availableCopies: 1,
+      copies: [
+        {
+          id: 'copy-1',
+          editionId: 'edition-1',
+          translationId: null,
+          status: 'AVAILABLE',
+          expectedReturnAt: null,
+          canRequest: true,
+        },
+      ],
     },
   ],
 }
@@ -98,7 +108,7 @@ it('searches available copies in my circle by default and never calls external c
   )
   expect(screen.getByLabelText('Показувати книжки')).toHaveValue('CIRCLE')
   expect(apiRequest).toHaveBeenCalledWith(
-    '/catalog/discover?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8&page=1&pageSize=10&scope=CIRCLE',
+    '/catalog/discover?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8&page=1&pageSize=10&scope=CIRCLE&availability=AVAILABLE&translation=ANY',
     expect.any(Object),
   )
   expect(apiRequest.mock.calls.some(([path]: [string]) => path.includes('/external'))).toBe(false)
@@ -125,6 +135,16 @@ it('explains public copies are not borrowable until friendship is accepted', asy
               owner: { id: 'other-1', displayName: 'Тарас', avatarUrl: null },
               relation: 'OTHER',
               availableCopies: 1,
+              copies: [
+                {
+                  id: 'copy-2',
+                  editionId: 'edition-1',
+                  translationId: null,
+                  status: 'AVAILABLE',
+                  expectedReturnAt: null,
+                  canRequest: false,
+                },
+              ],
             },
           ],
         },
@@ -172,5 +192,65 @@ it('offers adding a copy when nobody in the selected scope has one', async () =>
   expect(screen.getByRole('link', { name: 'Додати свою книжку' })).toHaveAttribute(
     'href',
     '/catalog/new?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8',
+  )
+})
+
+it('browses the circle without any text and shows filters', async () => {
+  renderAt('')
+
+  expect(await screen.findByRole('link', { name: 'Тигролови' })).toBeInTheDocument()
+  expect(apiRequest).toHaveBeenCalledWith(
+    '/catalog/discover?page=1&pageSize=10&scope=CIRCLE&availability=AVAILABLE&translation=ANY',
+    expect.any(Object),
+  )
+  expect(screen.getByLabelText('Доступність')).toHaveValue('AVAILABLE')
+  expect(screen.getByLabelText('Мова')).toHaveValue('')
+  expect(screen.getByLabelText('Переклад')).toHaveValue('ANY')
+})
+
+it('reads filters from the address, sends them, and resets the page when one changes', async () => {
+  renderAt('language=uk&translation=TRANSLATED&availability=ANY&page=3')
+
+  await screen.findByRole('link', { name: 'Тигролови' })
+  expect(apiRequest).toHaveBeenCalledWith(
+    '/catalog/discover?page=3&pageSize=10&scope=CIRCLE&availability=ANY&language=uk&translation=TRANSLATED',
+    expect.any(Object),
+  )
+
+  await userEvent.selectOptions(screen.getByLabelText('Мова'), 'pl')
+
+  expect(push).toHaveBeenCalledWith('/catalog?availability=ANY&language=pl&translation=TRANSLATED')
+})
+
+it('the legacy ALL scope hides the filters and never sends them', async () => {
+  renderAt('q=Тигролови&scope=ALL')
+
+  await screen.findByRole('link', { name: 'Тигролови' })
+  expect(screen.queryByLabelText('Доступність')).not.toBeInTheDocument()
+  expect(apiRequest).toHaveBeenCalledWith(expect.stringMatching(/scope=ALL$/), expect.any(Object))
+})
+
+it('normalises an invalid filter value in the address', async () => {
+  renderAt('availability=NOPE')
+
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/catalog'))
+})
+
+it('requests a copy right from the result without searching again', async () => {
+  renderAt('q=Тигролови')
+  await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
+
+  await waitFor(() =>
+    expect(apiRequest).toHaveBeenCalledWith('/loans', {
+      method: 'POST',
+      body: { copyId: 'copy-1' },
+    }),
+  )
+  // The list is refreshed once so `canRequest` can flip.
+  await waitFor(() =>
+    expect(
+      apiRequest.mock.calls.filter(([p]: [string]) => p.startsWith('/catalog/discover')),
+    ).toHaveLength(2),
   )
 })

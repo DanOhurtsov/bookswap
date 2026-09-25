@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { PrismaModule } from '../prisma/prisma.module'
 import { AnalyticsService } from './analytics.service'
 import { FunnelReportService } from './funnel-report.service'
+import { NetworkActivationService } from './network-activation.service'
 
 /**
  * docs/plan/stage-8-activation.md — Stage 8a product analytics storage and service.
@@ -16,7 +17,7 @@ import { FunnelReportService } from './funnel-report.service'
  */
 @Module({
   imports: [PrismaModule],
-  providers: [AnalyticsService, FunnelReportService],
-  exports: [AnalyticsService, FunnelReportService],
+  providers: [AnalyticsService, FunnelReportService, NetworkActivationService],
+  exports: [AnalyticsService, FunnelReportService, NetworkActivationService],
 })
 export class AnalyticsModule {}

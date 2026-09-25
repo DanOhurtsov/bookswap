@@ -18,6 +18,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { FriendsList } from '@/components/Friends/FriendsList'
 import { FriendsSearch, type SearchMode } from '@/components/Friends/FriendsSearch'
 import { Button } from '@/components/ui/button'
+import { InviteManager } from '@/features/network/index.client'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface SearchQuery {
@@ -185,6 +186,10 @@ function FriendsPageContent() {
         onRemoveFriend={confirmRemoveFriend}
         onBlockFriend={confirmBlock}
       />
+
+      <div className="border-t pt-7">
+        <InviteManager />
+      </div>
 
       <div className="border-t pt-7">
         <FriendsSearch

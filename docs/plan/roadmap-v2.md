@@ -134,6 +134,12 @@ Goodreads sync, нативний мобільний застосунок.
 
 ### Етап 9 — network activation і aggregated discovery
 
+**Статус:** функціонально реалізований (гілка `codex/stage-9-network-activation`).
+Детальний план, затверджені рішення D1–D6 і відповідність DoD —
+[execution plan Етапу 9](./stage-9-network-activation.md). Перевірка на реальних
+мережах відбудеться в private beta (Етап 11). **Не закриває Етап 8:** manual
+camera matrix на Android Chrome — NOT RUN.
+
 **Мета:** користувач не обходить друзів по одному, а одразу бачить, хто у його
 trusted network має потрібну книгу.
 
@@ -161,6 +167,13 @@ Definition of done:
 
 Не входить: пошук у бібліотеках незнайомців, публічний marketplace, рекомендації
 на основі ratings.
+
+**Узгодження scope (25.09.2026, варіант A).** `/catalog` з PR #44 має успадкований
+перемикач «Усіх користувачів», що додає `PUBLIC` примірники незнайомих. Product
+Owner залишив його без змін і без розвитку: усі нові можливості Етапу 9 (фільтри,
+перегляд без тексту, Who has this, метрики) працюють лише в колі «Мої та друзів»;
+режим «Усі» вимагає тексту й не приймає фільтри, а позичити такий примірник можна
+лише після дружби. Це свідомий виняток із «Не входить», а не новий пошук.
 
 ### Етап 10 — реальний світ і довіра до історії
 
@@ -318,8 +331,10 @@ Bayesian score, global prior і recompute CLI. Наявні поля БД не �
   retention-рішення для product events затверджено в
   [execution plan 8a](./stage-8-activation.md); остаточний retention входить до
   рішення про account deletion на Етапі 13.
-- **Етап 9:** строк дії/revoke invite; чи можна запрошувати кількох людей одним
-  посиланням; email anti-abuse limits.
+- **Етап 9:** ✅ затверджено 25.09.2026 (D1–D6 у
+  [execution plan](./stage-9-network-activation.md#6-рішення-product-owner-потрібне-затвердження)):
+  14 днів, revoke миттєвий, email одноразовий / посилання до 10, листи лише з
+  підтвердженою поштою (10/добу, 3/тиждень на адресу), синхронна відправка.
 - **Етап 10:** модель ExternalBorrower, PII retention, consent і account linking.
 - **Етап 11:** склад першої beta cohort та тривалість baseline-періоду.
 - **Етап 12:** debounce/digest правила wishlist matches і протокол extension.

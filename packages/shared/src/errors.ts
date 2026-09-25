@@ -229,6 +229,30 @@ export const API_ERROR_CODES = {
    * у `FAILED`, вдаючи збій каналу замість відсутньої прив'язки.
    */
   TELEGRAM_NOT_LINKED: 'TELEGRAM_NOT_LINKED',
+
+  // --- Запрошення (Етап 9) ---------------------------------------------------
+  /**
+   * Токен невідомий або пара заблокована (HTTP 404). Один код на обидва випадки:
+   * інакше відповідь розкривала б, що між людьми є блокування.
+   */
+  INVITE_INVALID: 'INVITE_INVALID',
+  /** Строк дії запрошення минув (HTTP 410). */
+  INVITE_EXPIRED: 'INVITE_EXPIRED',
+  /** Запрошувач відкликав запрошення (HTTP 410). */
+  INVITE_REVOKED: 'INVITE_REVOKED',
+  /** Запрошення вже використане максимальну кількість разів (HTTP 410). */
+  INVITE_EXHAUSTED: 'INVITE_EXHAUSTED',
+  /** Людина відкрила власне запрошення (HTTP 400). */
+  INVITE_SELF: 'INVITE_SELF',
+  /**
+   * Провайдер пошти не прийняв лист (HTTP 502). Запрошення лишається створеним:
+   * його можна відкликати або поділитися посиланням.
+   */
+  INVITE_EMAIL_FAILED: 'INVITE_EMAIL_FAILED',
+  /** Перевищено ліміт листів-запрошень (HTTP 429). */
+  INVITE_RATE_LIMITED: 'INVITE_RATE_LIMITED',
+  /** Листи-запрошення доступні лише з підтвердженою поштою (HTTP 403). */
+  INVITE_EMAIL_UNVERIFIED: 'INVITE_EMAIL_UNVERIFIED',
 } as const
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES]

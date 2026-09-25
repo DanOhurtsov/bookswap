@@ -11,6 +11,7 @@ import { EmailModule } from './email/email.module'
 import { FriendsModule } from './friends/friends.module'
 import { HealthModule } from './health/health.module'
 import { HistoryModule } from './history/history.module'
+import { InvitationsModule } from './invitations/invitations.module'
 import { LibraryImportModule } from './library/import/library-import.module'
 import { LibraryModule } from './library/library.module'
 import { LoansModule } from './loans/loans.module'
@@ -66,6 +67,7 @@ const ROOT_ENV_PATH = resolve(__dirname, '../../../.env')
     AuthModule,
     UsersModule,
     FriendsModule,
+    InvitationsModule,
     CatalogModule,
     LibraryModule,
     LibraryImportModule,

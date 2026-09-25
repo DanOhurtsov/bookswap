@@ -1,105 +1,61 @@
 import { Injectable } from '@nestjs/common'
 import type {
+  CatalogDiscoveryAvailability,
   CatalogDiscoveryResponse,
   CatalogDiscoveryResult,
   CatalogDiscoveryScope,
+  CatalogDiscoveryTranslation,
   CatalogMatchKind,
   SearchPageSize,
 } from '@bookswap/shared'
-import { AccessService } from '../../access/access.service'
-import { copyVisibleTo, type ViewerRole } from '../../access/visibility'
+import { AnalyticsService } from '../../analytics/analytics.service'
 import { PrismaService } from '../../prisma/prisma.service'
-import { PUBLIC_USER_FIELDS, toPublicUser } from '../../users/user.mapper'
 import { byEditionOrder, toEdition, toWork, toWorkAuthors } from '../catalog.mapper'
 import { LocalMatches } from './local-matches.service'
+import { groupByOwner, NetworkInventory, type InventoryCopy } from './network-inventory.service'
 
-type Location = CatalogDiscoveryResult['locations'][number]
-type EligibleWork = { editionIds: Set<string>; locations: Map<string, Location> }
+export interface DiscoveryQuery {
+  q?: string | undefined
+  page: number
+  pageSize: SearchPageSize
+  scope: CatalogDiscoveryScope
+  availability: CatalogDiscoveryAvailability
+  language?: string | undefined
+  translation: CatalogDiscoveryTranslation
+}
 
-/** Searches physical, currently available copies without exposing invisible shelves. */
+/** Searches physical copies visible to the viewer without exposing invisible shelves. */
 @Injectable()
 export class CatalogDiscoveryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly access: AccessService,
+    private readonly inventory: NetworkInventory,
+    private readonly analytics: AnalyticsService,
     private readonly local: LocalMatches,
   ) {}
 
-  async search(
-    viewerId: string,
-    query: string,
-    page: number,
-    pageSize: SearchPageSize,
-    scope: CatalogDiscoveryScope,
-  ): Promise<CatalogDiscoveryResponse> {
-    const copies = await this.prisma.copy.findMany({
-      where: { status: 'AVAILABLE' },
-      select: {
-        ownerId: true,
-        currentHolderId: true,
-        editionId: true,
-        visibility: true,
-        edition: { select: { workId: true } },
-        owner: { select: { ...PUBLIC_USER_FIELDS, libraryVisibility: true } },
-      },
+  async search(viewerId: string, query: DiscoveryQuery): Promise<CatalogDiscoveryResponse> {
+    const { page, pageSize, scope } = query
+    const copies = await this.inventory.load(viewerId, {
+      scope,
+      availability: query.availability,
+      language: query.language,
+      translation: query.translation,
     })
+    const eligible = new Map<string, InventoryCopy[]>()
 
-    const ownerIds = [...new Set(copies.map((copy) => copy.ownerId))].filter(
-      (ownerId) => ownerId !== viewerId,
-    )
-    const relations = await this.access.relationsWith(viewerId, ownerIds)
-    const eligible = new Map<string, EligibleWork>()
+    for (const item of copies) {
+      const list = eligible.get(item.workId)
 
-    for (const copy of copies) {
-      if (copy.currentHolderId !== copy.ownerId) continue
-
-      const relation = relations.get(copy.ownerId)
-      const role: ViewerRole =
-        copy.ownerId === viewerId
-          ? 'OWNER'
-          : relation === 'FRIENDS'
-            ? 'FRIEND'
-            : relation === 'BLOCKED_BY_ME' || relation === 'BLOCKED_ME'
-              ? 'BLOCKED'
-              : 'OTHER'
-
-      if (scope === 'CIRCLE' && role !== 'OWNER' && role !== 'FRIEND') continue
-      if (!copyVisibleTo(role, copy.owner.libraryVisibility, copy.visibility)) continue
-
-      const workId = copy.edition.workId
-      let work = eligible.get(workId)
-
-      if (work === undefined) {
-        work = { editionIds: new Set(), locations: new Map() }
-        eligible.set(workId, work)
-      }
-
-      work.editionIds.add(copy.editionId)
-
-      const previous = work.locations.get(copy.ownerId)
-
-      work.locations.set(copy.ownerId, {
-        owner: toPublicUser(copy.owner),
-        relation: role === 'OWNER' ? 'SELF' : role === 'FRIEND' ? 'FRIEND' : 'OTHER',
-        availableCopies: (previous?.availableCopies ?? 0) + 1,
-      })
+      if (list === undefined) eligible.set(item.workId, [item])
+      else list.push(item)
     }
 
-    const matches = await this.local.rank(query, {
-      authors: false,
-      allowedWorkIds: [...eligible.keys()],
-      allowedEditionIds: [...eligible.values()].flatMap((work) => [...work.editionIds]),
-    })
-    const total = matches.works.length
+    const ranked = await this.rank(query.q, eligible)
+    const total = ranked.rows.length
     const from = (page - 1) * pageSize
-    const pageRows = matches.works.slice(from, from + pageSize)
+    const pageRows = ranked.rows.slice(from, from + pageSize)
     const ids = pageRows.map((row) => row.id)
-    const matchKinds = new Map<string, CatalogMatchKind>(
-      pageRows.map((row) => [
-        row.id,
-        matches.byIsbn ? 'ISBN' : row.titleScore >= row.authorScore ? 'TITLE' : 'AUTHOR',
-      ]),
-    )
     const works = await this.prisma.work.findMany({
       where: { id: { in: ids }, mergedIntoId: null },
       include: {
@@ -109,36 +65,103 @@ export class CatalogDiscoveryService {
     })
     const byId = new Map(works.map((work) => [work.id, work]))
 
-    const results: CatalogDiscoveryResult[] = ids.flatMap((id) => {
-      const work = byId.get(id)
-      const inventory = eligible.get(id)
+    const results: CatalogDiscoveryResult[] = pageRows.flatMap((row) => {
+      const work = byId.get(row.id)
+      const inventory = eligible.get(row.id)
 
       if (work === undefined || inventory === undefined) return []
+
+      const editionIds = new Set(inventory.map((item) => item.copy.editionId))
 
       return [
         {
           work: toWork(work),
           authors: toWorkAuthors(work.authors),
           editions: work.editions
-            .filter((edition) => inventory.editionIds.has(edition.id))
+            .filter((edition) => editionIds.has(edition.id))
             .map((edition) => toEdition(edition, work))
             .sort(byEditionOrder),
-          matchedOn: matchKinds.get(id) ?? 'TITLE',
-          locations: [...inventory.locations.values()].sort(
-            (left, right) =>
-              relationOrder(left.relation) - relationOrder(right.relation) ||
-              left.owner.displayName.localeCompare(right.owner.displayName),
-          ),
+          matchedOn: row.matchedOn,
+          locations: groupByOwner(inventory),
         },
       ]
     })
 
+    await this.recordSearch(viewerId, query, results)
+
     return { results, page, pageSize, scope, total, hasMore: total > page * pageSize }
   }
-}
 
-function relationOrder(relation: Location['relation']): number {
-  if (relation === 'SELF') return 0
-  if (relation === 'FRIEND') return 1
-  return 2
+  /**
+   * `discovery_searched` / `friend_book_found` (Етап 9, §2): лише текстовий пошук у
+   * колі. Подія не несе ні запиту, ні назв, ні id книжок — тільки факт, що людина
+   * шукала й що в її друзів знайшлася книжка, яку можна попросити. Раз на добу на
+   * людину: ключ дедуплікації — доба.
+   */
+  private async recordSearch(
+    viewerId: string,
+    query: DiscoveryQuery,
+    results: CatalogDiscoveryResult[],
+  ): Promise<void> {
+    if (query.scope !== 'CIRCLE' || query.q === undefined) return
+
+    const day = new Date().toISOString().slice(0, 10)
+
+    await this.analytics.record({
+      type: 'DISCOVERY_SEARCHED',
+      subjectUserId: viewerId,
+      domainEntityId: day,
+      properties: {},
+    })
+
+    const found = results.some((result) =>
+      result.locations.some(
+        (location) => location.relation === 'FRIEND' && location.availableCopies > 0,
+      ),
+    )
+
+    if (found) {
+      await this.analytics.record({
+        type: 'FRIEND_BOOK_FOUND',
+        subjectUserId: viewerId,
+        domainEntityId: day,
+        properties: {},
+      })
+    }
+  }
+
+  /** З текстом — за релевантністю; без тексту — за назвою, детерміновано. */
+  private async rank(
+    q: string | undefined,
+    eligible: Map<string, InventoryCopy[]>,
+  ): Promise<{ rows: { id: string; matchedOn: CatalogMatchKind }[] }> {
+    if (q === undefined) {
+      const titles = await this.prisma.work.findMany({
+        where: { id: { in: [...eligible.keys()] } },
+        select: { id: true },
+        orderBy: [{ titleNorm: 'asc' }, { id: 'asc' }],
+      })
+
+      return { rows: titles.map((work) => ({ id: work.id, matchedOn: 'TITLE' as const })) }
+    }
+
+    const matches = await this.local.rank(q, {
+      authors: false,
+      allowedWorkIds: [...eligible.keys()],
+      allowedEditionIds: [...eligible.values()].flatMap((items) =>
+        items.map((item) => item.copy.editionId),
+      ),
+    })
+
+    return {
+      rows: matches.works.map((row) => ({
+        id: row.id,
+        matchedOn: matches.byIsbn
+          ? ('ISBN' as const)
+          : row.titleScore >= row.authorScore
+            ? ('TITLE' as const)
+            : ('AUTHOR' as const),
+      })),
+    }
+  }
 }

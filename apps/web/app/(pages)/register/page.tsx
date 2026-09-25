@@ -1,17 +1,27 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState, type FormEvent } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useState, type FormEvent } from 'react'
 import { PASSWORD_LIMITS, registerRequestSchema, sessionResponseSchema } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
+import { returnToQuery, safeReturnTo } from '../../lib/return-to'
 import { useSession } from '../../lib/use-session'
 import { validate, type FieldErrors } from '../../lib/validation'
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterPageForm />
+    </Suspense>
+  )
+}
+
+function RegisterPageForm() {
   const router = useRouter()
+  const returnTo = useSearchParams().get('returnTo')
   const session = useSession()
   const [fields, setFields] = useState({ displayName: '', email: '', password: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -43,7 +53,7 @@ export default function RegisterPage() {
       // every other mounted consumer (`NavBar` included) sees the new
       // identity through the same context, without a fetch of its own.
       session.setUser(user)
-      router.push('/profile')
+      router.push(safeReturnTo(returnTo))
     } catch (error) {
       // Зайнята адреса — це помилка конкретного поля, а не форми загалом.
       if (error instanceof ApiRequestError && error.code === 'EMAIL_TAKEN') {
@@ -112,7 +122,7 @@ export default function RegisterPage() {
       </form>
 
       <p className="form__aside">
-        Уже маєте акаунт? <Link href="/login">Увійти</Link>
+        Уже маєте акаунт? <Link href={`/login${returnToQuery(returnTo)}`}>Увійти</Link>
       </p>
     </main>
   )

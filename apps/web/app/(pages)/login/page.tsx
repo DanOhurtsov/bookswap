@@ -1,17 +1,27 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState, type FormEvent } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useState, type FormEvent } from 'react'
 import { loginRequestSchema, sessionResponseSchema } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
+import { returnToQuery, safeReturnTo } from '../../lib/return-to'
 import { useSession } from '../../lib/use-session'
 import { validate, type FieldErrors } from '../../lib/validation'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageForm />
+    </Suspense>
+  )
+}
+
+function LoginPageForm() {
   const router = useRouter()
+  const returnTo = useSearchParams().get('returnTo')
   const session = useSession()
   const [fields, setFields] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -43,7 +53,7 @@ export default function LoginPage() {
       // state: `NavBar` and every other mounted consumer must see the new
       // identity too, without waiting for a fetch of their own.
       session.setUser(user)
-      router.push('/profile')
+      router.push(safeReturnTo(returnTo))
     } catch (error) {
       // INVALID_CREDENTIALS показується як помилка форми, а не поля: сервер
       // навмисно не каже, що саме не так, і підсвічувати email було б домислом.
@@ -95,7 +105,7 @@ export default function LoginPage() {
 
       <p className="form__aside">
         <Link href="/forgot-password">Забули пароль?</Link> ·{' '}
-        <Link href="/register">Зареєструватися</Link>
+        <Link href={`/register${returnToQuery(returnTo)}`}>Зареєструватися</Link>
       </p>
     </main>
   )
