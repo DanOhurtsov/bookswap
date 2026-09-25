@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { conditionSchema, copyStatusSchema } from '../domain/copy'
-import { loanStatusSchema } from '../domain/loan'
+import { loanOriginSchema, loanStatusSchema } from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { publicUserSchema } from './user'
 
@@ -29,8 +29,14 @@ const historyFactsSchema = z.object({
   /** §5.2: похідне від `HANDED_OVER` і `dueAt`, а не окремий статус. */
   isOverdue: z.boolean(),
   /**
+   * Stage 10 (10b): звідки взялася позика. Це не приватне поле — воно лише каже клієнтові, чи був
+   * запит: `REQUESTED` — звичайний request-flow, інакше позику записав власник.
+   */
+  origin: loanOriginSchema,
+  /**
    * Stage 10 (T2): `null` для записаних власником позик — запиту не було, і дата не вигадується.
-   * До кроку 10e значення завжди непорожнє.
+   * Але БД має дефолт `now()`, тож ненульове значення при `origin ≠ REQUESTED` не означає запиту:
+   * джерелом істини є `origin`, а не `requestedAt`.
    */
   requestedAt: z.iso.datetime().nullable(),
   respondedAt: z.iso.datetime().nullable(),

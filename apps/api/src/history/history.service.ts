@@ -18,7 +18,19 @@ import {
   toHistoryEntry,
   toNamedEntry,
 } from './history.mapper'
-import type { FriendRelation } from '@bookswap/shared'
+import type { FriendRelation, LoanStatus } from '@bookswap/shared'
+
+/**
+ * Stage 10 (T5): позика, яку власник записав і яка ще не підтверджена (або відхилена), — це
+ * претензія однієї сторони, а не факт. Її бачать лише сторони позики.
+ */
+const CLAIM_STATUSES: readonly LoanStatus[] = ['PENDING_CONFIRMATION', 'DECLINED']
+
+/**
+ * Stage 10 (10b, Q8): «Хто читав» — лише фактична передача. `LOST` рахується, тільки якщо передача
+ * відбулася (`handedAt != null`); решта статусів — це запит, відмова або претензія, а не читання.
+ */
+const READ_STATUSES: LoanStatus[] = ['HANDED_OVER', 'RETURNED', 'LOST']
 
 /** Каталожний контекст примірника — рівно те, що читає `history.mapper`. */
 const COPY_CATALOG = {
@@ -90,10 +102,12 @@ export class HistoryService {
     // полиці й доступ до того, хто що в кого брав, — різні питання.
     assertHistoryVisible(role)
 
-    const loans = await this.prisma.loan.findMany({
-      where: { copyId: copy.id },
-      include: WITH_SIDES,
-    })
+    const loans = (
+      await this.prisma.loan.findMany({
+        where: { copyId: copy.id },
+        include: WITH_SIDES,
+      })
+    ).filter((loan) => isVisibleToParty(loan, viewerId))
 
     const showNames = holderNamesVisibleTo(role, copy.owner.showHolderNames)
     const now = new Date()
@@ -131,7 +145,10 @@ export class HistoryService {
         visibility: true,
         owner: { select: { libraryVisibility: true, showHolderNames: true } },
         edition: { include: { translation: true, work: true } },
-        loans: { include: WITH_SIDES },
+        loans: {
+          where: { status: { in: READ_STATUSES }, handedAt: { not: null } },
+          include: WITH_SIDES,
+        },
       },
     })
 
@@ -198,6 +215,16 @@ export class HistoryService {
       lent: ordered.filter((loan) => loan.ownerId === userId).map(project),
     }
   }
+}
+
+/** Претензії (`PENDING_CONFIRMATION`/`DECLINED`) бачать лише власник і позичальник цієї позики. */
+function isVisibleToParty(
+  loan: { status: LoanStatus; ownerId: string; borrowerId: string | null },
+  viewerId: string,
+): boolean {
+  if (!CLAIM_STATUSES.includes(loan.status)) return true
+
+  return loan.ownerId === viewerId || loan.borrowerId === viewerId
 }
 
 /**

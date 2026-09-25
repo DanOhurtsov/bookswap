@@ -16,6 +16,7 @@ const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
 
 const facts = {
   status: 'RETURNED',
+  origin: 'REQUESTED',
   isOverdue: false,
   requestedAt: '2026-06-01T10:00:00.000Z',
   respondedAt: '2026-06-02T10:00:00.000Z',

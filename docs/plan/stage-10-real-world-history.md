@@ -1,7 +1,7 @@
 # Етап 10 — реальний світ і довіра до історії: execution plan
 
-**Статус:** план; **крок 10a реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10b–10j не
-розпочато. Q0, Q10 і Q13 затверджено Product Owner ([§0.2](#02-рішення-product-owner-отримані-для-кроку-10a)).
+**Статус:** план; **кроки 10a і 10b реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10c–10j не
+розпочато. Q0, Q8, Q10 і Q13 затверджено Product Owner ([§0.2](#02-рішення-product-owner-отримані-для-кроку-10a)).
 Решта Q і всі T-пропозиції, окрім T1-a, лишаються **незатвердженими**.
 **Джерело:** [Product Roadmap v2, Етап 10](./roadmap-v2.md#етап-10--реальний-світ-і-довіра-до-історії).
 **Гілка реалізації:** `codex/stage-10-real-world-history` (Q0, затверджено PO).
@@ -47,9 +47,14 @@
   над** `docs/specification.md`. Сам `docs/specification.md` не змінюється (і не змінювався). Рішення
   стосується лише переліку §5; будь-яка нова розбіжність зі spec потребує окремого рішення PO.
 
-**Не затверджено цим повідомленням (лишається відкритим):** Q1–Q9, Q11, Q12, Q14 та решта T-пропозицій;
+**Не затверджено повідомленнями §0.2–§0.3 (лишається відкритим):** Q1–Q7, Q9, Q11, Q12, Q14 та решта T-пропозицій;
 **D2 — відкритий release blocker**, реальні персональні дані гостя заборонені в будь-якому середовищі.
 Android Chrome QA Етапу 8 — **NOT RUN**; Етап 8 і beta gate не закриті.
+
+### 0.3 Рішення Product Owner, отримані для кроку 10b
+
+- **Q8 — затверджено.** `LOST` входить у «Хто читав» **лише за наявності `handedAt`**: фактична передача
+  відбулася. `LOST` без `handedAt` — не читання. Це уточнює §2 п. 6, §6.7 і H1.
 
 ## 1. Product outcome, метрики, «Не робити»
 
@@ -107,7 +112,7 @@ Android Chrome QA Етапу 8 — **NOT RUN**; Етап 8 і beta gate не з�
 | 3 | **Archive / no longer owned** | `Copy.archivedAt`; архів заборонений лише при ексклюзивній позиці; `LOST`-примірник архівувати можна; історія й `Loan` незмінні; архівний примірник не в бібліотеці/discovery/holders/«я маю це» | Передача володіння; відновлення після видалення, що вже відбулося до міграції |
 | 4 | **Hard delete лише без loan activity** | `DELETE /me/library/:id` дозволений, лише якщо у примірника **немає жодного** `Loan` будь-якого статусу; інакше 409 з підказкою про архів; FK `Loan → Copy` стає `RESTRICT` | Видалення `Work/Edition`; каскад від видалення акаунта (Етап 13) |
 | 5 | **LOST → RECOVERED** | Дія `recover` власника над `LOST`-позикою: `Copy` знову `AVAILABLE`/вдома, окрема подія `RECOVERED` з датою, `Loan.status` лишається `LOST` (минуле не переписується) | Часткове відшкодування, суперечки, повторне «втратив» тієї ж позики |
-| 6 | **«Хто читав»** | `GET /works/:id/history` включає лише позики з фактичною передачею (`HANDED_OVER`, `RETURNED`; `LOST` — Q8); `REJECTED`/`CANCELLED` (і нові `DECLINED`, `PENDING_CONFIRMATION`) лишаються в activity history примірника та «Моїй історії», але не називаються читанням | Зміна `GET /copies/:id/history` та `GET /me/history` щодо повноти статусів |
+| 6 | **«Хто читав»** | `GET /works/:id/history` включає лише позики з фактичною передачею (`HANDED_OVER`, `RETURNED`, `LOST` за наявності `handedAt` — Q8 затверджено, §0.3); `REJECTED`/`CANCELLED` (і нові `DECLINED`, `PENDING_CONFIRMATION`) лишаються в activity history примірника та «Моїй історії», але не називаються читанням | Зміна `GET /copies/:id/history` та `GET /me/history` щодо повноти статусів |
 
 ## 3. Зафіксовані продуктові рішення D1–D6
 
@@ -341,14 +346,16 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 
 ### 6.7 «Хто читав» (T8)
 
-- `workHistory` фільтрує: `status ∈ {HANDED_OVER, RETURNED}` (+`LOST` — Q8). `REQUESTED`,
+- `workHistory` фільтрує: `status ∈ {HANDED_OVER, RETURNED, LOST}` **і** `handedAt != null` (Q8 затверджено,
+  §0.3: `LOST` — читання лише за фактичної передачі; `LOST` без `handedAt` — ні). `REQUESTED`,
   `APPROVED`, `REJECTED`, `CANCELLED`, `PENDING_CONFIRMATION`, `DECLINED` — **не читання**.
 - Activity history: `GET /copies/:id/history` і `GET /me/history` показують усі статуси, як зараз.
   `PENDING_CONFIRMATION` і `DECLINED` бачать лише сторони позики (T5: для друзів/інших їх немає —
   це претензія, а не факт).
 - Гостьові рядки — завжди анонімні для не-власника, навіть при `showHolderNames = true` (D4).
 - `HistoryEntryLine`: для `origin ≠ REQUESTED` не друкується «Попросили …»; показується
-  «Записано власником» і фактичні дати.
+  «Записано власником» і фактичні дати. Джерело істини — `origin` (нове поле контракту `HistoryEntry`), а не
+  `requestedAt`: БД має дефолт `now()`, тож записана позика може мати ненульовий `requestedAt`.
 
 ### 6.8 Audit trail (T4)
 
@@ -540,7 +547,7 @@ private beta), доки рішення не ухвалене й не реалі�
 |---|---|---|---|
 | **10.0** ✅ (Q0, Q10, Q13) | Відповіді PO, що блокують **перший реалізаційний крок (10a)**: **Q0** (гілка), **Q13** (gate зі специфікацією: PO оновлює spec або явно вирішує пріоритет — виконавець spec не змінює), **Q10** (модель тримача книжки). Q14 (roadmap-gate D2) PO вносить до roadmap до будь-якого релізного рішення. Інші Q блокують лише свої кроки: Q8 → 10b; Q11 → 10c; Q6, Q12 → 10e; Q1–Q5 → 10g/10h; Q7 → 10i; Q9 → 10j | — | Письмові відповіді PO; жоден Q/T не вважається затвердженим без них |
 | **10a** ✅ | **Expand-схема, без зміни поведінки.** M1+M2 (`NotificationType` — у 10e); Prisma-схема; shared-enum-и; nullable-safe читачі (`history.mapper`, `library.mapper`, `notification-digest` виключає `borrowerKind=GUEST`, `library.service` view «не вдома»); переписані CHECK; runbook `stage-10-migration-rollback.md` | 10.0 | Наявні тести зелені; db-spec на наповненій БД (§9 MIG-*); `migrate diff` чистий; жодної нової функціональності |
-| **10b** | **«Хто читав»**: фільтр `workHistory`; `HistoryEntryLine` без «Попросили» для non-request; оновлений контракт | 10.0 (Q8, Q13) | Тести H-* ; `GET /copies/:id/history` без змін |
+| **10b** ✅ | **«Хто читав»**: фільтр `workHistory`; `HistoryEntryLine` без «Попросили» для non-request; оновлений контракт | 10.0 (Q8, Q13) | Тести H-* ; `GET /copies/:id/history` без змін |
 | **10c** | **Archive + safe delete** + M3; `COPY_HAS_LOAN_HISTORY`; фільтр архівних у всіх вибірках G5; UI «Архів»; інверсія `referential-actions.db-spec.ts:61` | 10a | Тести A-*, DEL-*; жоден `Loan` не зникає при видаленні/архіві |
 | **10d** | **`LoanEvent` + `recover`** + M4; час `LOAN_LOST` для нових позик; UI «Знайшлася» | 10a, 10c (архів у передумовах) | Тести REC-*; повторне `recover` ідемпотентне |
 | **10e** | **Existing loan (D6)**: `POST /loans/recorded`, `confirm/decline/withdraw/amend`; M5; `PENDING_CONFIRMATION` в `EXCLUSIVE_LOAN_STATUS`; сповіщення; UI обох сторін; події аналітики | 10a, 10d | Тести E-*, C-*; примірник ніколи не «доступний» до відповіді; наявні `REQUESTED` відхиляються лише після `confirm_record` |
@@ -649,7 +656,7 @@ private beta), доки рішення не ухвалене й не реалі�
 | REC3 | Recover: не власник → 404/403; не `LOST` → 409; дата в майбутньому → 400 | E |
 | REC4 | Після recover примірник знову доступний, новий запит проходить; старий `LOST` у історії | E |
 | REC5 | Наявні (до міграції) `LOST`-позики відновлювані | DB |
-| H1 | `workHistory` віддає лише `HANDED_OVER/RETURNED` (+Q8); **не** віддає `REQUESTED/APPROVED/REJECTED/CANCELLED/PENDING_CONFIRMATION/DECLINED` | E |
+| H1 | `workHistory` віддає лише `HANDED_OVER/RETURNED/LOST` із `handedAt != null` (Q8: `LOST` з і без `handedAt`); **не** віддає `REQUESTED/APPROVED/REJECTED/CANCELLED/PENDING_CONFIRMATION/DECLINED` | E |
 | H2 | `copies/:id/history` і `me/history` **зберігають** `REJECTED/CANCELLED` | E |
 | H3 | Матриця ролей для work history: власник / друг + `showHolderNames` on/off / інший (403) / blocked | E |
 | H4 | `PENDING_CONFIRMATION/DECLINED` невидимі друзям і не «читання» | E |
@@ -727,7 +734,7 @@ private beta), доки рішення не ухвалене й не реалі�
   CLAUDE.md не будується без рішення.)
 - **Q7.** Чи входить прив’язка контакту до акаунта (D5) у Етап 10, чи це наступний етап? І політика
   активної гостьової позики в момент прив’язки.
-- **Q8.** Чи `LOST` (після фактичної передачі) — «читав»? Roadmap називає лише `HANDED_OVER/RETURNED`.
+- **Q8.** ~~Чи `LOST` — «читав»?~~ — **затверджено PO** (§0.3): так, лише за наявності `handedAt`.
 - **Q9.** Чи рахувати записані існуючі позики в North Star/кроках funnel, чи лише окремим блоком
   (рекомендовано окремо)?
 - **Q10.** ~~Модель тримача книжки~~ — **затверджено T1-a** (§0.2).

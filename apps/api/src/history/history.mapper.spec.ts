@@ -24,6 +24,7 @@ function loanRow(overrides: Partial<NamedHistoryLoanRow> = {}): NamedHistoryLoan
   return {
     id: 'loan-1',
     status: 'RETURNED',
+    origin: 'REQUESTED',
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     requestedAt: new Date('2026-06-01T10:00:00.000Z'),
     respondedAt: new Date('2026-06-02T10:00:00.000Z'),

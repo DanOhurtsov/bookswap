@@ -32,6 +32,7 @@ export type HistoryLoanRow = Pick<
   LoanModel,
   | 'id'
   | 'status'
+  | 'origin'
   | 'createdAt'
   | 'requestedAt'
   | 'respondedAt'
@@ -67,6 +68,7 @@ function factsOf(
 ): Omit<NamedHistoryEntry, 'names' | 'loanId' | 'owner' | 'borrower'> {
   return {
     status: loan.status,
+    origin: loan.origin,
     isOverdue: isOverdue(loan, now),
     requestedAt: loan.requestedAt?.toISOString() ?? null,
     respondedAt: loan.respondedAt?.toISOString() ?? null,

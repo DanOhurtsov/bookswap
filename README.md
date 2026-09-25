@@ -775,6 +775,10 @@ GET    /api/v1/me/history
 
 `GET /me/history` завжди з іменами: viewer — сторона кожного з цих лоанів, а не стороння людина, і без імені йому немає кому вертати книжку.
 
+**«Хто читав» (`GET /works/:id/history`) — лише фактична передача (Етап 10, крок 10b).** У відповідь потрапляють позики зі статусом `HANDED_OVER`, `RETURNED` або `LOST` **і** з `handedAt != null`. За рішенням Product Owner (Q8) `LOST` — «читав» лише тоді, коли передача справді відбулася; `LOST` без `handedAt` читанням не є. `REQUESTED`, `APPROVED`, `REJECTED`, `CANCELLED`, `PENDING_CONFIRMATION` і `DECLINED` — це запит, відмова або претензія, а не читання. Повна activity history не втрачається: `GET /copies/:id/history` і `GET /me/history` як і раніше показують усі статуси, зокрема `REJECTED` і `CANCELLED`. `PENDING_CONFIRMATION` і `DECLINED` бачать лише сторони відповідної позики — не друзі власника. Правила friendship, block, видимості примірника й `showHolderNames` не змінені; гостьові рядки для не-власника завжди анонімні.
+
+Кожен запис історії несе `origin` (`REQUESTED` / `RECORDED_EXISTING` / `RECORDED_GUEST`). Для записаної власником позики UI показує «Записано власником» замість «Попросили …», навіть якщо `requestedAt` ненульовий через дефолт БД: джерелом істини про «чи був запит» є `origin`, а не дата. Для звичайного request-flow текст «Попросили …» не змінився.
+
 ## Сповіщення
 
 ```
