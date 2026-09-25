@@ -2,73 +2,54 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  catalogSearchResponseSchema,
+  CATALOG_LIMITS,
+  catalogDiscoveryResponseSchema,
   workDetailResponseSchema,
-  type CatalogSearchResponse,
+  type CatalogDiscoveryResponse,
+  type CatalogDiscoveryScope,
   type WorkDetailResponse,
 } from '@bookswap/shared'
 import { apiRequest, apiRequestWithRedirect, describeError } from './api'
+import { askedFor } from './search-page'
+import { useKeyedRequest } from './use-keyed-request'
 
 /**
  * Ті самі три стани, що й у `useSession` та `useFriends`: «ще шукаю» і «нічого не
  * знайдено» — різні речі, і без цієї різниці сторінка блимає написом «нічого не
  * знайдено» при кожному натисканні.
  */
-export type CatalogSearchState =
+export type CatalogDiscoveryState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ready'; response: CatalogSearchResponse }
+  | { status: 'ready'; response: CatalogDiscoveryResponse }
   | { status: 'error'; message: string }
 
 /**
- * Порожній запит — це `idle`, а не порожній пошук: до першого символу питати
- * сервер немає про що, а показувати «нічого не знайдено» — тим паче.
- *
- * Стан зберігається РАЗОМ із запитом, до якого належить, і поточний стан
- * виводиться під час рендеру. Це не ускладнення: інакше при зміні запиту в
- * інтерфейсі одну мить видно результати попереднього — з чужими книжками під
- * новим словом. Заразом зникає єдина причина писати `setState` просто в тілі
- * ефекту (React це прямо не радить, а ESLint — забороняє).
+ * Discovery of physical copies for the selected viewer scope and URL page.
+ * An empty query stays idle; stale responses never render for another key.
  */
-export function useCatalogSearch(query: string): CatalogSearchState {
+export function useCatalogDiscovery(
+  query: string,
+  page: number,
+  pageSize: number,
+  scope: CatalogDiscoveryScope,
+  refresh = 0,
+): CatalogDiscoveryState {
   const trimmed = query.trim()
-  const enabled = trimmed.length >= 2
-  const [result, setResult] = useState<{ query: string; state: CatalogSearchState }>({
-    query: '',
-    state: { status: 'idle' },
-  })
+  const enabled = trimmed.length >= CATALOG_LIMITS.queryMin
 
-  useEffect(() => {
-    if (!enabled) return
+  const key = `${scope}\u0000${String(refresh)}\u0000${askedFor(trimmed, page, pageSize)}`
+  const state = useKeyedRequest(enabled ? key : undefined, (signal) =>
+    apiRequest(
+      `/catalog/discover?q=${encodeURIComponent(trimmed)}&page=${String(page)}&pageSize=${String(pageSize)}&scope=${scope}`,
+      { schema: catalogDiscoveryResponseSchema, signal },
+    ),
+  )
 
-    const controller = new AbortController()
+  if (state.status === 'ready') return { status: 'ready', response: state.value }
+  if (state.status === 'error') return { status: 'error', message: describeError(state.error) }
 
-    async function load(): Promise<void> {
-      try {
-        const response = await apiRequest(`/catalog/search?q=${encodeURIComponent(trimmed)}`, {
-          schema: catalogSearchResponseSchema,
-          signal: controller.signal,
-        })
-
-        setResult({ query: trimmed, state: { status: 'ready', response } })
-      } catch (error) {
-        if (controller.signal.aborted) return
-
-        setResult({ query: trimmed, state: { status: 'error', message: describeError(error) } })
-      }
-    }
-
-    void load()
-
-    return () => {
-      controller.abort()
-    }
-  }, [trimmed, enabled])
-
-  if (!enabled) return { status: 'idle' }
-
-  // Відповідь на інший запит — це ще не відповідь на цей.
-  return result.query === trimmed ? result.state : { status: 'loading' }
+  return state
 }
 
 export type WorkState =
@@ -109,7 +90,7 @@ export interface WorkResource {
 
 export function useWork(workId: string): WorkResource {
   // Stored together with the id it resulted from, same idiom as `moved`
-  // below and `useCatalogSearch` above: otherwise a workId change (navigating
+  // below and `useCatalogDiscovery` above: otherwise a workId change (navigating
   // to a different book) would keep showing the PREVIOUS book's `ready`
   // detail — including its title, authors, everything — for as long as the
   // new book's own fetch takes, instead of `loading`.

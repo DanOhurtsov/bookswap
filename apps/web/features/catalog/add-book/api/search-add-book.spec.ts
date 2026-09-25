@@ -12,8 +12,8 @@ it('after an ISBN miss searches local Works once more by the exact external titl
   const candidate = { work: { id: 'existing-work', title: 'Вечірка на Гелловін' } }
 
   mockApiRequest.mockImplementation((path: string) => {
-    if (path === '/catalog/search/candidates?q=9786171502789') {
-      return Promise.resolve({ candidates: [] })
+    if (path === '/catalog/search/candidates?q=9786171502789&page=1&pageSize=10') {
+      return Promise.resolve({ candidates: [], page: 1, pageSize: 10, total: 0, hasMore: false })
     }
     if (path === '/catalog/lookup?isbn=9786171502789') {
       return Promise.resolve({
@@ -22,15 +22,21 @@ it('after an ISBN miss searches local Works once more by the exact external titl
     }
     if (
       path.startsWith('/catalog/search/candidates?q=') &&
-      decodeURIComponent(path.split('=')[1] ?? '') === 'Вечірка на Гелловін'
+      new URLSearchParams(path.split('?')[1]).get('q') === 'Вечірка на Гелловін'
     ) {
-      return Promise.resolve({ candidates: [candidate] })
+      return Promise.resolve({
+        candidates: [candidate],
+        page: 1,
+        pageSize: 10,
+        total: 1,
+        hasMore: false,
+      })
     }
 
     return Promise.reject(new Error(`Unexpected path: ${path}`))
   })
 
-  const result = await searchAddBookCandidates('9786171502789')
+  const result = await searchAddBookCandidates('9786171502789', 1, 10)
 
   expect(result.candidates).toEqual([candidate])
   expect(result.lookup?.title).toBe('Вечірка на Гелловін')
@@ -39,12 +45,40 @@ it('after an ISBN miss searches local Works once more by the exact external titl
 
 it('keeps exact external metadata when best-effort title dedup search fails', async () => {
   mockApiRequest
-    .mockResolvedValueOnce({ candidates: [] })
+    .mockResolvedValueOnce({ candidates: [], page: 1, pageSize: 10, total: 0, hasMore: false })
     .mockResolvedValueOnce({ result: { title: 'Вечірка на Гелловін' } })
     .mockRejectedValueOnce(new Error('candidate search unavailable'))
 
-  await expect(searchAddBookCandidates('9786171502789')).resolves.toMatchObject({
+  await expect(searchAddBookCandidates('9786171502789', 1, 10)).resolves.toMatchObject({
     candidates: [],
     lookup: { title: 'Вечірка на Гелловін' },
   })
+})
+
+it('відгортає список: page і pageSize їдуть у запит кандидатів явно', async () => {
+  mockApiRequest.mockResolvedValue({
+    candidates: [],
+    page: 3,
+    pageSize: 50,
+    total: 120,
+    hasMore: true,
+  })
+
+  const result = await searchAddBookCandidates('шевченко', 3, 50)
+
+  const [path] = mockApiRequest.mock.calls[0] as [string]
+  expect(path).toContain('&page=3&pageSize=50')
+  expect(result).toMatchObject({ page: 3, pageSize: 50, hasMore: true })
+})
+
+it('запасний пошук за назвою — лише на першій сторінці ISBN-запиту', async () => {
+  mockApiRequest.mockImplementation((path: string) =>
+    path.startsWith('/catalog/lookup')
+      ? Promise.resolve({ result: { title: 'Вечірка на Гелловін' } })
+      : Promise.resolve({ candidates: [], page: 2, pageSize: 10, total: 0, hasMore: false }),
+  )
+
+  await searchAddBookCandidates('9786171502789', 2, 10)
+
+  expect(mockApiRequest).toHaveBeenCalledTimes(2)
 })

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { StrictMode } from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Edition, Translation, Work, WorkAuthor, WorkDetailResponse } from '@bookswap/shared'
@@ -56,11 +56,40 @@ jest.mock('@/app/lib/use-session', () => ({
 let searchParams = new URLSearchParams()
 const push = jest.fn()
 const replace = jest.fn()
+const navigationListeners = new Set<() => void>()
 
-jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push, replace }),
-  useSearchParams: () => searchParams,
-}))
+/**
+ * The wizard's search lives in the ADDRESS, so the router mock is a working one:
+ * `push`/`replace` move `searchParams` and re-render whoever reads them — exactly
+ * what the real router does. A mock that only recorded the call would leave the
+ * wizard staring at the old address after every search.
+ */
+function navigate(href: string): void {
+  searchParams = new URLSearchParams(href.split('?')[1] ?? '')
+  navigationListeners.forEach((listener) => {
+    listener()
+  })
+}
+
+jest.mock('next/navigation', () => {
+  const { useSyncExternalStore } = jest.requireActual<typeof import('react')>('react')
+
+  return {
+    useRouter: () => ({ push, replace }),
+    useSearchParams: () =>
+      useSyncExternalStore(
+        (listener) => {
+          navigationListeners.add(listener)
+
+          return () => {
+            navigationListeners.delete(listener)
+          }
+        },
+        () => searchParams,
+        () => searchParams,
+      ),
+  }
+})
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
 
@@ -169,6 +198,8 @@ beforeEach(() => {
   mockApiRequest.mockReset()
   push.mockReset()
   replace.mockReset()
+  push.mockImplementation(navigate)
+  replace.mockImplementation(navigate)
   sessionStorage.clear()
 })
 
@@ -589,6 +620,10 @@ describe('гілка «немає збігів»', () => {
       '/catalog/search/external': () => ({
         results: [],
         sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+        page: 1,
+        pageSize: 10,
+        more: 'NO' as const,
+        complete: true,
       }),
       '/works': ({ body }) => {
         expect(body).toMatchObject({ title: 'Новий твір' })
@@ -1184,5 +1219,179 @@ describe('прихід із каталогу з уже обраним зовні
     expect(screen.queryByText(/Обрано:/)).not.toBeInTheDocument()
 
     getItem.mockRestore()
+  })
+})
+
+describe('/catalog/new — пошук і сторінки живуть в адресі', () => {
+  const EXTERNAL = (overrides: Record<string, unknown> = {}) => ({
+    results: [],
+    sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+    page: 1,
+    pageSize: 10,
+    more: 'NO',
+    complete: true,
+    ...overrides,
+  })
+
+  const CANDIDATES = (overrides: Record<string, unknown> = {}) => ({
+    candidates: [candidate()],
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    hasMore: false,
+    ...overrides,
+  })
+
+  const paramsOf = (path: string): URLSearchParams => new URLSearchParams(path.split('?')[1] ?? '')
+
+  it('пряме посилання відновлює видачу: пошук стартує без жодного кліку', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL({ page: 2, pageSize: 20 }),
+      '/catalog/search/candidates': () => CANDIDATES({ page: 2, pageSize: 20 }),
+    })
+    searchParams = new URLSearchParams('q=Кобзар&page=2&pageSize=20')
+
+    render(withQueryClient(<AddBookWizard />))
+
+    expect(
+      await screen.findByRole('button', { name: 'У мене інше видання цього твору' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Назва або ISBN')).toHaveValue('Кобзар')
+
+    const calls = mockApiRequest.mock.calls.map(([path]: [string]) => path)
+    for (const path of calls.filter((path) => path.startsWith('/catalog/search'))) {
+      expect(paramsOf(path).get('page')).toBe('2')
+      expect(paramsOf(path).get('pageSize')).toBe('20')
+    }
+  })
+
+  it('надсилання форми кладе q в адресу, скидає page і зберігає pageSize та параметри майстра', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL(),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+    searchParams = new URLSearchParams('mode=scan&pageSize=20')
+    const user = userEvent.setup()
+
+    render(withQueryClient(<AddBookWizard />))
+
+    await user.type(await screen.findByLabelText('Назва або ISBN'), 'Кобзар')
+    await user.click(screen.getByRole('button', { name: 'Шукати' }))
+
+    expect(push).toHaveBeenCalledWith(
+      `/catalog/new?q=${encodeURIComponent('Кобзар')}&pageSize=20&mode=scan`,
+    )
+  })
+
+  it('перехід між сторінками зберігає параметри майстра, окрім нічого', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL({ more: 'YES' }),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+    searchParams = new URLSearchParams('q=Кобзар&mode=scan&external=tok&workId=')
+
+    render(withQueryClient(<AddBookWizard />))
+
+    const next = await screen.findByRole('link', { name: 'Наступна сторінка' })
+    const target = paramsOf(next.getAttribute('href') ?? '')
+
+    expect(target.get('page')).toBe('2')
+    expect(target.get('mode')).toBe('scan')
+    expect(target.get('external')).toBe('tok')
+  })
+
+  it('новий запит скидає токен передавання: він привʼязаний до запиту, під яким зроблений вибір', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL(),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+    searchParams = new URLSearchParams('q=Кобзар&external=tok&mode=scan')
+    const user = userEvent.setup()
+
+    render(withQueryClient(<AddBookWizard />))
+
+    const field = await screen.findByLabelText('Назва або ISBN')
+    await user.clear(field)
+    await user.type(field, 'Сад')
+    await user.click(screen.getByRole('button', { name: 'Шукати' }))
+
+    const target = push.mock.calls.at(-1)?.[0] as string
+    expect(paramsOf(target).get('q')).toBe('Сад')
+    expect(paramsOf(target).has('external')).toBe(false)
+    expect(paramsOf(target).get('mode')).toBe('scan')
+  })
+
+  it('вибір розміру веде на сторінку 1 того самого запиту й лишає інші параметри', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL({ page: 3 }),
+      '/catalog/search/candidates': () => CANDIDATES({ page: 3 }),
+    })
+    searchParams = new URLSearchParams('q=Кобзар&page=3&mode=scan')
+    const user = userEvent.setup()
+
+    render(withQueryClient(<AddBookWizard />))
+
+    await user.selectOptions(await screen.findByLabelText('Результатів на сторінці'), '50')
+
+    expect(push).toHaveBeenCalledWith(
+      `/catalog/new?q=${encodeURIComponent('Кобзар')}&pageSize=50&mode=scan`,
+    )
+  })
+
+  it('Back/Forward: зміна адреси міняє список, поле запиту йде за нею', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL(),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+    searchParams = new URLSearchParams('q=Кобзар')
+
+    render(withQueryClient(<AddBookWizard />))
+    await screen.findByRole('button', { name: 'У мене інше видання цього твору' })
+
+    mockApiRequest.mockClear()
+    act(() => {
+      navigate('/catalog/new?q=Сад&page=2')
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Назва або ISBN')).toHaveValue('Сад')
+    })
+    await waitFor(() => {
+      const calls = mockApiRequest.mock.calls.map(([path]: [string]) => path)
+      expect(calls.some((path) => paramsOf(path).get('q') === 'Сад')).toBe(true)
+    })
+  })
+
+  it('поламаний page в адресі виправляється через replace, а не push', async () => {
+    routeApiRequest({
+      '/catalog/search/external': () => EXTERNAL(),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+    searchParams = new URLSearchParams('q=Кобзар&page=abc&mode=scan')
+
+    render(withQueryClient(<AddBookWizard />))
+
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith(
+        `/catalog/new?q=${encodeURIComponent('Кобзар')}&mode=scan`,
+      )
+    })
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('скановане ISBN кладе номер в адресу й зберігає параметри сканера', async () => {
+    routeApiRequest({
+      '/catalog/lookup': () => ({ result: { title: 'Кобзар' } }),
+      '/catalog/search/candidates': () => CANDIDATES(),
+    })
+
+    await searchViaScan()
+
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith(`/catalog/new?q=${CANDIDATE_ISBN}&mode=scan`)
+    })
+    expect(
+      await screen.findByRole('button', { name: 'У мене інше видання цього твору' }),
+    ).toBeInTheDocument()
   })
 })

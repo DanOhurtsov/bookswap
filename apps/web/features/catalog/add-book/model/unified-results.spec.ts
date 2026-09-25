@@ -59,120 +59,45 @@ function external(overrides: Partial<ExternalSearchResult> & { id: string }): Ex
 const keysOf = (rows: ReturnType<typeof buildUnifiedResults>) => rows.map((row) => row.key)
 
 describe('buildUnifiedResults', () => {
-  it('складає локальні й зовнішні записи в ОДИН список', () => {
+  it('локальні рядки йдуть першими, зовнішні — за ними, у порядку сервера', () => {
     const rows = buildUnifiedResults(
-      'Тигролови',
-      [candidate({ id: 'work-1', title: 'Тигролови' })],
-      [external({ id: 'GOOGLE_BOOKS:v1' })],
+      [candidate({ id: 'w1', title: 'Розгром' }), candidate({ id: 'w2', title: 'Сад' })],
+      [external({ id: 'GOOGLE_BOOKS:b' }), external({ id: 'GOOGLE_BOOKS:a' })],
     )
 
-    expect(rows).toHaveLength(2)
-    expect(rows.map((row) => row.origin).sort()).toEqual(['EXTERNAL', 'LOCAL'])
+    expect(keysOf(rows)).toEqual([
+      'local:w1',
+      'local:w2',
+      'external:GOOGLE_BOOKS:b',
+      'external:GOOGLE_BOOKS:a',
+    ])
   })
 
-  it('локальні результати доступні й до приходу зовнішніх', () => {
+  it('не пересортовує за релевантністю: межі сторінок різала сервер за цим порядком', () => {
     const rows = buildUnifiedResults(
-      'Тигролови',
-      [candidate({ id: 'work-1', title: 'Тигролови' })],
-      [],
+      [candidate({ id: 'w1', title: 'Зовсім інша назва' })],
+      [external({ id: 'GOOGLE_BOOKS:exact', title: 'Тигролови' })],
     )
 
-    expect(keysOf(rows)).toEqual(['local:work-1'])
+    expect(keysOf(rows)).toEqual(['local:w1', 'external:GOOGLE_BOOKS:exact'])
   })
 
-  it('сортує за релевантністю, а не за походженням', () => {
+  it('не відкидає зовнішній запис із ISBN нашого каталогу — це робить сервер до нарізання', () => {
     const rows = buildUnifiedResults(
-      'Тигролови',
-      [candidate({ id: 'work-1', title: 'Зовсім інша книжка', authors: ['Хтось'] })],
-      [external({ id: 'GOOGLE_BOOKS:v1', title: 'Тигролови' })],
-    )
-
-    // Точна назва ззовні випереджає слабкий локальний збіг: спільний список
-    // існує саме для того, щоб релевантність важила більше за джерело.
-    expect(keysOf(rows)[0]).toBe('external:GOOGLE_BOOKS:v1')
-  })
-
-  it('за однакової релевантності попереду наш каталог', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
-      [candidate({ id: 'work-1', title: 'Тигролови' })],
-      [external({ id: 'GOOGLE_BOOKS:v1', title: 'Тигролови' })],
-    )
-
-    expect(keysOf(rows)).toEqual(['local:work-1', 'external:GOOGLE_BOOKS:v1'])
-  })
-
-  it('точний збіг назви вище за частковий у межах спільного списку', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
-      [],
-      [
-        external({ id: 'GOOGLE_BOOKS:long', title: 'Тигролови та інші повісті' }),
-        external({ id: 'GOOGLE_BOOKS:exact', title: 'Тигролови' }),
-      ],
-    )
-
-    expect(keysOf(rows)).toEqual(['external:GOOGLE_BOOKS:exact', 'external:GOOGLE_BOOKS:long'])
-  })
-
-  // --- Дедуплікація ---------------------------------------------------------
-
-  it('ховає зовнішній запис із ISBN, який уже є в нашому каталозі', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
       [
         candidate({
-          id: 'work-1',
+          id: 'w1',
           title: 'Тигролови',
-          editions: [edition({ id: 'edition-1', isbn13: '9786177585113' })],
+          editions: [edition({ id: 'e1', isbn13: '9786177585113' })],
         }),
       ],
-      [external({ id: 'GOOGLE_BOOKS:v1', isbn13: '9786177585113' })],
+      [external({ id: 'GOOGLE_BOOKS:x', isbn13: '9786177585113' })],
     )
 
-    expect(keysOf(rows)).toEqual(['local:work-1'])
+    expect(keysOf(rows)).toHaveLength(2)
   })
 
-  it('інший ISBN — це інше видання, і воно лишається в списку', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
-      [
-        candidate({
-          id: 'work-1',
-          title: 'Тигролови',
-          editions: [edition({ id: 'edition-1', isbn13: '9786177585113' })],
-        }),
-      ],
-      [external({ id: 'GOOGLE_BOOKS:v1', isbn13: '9789660303072' })],
-    )
-
-    expect(rows).toHaveLength(2)
-  })
-
-  it('однакова назва без ISBN не вважається дублікатом', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
-      [candidate({ id: 'work-1', title: 'Тигролови' })],
-      [external({ id: 'GOOGLE_BOOKS:v1', title: 'Тигролови' })],
-    )
-
-    // Тезки бувають, а два тиражі — це дві різні книжки на полиці.
-    expect(rows).toHaveLength(2)
-  })
-
-  it('зовнішній запис без ISBN лишається, навіть коли в каталозі є ISBN', () => {
-    const rows = buildUnifiedResults(
-      'Тигролови',
-      [
-        candidate({
-          id: 'work-1',
-          title: 'Тигролови',
-          editions: [edition({ id: 'edition-1', isbn13: '9786177585113' })],
-        }),
-      ],
-      [external({ id: 'OPEN_LIBRARY:OL1W', kind: 'WORK', sources: ['OPEN_LIBRARY'] })],
-    )
-
-    expect(rows).toHaveLength(2)
+  it('порожній вхід — порожній список', () => {
+    expect(buildUnifiedResults([], [])).toEqual([])
   })
 })

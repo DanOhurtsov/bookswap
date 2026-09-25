@@ -1,24 +1,34 @@
-import type { CopyEntryMethod, ExternalSearchResult, WorkDetailResponse } from '@bookswap/shared'
+import type {
+  CopyEntryMethod,
+  ExternalSearchResult,
+  SearchPageSize,
+  WorkDetailResponse,
+} from '@bookswap/shared'
 import type { AddBookSearchResult } from '../api/search-add-book'
 import type { ExistingEditionInput, ExistingWorkInput, NewWorkInput } from '../model/add-book-step'
-import {
-  externalSearchBlind,
-  externalSearchSettled,
-  type ExternalSearchState,
-} from '../model/external-search-state'
+import type { ExternalSearchState } from '../model/external-search-state'
+import { searchPageView } from '../model/search-page-view'
 import { buildUnifiedResults } from '../model/unified-results'
-import { ExternalResultCard } from './ExternalResultCard'
-import { ExternalSearchStatus } from './ExternalSearchStatus'
-import { LocalResultCard } from './LocalResultCard'
 import { LookupCard } from './LookupCard'
+import { SearchPagination } from './SearchPagination'
+import { SearchResultsList, type LocalListState } from './SearchResultsList'
 
 type SearchResultsProps = {
-  result: AddBookSearchResult
+  /** The local half's answer; absent while it is still loading or after it failed. */
+  result: AddBookSearchResult | undefined
+  local: LocalListState
   entryMethod: CopyEntryMethod
   external: ExternalSearchState
+  page: number
+  pageSize: SearchPageSize
+  /** Address of a page of THIS route — the wizard keeps its own parameters in it. */
+  hrefFor: (target: { page: number; pageSize: SearchPageSize }) => string
+  onPageSizeChange: (size: SearchPageSize) => void
   onFoundEdition: (selection: ExistingEditionInput) => void
   onFoundWork: (selection: ExistingWorkInput) => void
+  /** Creating a new work needs the query, which `result` may not carry yet. */
   onCreateNew: (selection: NewWorkInput) => void
+  query: string
   onSelectExternal: (result: ExternalSearchResult) => void
 }
 
@@ -47,60 +57,75 @@ function existingWorkInput(
 }
 
 /**
- * The results area: ONE list holding our catalog and the external catalogs.
+ * The results area of the wizard: the SAME shared list and page controls as
+ * `/catalog` (`SearchResultsList`, `SearchPagination`), plus what only the
+ * wizard has — the exact-ISBN lookup card and the ways to create a new work.
+ * What differs from `/catalog` is what happens AFTER a result is chosen: here an
+ * existing edition becomes a copy, an existing work continues to translation, an
+ * external record starts the duplicate check.
  *
- * It is one list, not a local section followed by an external one, because a
- * person looking for their book is asking a single question and comparing a
- * single set of answers. Two sections made them compare across a heading and
- * work out for themselves which half to trust — while relevance, not origin,
- * is what actually decides whether a row is the book in their hands. Origin is
- * still visible on every card as a badge, and it still decides what the card
- * can do.
- *
- * Local rows appear as soon as the local request answers; external ones join
- * the same list when they arrive (`buildUnifiedResults` simply gets a longer
- * input). Nothing waits: the external state is reported on one line beside the
- * list, never around it.
+ * Local rows appear as soon as the local request answers; external ones join the
+ * same list when they arrive. Nothing waits: the external state is reported on one
+ * line beside the list, never around it.
  *
  * The ISBN path is untouched. An ISBN query does not run an external title
- * search at all (`SearchStep`), so for it this renders exactly what it did
- * before: the looked-up edition, and the offer to create a work from it.
+ * search at all (`useExternalSearch`), so for it this renders what it always did:
+ * the looked-up edition, and the offer to create a work from it.
  */
 export function SearchResults({
   result,
+  local,
   entryMethod,
   external,
+  page,
+  pageSize,
+  hrefFor,
+  onPageSizeChange,
   onFoundEdition,
   onFoundWork,
   onCreateNew,
+  query,
   onSelectExternal,
 }: SearchResultsProps) {
   const hasExactCatalogEdition =
-    result.isbn !== undefined &&
+    result?.isbn !== undefined &&
     result.candidates.some((candidate) =>
       candidate.editions.some((edition) => edition.isbn13 === result.isbn),
     )
 
   const rows = buildUnifiedResults(
-    result.query,
-    result.candidates,
+    result?.candidates ?? [],
     external.status === 'ready' ? external.results : [],
   )
 
-  // "Nothing found" may only be said once every source has answered. While one
-  // is still being asked, an empty list means "not yet", not "not there".
-  const finished = externalSearchSettled(external)
+  const view = searchPageView({
+    page,
+    local: { ready: result !== undefined, hasMore: result?.hasMore ?? false },
+    rowCount: rows.length,
+    external,
+  })
 
-  if (result.candidates.length === 0 && result.lookup !== undefined && rows.length === 0) {
+  // The query the create form starts from: a lookup title beats the raw input.
+  const startNew = (): void => {
+    onCreateNew(
+      result === undefined
+        ? { initialTitle: query, entryMethod }
+        : newWorkInput(result, entryMethod),
+    )
+  }
+
+  if (
+    page === 1 &&
+    result !== undefined &&
+    result.candidates.length === 0 &&
+    result.lookup !== undefined &&
+    rows.length === 0
+  ) {
     return (
       <>
         <p className="empty">У каталозі BookSwap цього видання ще немає.</p>
         <ul className="books">
-          <LookupCard
-            isbn={result.isbn}
-            lookup={result.lookup}
-            onUse={() => onCreateNew(newWorkInput(result, entryMethod))}
-          />
+          <LookupCard isbn={result.isbn} lookup={result.lookup} onUse={startNew} />
         </ul>
       </>
     )
@@ -108,7 +133,7 @@ export function SearchResults({
 
   return (
     <>
-      {result.lookup !== undefined && !hasExactCatalogEdition && (
+      {result?.lookup !== undefined && !hasExactCatalogEdition && (
         <>
           <p className="empty">
             Точне видання знайдено зовні. Перевірте, чи твір уже є у BookSwap.
@@ -119,65 +144,58 @@ export function SearchResults({
         </>
       )}
 
-      {rows.length > 0 && (
-        <>
-          <p className="lede">Можливо, це одна з цих книжок?</p>
-          <ul className="books">
-            {rows.map((row) =>
-              row.origin === 'LOCAL' ? (
-                <LocalResultCard
-                  key={row.key}
-                  candidate={row.candidate}
-                  searchedIsbn={result.isbn}
-                  onUseEdition={(editionId) => {
-                    onFoundEdition({
-                      workId: row.candidate.work.id,
-                      title: row.candidate.work.title,
-                      editionId,
-                      entryMethod,
-                    })
-                  }}
-                  onUseWork={() =>
-                    onFoundWork(existingWorkInput(result, row.candidate, entryMethod))
-                  }
-                />
-              ) : (
-                <ExternalResultCard
-                  key={row.key}
-                  result={row.result}
-                  onSelect={() => {
-                    onSelectExternal(row.result)
-                  }}
-                />
-              ),
-            )}
-          </ul>
-        </>
+      {rows.length > 0 && <p className="lede">Можливо, це одна з цих книжок?</p>}
+
+      <SearchResultsList
+        rows={rows}
+        local={local}
+        external={external}
+        page={page}
+        firstPageHref={hrefFor({ page: 1, pageSize })}
+        localCard={(candidate) => ({
+          ...(result?.isbn === undefined ? {} : { searchedIsbn: result.isbn }),
+          onUseEdition: (editionId) => {
+            onFoundEdition({
+              workId: candidate.work.id,
+              title: candidate.work.title,
+              editionId,
+              entryMethod,
+            })
+          },
+          onUseWork: () => {
+            if (result !== undefined) onFoundWork(existingWorkInput(result, candidate, entryMethod))
+          },
+        })}
+        onSelectExternal={onSelectExternal}
+        emptyNotice={({ blind }) => (
+          <>
+            <p className="empty">
+              {blind
+                ? 'У BookSwap нічого схожого немає, а зовнішні каталоги не відповіли — чи є там ця книжка, невідомо.'
+                : 'Нічого схожого не знайшлося. Заведемо новий твір.'}
+            </p>
+            <button type="button" onClick={startNew}>
+              Створити новий твір
+            </button>
+          </>
+        )}
+      />
+
+      {local.status !== 'idle' && (
+        <SearchPagination
+          page={page}
+          pageSize={pageSize}
+          next={view.next}
+          currentHasRows={view.currentHasRows}
+          hrefFor={hrefFor}
+          onPageSizeChange={onPageSizeChange}
+        />
       )}
 
-      <ExternalSearchStatus state={external} />
-
-      {rows.length === 0 && finished && (
-        <>
-          <p className="empty">
-            {externalSearchBlind(external)
-              ? 'У BookSwap нічого схожого немає, а зовнішні каталоги не відповіли — чи є там ця книжка, невідомо.'
-              : 'Нічого схожого не знайшлося. Заведемо новий твір.'}
-          </p>
-          <button type="button" onClick={() => onCreateNew(newWorkInput(result, entryMethod))}>
-            Створити новий твір
-          </button>
-        </>
-      )}
-
-      {(rows.length > 0 || !finished) && (
+      {(rows.length > 0 || !view.finished) && (
         <p className="form__aside">
           Не знайшли своє видання?{' '}
-          <button
-            type="button"
-            className="button--ghost"
-            onClick={() => onCreateNew(newWorkInput(result, entryMethod))}
-          >
+          <button type="button" className="button--ghost" onClick={startNew}>
             Завести новий твір
           </button>
         </p>

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
+import type { CatalogDiscoveryResult } from '@bookswap/shared'
 import type { LocalCandidate } from '../model/unified-results'
 import { ResultCardShell } from './ResultCardShell'
 
@@ -15,6 +16,7 @@ type LocalResultCardProps = {
   /** One extra line of context, e.g. why this work matched the query. */
   note?: string
   searchedIsbn?: string
+  locations?: CatalogDiscoveryResult['locations']
   /** Offering an existing edition is the catalog's privilege — omitted, no buttons. */
   onUseEdition?: (editionId: string) => void
   onUseWork?: () => void
@@ -44,6 +46,7 @@ export function LocalResultCard({
   href,
   note,
   searchedIsbn,
+  locations,
   onUseEdition,
   onUseWork,
 }: LocalResultCardProps) {
@@ -101,6 +104,33 @@ export function LocalResultCard({
         <button type="button" className="button--ghost" onClick={onUseWork}>
           У мене інше видання цього твору
         </button>
+      )}
+
+      {locations !== undefined && (
+        <ul className="book__locations">
+          {locations.map((location) => (
+            <li key={location.owner.id}>
+              <Link
+                href={
+                  location.relation === 'SELF'
+                    ? '/library'
+                    : `/users/${encodeURIComponent(location.owner.id)}/library`
+                }
+              >
+                {location.relation === 'SELF'
+                  ? 'У моїй бібліотеці'
+                  : `У ${location.owner.displayName}`}
+              </Link>{' '}
+              · доступних примірників: {location.availableCopies}
+              {location.relation === 'OTHER' && (
+                <>
+                  {' '}
+                  · <Link href="/friends">Спочатку додайте власника в друзі</Link>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </ResultCardShell>
   )

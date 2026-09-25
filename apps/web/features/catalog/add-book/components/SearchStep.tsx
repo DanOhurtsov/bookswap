@@ -2,34 +2,32 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import {
-  isValidIsbn13,
-  searchCandidatesRequestSchema,
+  CATALOG_LIMITS,
+  catalogQuerySchema,
+  type CatalogQuery,
   type CopyEntryMethod,
   type ExternalSearchResult,
-  type SearchCandidatesRequest,
 } from '@bookswap/shared'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { describeAddBookError } from '@/app/lib/catalog-errors'
+import { askedFor, type SearchAddress } from '@/app/lib/search-page'
+import { useKeyedRequest } from '@/app/lib/use-keyed-request'
 import { TextField } from '@/components/Form/FormFields'
-import { FormStatus } from '@/components/Form/FormStatus'
-import { searchAddBookCandidates, type AddBookSearchResult } from '../api/search-add-book'
-import { findLocalDuplicates, searchExternalCatalogs } from '../api/search-external'
+import { searchAddBookCandidates } from '../api/search-add-book'
+import { findLocalDuplicates } from '../api/search-external'
 import { loadBarcodeScannerPanel } from '../lib/load-barcode-scanner-panel'
 import type { ExistingEditionInput, ExistingWorkInput, NewWorkInput } from '../model/add-book-step'
-import {
-  IDLE_EXTERNAL_SEARCH,
-  externalSearchReady,
-  type ExternalSearchState,
-} from '../model/external-search-state'
 import {
   existingWorkFromExternal,
   newWorkFromExternal,
   type ExternalSelection,
 } from '../model/external-selection'
+import { useExternalSearch } from '../model/use-external-search'
 import { ExternalSelectionPanel } from './ExternalSelectionPanel'
 import { SearchResults } from './SearchResults'
+import type { LocalListState } from './SearchResultsList'
 
 /**
  * Bundle-split boundary (§9): `next/dynamic` keeps the scanner panel — and
@@ -43,7 +41,16 @@ import { SearchResults } from './SearchResults'
 const BarcodeScannerPanel = dynamic(loadBarcodeScannerPanel, { ssr: false })
 
 type SearchStepProps = {
-  initialQuery: string
+  /**
+   * The search the ADDRESS asks for: query, page and page size. The address is the
+   * single source of truth — a direct link, Back/Forward and a reload all restore
+   * the list, because the list is derived from it and from nothing else.
+   */
+  address: SearchAddress
+  /** Address of a page of this route; keeps the wizard's own parameters. */
+  hrefFor: (target: SearchAddress) => string
+  /** Move the address (push). The step never changes the search any other way. */
+  onNavigate: (target: SearchAddress) => void
   /**
    * A record already chosen on `/catalog`.
    *
@@ -58,43 +65,81 @@ type SearchStepProps = {
   onCreateNew: (selection: NewWorkInput) => void
 }
 
-type ScanState = { result: AddBookSearchResult; entryMethod: CopyEntryMethod }
-
 export function SearchStep({
-  initialQuery,
+  address,
+  hrefFor,
+  onNavigate,
   initialExternalSelection,
   onFoundEdition,
   onFoundWork,
   onCreateNew,
 }: SearchStepProps) {
-  const [scanState, setScanState] = useState<ScanState>()
-  const [failure, setFailure] = useState<unknown>()
-  const [external, setExternal] = useState<ExternalSearchState>(IDLE_EXTERNAL_SEARCH)
-  const [selection, setSelection] = useState<ExternalSelection>()
+  const query = address.q.trim()
+  const enabled = query.length >= CATALOG_LIMITS.queryMin
+  /**
+   * Pressing "Шукати" on an unchanged query moves no address, yet it is a request
+   * to search AGAIN (it is also how a failed search is retried). `refresh` makes
+   * that a new key: both halves ask again, and a selection made under the previous
+   * answer is dropped along with any duplicate check still in flight.
+   */
+  const [refresh, setRefresh] = useState(0)
+  const searchKey = `${String(refresh)}\u0000${askedFor(query, address.page, address.pageSize)}`
+
+  /**
+   * The query that came from the camera. Whether the CURRENT search is a scan is
+   * derived from it, not remembered as a flag: a scan followed by a typed search
+   * would otherwise tag the title match as `BARCODE` and quietly corrupt the funnel
+   * (Stage 8a). It lives in the component, not the address, so after a reload the
+   * search is restored as `MANUAL`.
+   */
+  const [scannedQuery, setScannedQuery] = useState<string>()
+  const entryMethod: CopyEntryMethod = scannedQuery === address.q ? 'BARCODE' : 'MANUAL'
+  const entryMethodRef = useRef<CopyEntryMethod>(entryMethod)
+
+  const [selectionState, setSelectionState] = useState<{
+    key: string
+    value: ExternalSelection
+  }>()
   const [scannerResetToken, setScannerResetToken] = useState(0)
-  const requestIdRef = useRef(0)
   /**
    * Bumped by every action that abandons a selection, so an in-flight duplicate
    * check can tell it is no longer wanted. See `abandonSelection`.
    */
   const selectionIdRef = useRef(0)
-  /**
-   * How the CURRENT search was started, not how some earlier one was.
-   *
-   * Read from a ref rather than from `scanState`, because `scanState` still
-   * holds the previous search's results while a new one is running: a scan
-   * followed by a title search would otherwise tag the title match as
-   * `BARCODE` and quietly corrupt the funnel (Stage 8a).
-   */
-  const entryMethodRef = useRef<CopyEntryMethod>('MANUAL')
+  const searchKeyRef = useRef(searchKey)
+
+  useEffect(() => {
+    entryMethodRef.current = entryMethod
+    searchKeyRef.current = searchKey
+  })
+
+  // A selection belongs to the search it was made under. Back/Forward or a new
+  // query moves the address, and the panel for a record chosen in another list
+  // must not linger over this one.
+  const selection = selectionState?.key === searchKey ? selectionState.value : undefined
+
+  // Both halves are asked for the same page, in parallel and independently:
+  // local results must not wait on the slowest external source. Each is keyed
+  // by (query, page, size), so an answer to any other key is never painted.
+  const localRequest = useKeyedRequest(enabled ? searchKey : undefined, (signal) =>
+    searchAddBookCandidates(query, address.page, address.pageSize, signal),
+  )
+  const external = useExternalSearch(query, address.page, address.pageSize, refresh)
+
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<SearchCandidatesRequest>({
-    resolver: zodResolver(searchCandidatesRequestSchema),
-    defaultValues: { q: initialQuery },
+    formState: { errors },
+  } = useForm<CatalogQuery>({
+    resolver: zodResolver(catalogQuerySchema),
+    values: { q: address.q },
   })
+
+  const local: LocalListState =
+    localRequest.status === 'error'
+      ? { status: 'error', message: describeAddBookError(localRequest.error) }
+      : { status: localRequest.status }
+  const result = localRequest.status === 'ready' ? localRequest.value : undefined
 
   /**
    * Drops the current selection AND invalidates any duplicate check still in
@@ -108,47 +153,7 @@ export function SearchStep({
    */
   function abandonSelection(): void {
     selectionIdRef.current += 1
-    setSelection(undefined)
-  }
-
-  /**
-   * The shared path for manual and camera search — R2: no second copy of the
-   * orchestration.
-   *
-   * Local and external search start together but do NOT wait for each other:
-   * `runSearch` returns as soon as local candidates are ready, while the
-   * external section arrives on its own state. Hence two independent `await`
-   * chains rather than one `Promise.all`, which would hold local results for
-   * exactly as long as the slowest external source thinks.
-   */
-  async function runSearch(query: string, entryMethod: CopyEntryMethod): Promise<void> {
-    const requestId = ++requestIdRef.current
-
-    entryMethodRef.current = entryMethod
-    setFailure(undefined)
-    abandonSelection()
-
-    // A query that IS itself a valid ISBN does not go to external title search:
-    // `/catalog/lookup` inside `searchAddBookCandidates` already answers it, and
-    // a second call would spend somebody else's quota on the same question. The
-    // existing ISBN behaviour is unchanged.
-    const searchesExternally = !isValidIsbn13(query)
-
-    setExternal(searchesExternally ? { status: 'loading' } : IDLE_EXTERNAL_SEARCH)
-
-    if (searchesExternally) void runExternalSearch(query, requestId)
-
-    try {
-      const result = await searchAddBookCandidates(query)
-      if (requestIdRef.current !== requestId) return
-
-      setScanState({ result, entryMethod })
-    } catch (error) {
-      if (requestIdRef.current !== requestId) return
-
-      setScanState(undefined)
-      setFailure(error)
-    }
+    setSelectionState(undefined)
   }
 
   /**
@@ -175,56 +180,49 @@ export function SearchStep({
   }, [])
 
   /**
-   * Guard against a stale answer: a slow first request returning after a second
-   * one must be discarded, not repaint fresh results. The same `requestIdRef`
-   * as the local search — one counter per step, so a new search invalidates
-   * both branches together.
-   */
-  async function runExternalSearch(query: string, requestId: number): Promise<void> {
-    try {
-      const response = await searchExternalCatalogs(query)
-      if (requestIdRef.current !== requestId) return
-
-      setExternal(externalSearchReady(response))
-    } catch (error) {
-      if (requestIdRef.current !== requestId) return
-
-      setExternal({ status: 'failed', message: describeAddBookError(error) })
-    }
-  }
-
-  /**
    * Picking an external record → duplicate check → form.
    *
    * No duplicates — straight to the creation form: an extra "found nothing,
    * press on" screen adds nothing. Duplicates — the decision is the user's
    * (`ExternalSelectionPanel`).
    *
-   * `entryMethod` is captured from the ref, i.e. from the search that actually
-   * produced this list, not from whatever `scanState` still holds.
+   * The check is INDEPENDENT of the page being viewed: `findLocalDuplicates`
+   * asks the candidates endpoint for the first screen of matches for this very
+   * record (by ISBN, then title and author), never for "what is on this page".
+   *
+   * An answer is discarded when the step is gone, when the selection was
+   * abandoned, or when the address moved on to another search meanwhile.
+   * `entryMethod` is read from the ref, i.e. from the search that produced this
+   * list.
    */
   const selectExternal = useCallback(
-    async (result: ExternalSearchResult): Promise<void> => {
+    async (record: ExternalSearchResult): Promise<void> => {
       const selectionId = ++selectionIdRef.current
-      const entryMethod = entryMethodRef.current
+      const key = searchKeyRef.current
+      const method = entryMethodRef.current
+      const current = (): boolean =>
+        mountedRef.current && selectionIdRef.current === selectionId && searchKeyRef.current === key
 
-      setSelection({ status: 'checking', result })
+      setSelectionState({ key, value: { status: 'checking', result: record } })
 
       try {
-        const check = await findLocalDuplicates(result)
-        if (!mountedRef.current || selectionIdRef.current !== selectionId) return
+        const check = await findLocalDuplicates(record)
+        if (!current()) return
 
         if (check.candidates.length === 0) {
-          setSelection(undefined)
-          onCreateNew(newWorkFromExternal(result, entryMethod))
+          setSelectionState(undefined)
+          onCreateNew(newWorkFromExternal(record, method))
           return
         }
 
-        setSelection({ status: 'duplicates', result, check })
+        setSelectionState({ key, value: { status: 'duplicates', result: record, check } })
       } catch (error) {
-        if (!mountedRef.current || selectionIdRef.current !== selectionId) return
+        if (!current()) return
 
-        setSelection({ status: 'failed', result, message: describeAddBookError(error) })
+        setSelectionState({
+          key,
+          value: { status: 'failed', result: record, message: describeAddBookError(error) },
+        })
       }
     },
     [onCreateNew],
@@ -248,10 +246,20 @@ export function SearchStep({
     void selectExternal(initialExternalSelection)
   }, [initialExternalSelection, selectExternal])
 
-  async function submit({ q }: SearchCandidatesRequest): Promise<void> {
+  function submit({ q }: CatalogQuery): void {
+    // A new search abandons the selection AT ONCE, in this very handler: the
+    // address change below reaches the key only after a render, and a duplicate
+    // check answering in between must already find itself unwanted.
+    abandonSelection()
     // A manual search is always MANUAL and stops an active camera (remount below).
+    setScannedQuery(undefined)
     setScannerResetToken((token) => token + 1)
-    await runSearch(q, 'MANUAL')
+    // A new query starts from page 1 and keeps the chosen page size.
+    const next = { q, page: 1, pageSize: address.pageSize }
+
+    if (next.q === address.q && next.page === address.page) setRefresh((count) => count + 1)
+
+    onNavigate(next)
   }
 
   return (
@@ -266,9 +274,7 @@ export function SearchStep({
           {...register('q')}
         />
 
-        <button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Шукаю…' : 'Шукати'}
-        </button>
+        <button type="submit">Шукати</button>
       </form>
 
       {/* The panel is always rendered, in both modes, and its own start button is
@@ -281,30 +287,38 @@ export function SearchStep({
       <BarcodeScannerPanel
         key={scannerResetToken}
         onValidIsbn={(isbn) => {
-          void runSearch(isbn, 'BARCODE')
+          abandonSelection()
+          setScannedQuery(isbn)
+          onNavigate({ q: isbn, page: 1, pageSize: address.pageSize })
         }}
       />
 
-      {failure !== undefined && <FormStatus error={new Error(describeAddBookError(failure))} />}
-      {scanState?.result.lookupFailure !== undefined && (
-        <p className="status status--pending">
-          {describeAddBookError(scanState.result.lookupFailure)}
-        </p>
+      {result?.lookupFailure !== undefined && (
+        <p className="status status--pending">{describeAddBookError(result.lookupFailure)}</p>
       )}
 
-      {/* One list for both halves of the search. While a selection is being
-          checked the list gives way to the panel, so the person is answering
-          one question at a time rather than choosing again underneath it. */}
-      {scanState !== undefined && selection === undefined && (
+      {/* One list for both halves of the search, and the same component as
+          `/catalog`. While a selection is being checked the list gives way to the
+          panel, so the person is answering one question at a time rather than
+          choosing again underneath it. */}
+      {enabled && selection === undefined && (
         <SearchResults
-          result={scanState.result}
-          entryMethod={scanState.entryMethod}
+          result={result}
+          local={local}
+          entryMethod={entryMethod}
           external={external}
+          page={address.page}
+          pageSize={address.pageSize}
+          query={query}
+          hrefFor={(target) => hrefFor({ q: address.q, ...target })}
+          onPageSizeChange={(pageSize) => {
+            onNavigate({ q: address.q, page: 1, pageSize })
+          }}
           onFoundEdition={onFoundEdition}
           onFoundWork={onFoundWork}
           onCreateNew={onCreateNew}
-          onSelectExternal={(result) => {
-            void selectExternal(result)
+          onSelectExternal={(record) => {
+            void selectExternal(record)
           }}
         />
       )}
@@ -315,16 +329,16 @@ export function SearchStep({
           onUseEdition={(workId, title, editionId) => {
             onFoundEdition({ workId, title, editionId, entryMethod: entryMethodRef.current })
           }}
-          onUseWork={(workId, title, result, translations) => {
+          onUseWork={(workId, title, record, translations) => {
             onFoundWork(
-              existingWorkFromExternal(workId, title, result, entryMethodRef.current, translations),
+              existingWorkFromExternal(workId, title, record, entryMethodRef.current, translations),
             )
           }}
-          onCreateAnyway={(result) => {
-            onCreateNew(newWorkFromExternal(result, entryMethodRef.current))
+          onCreateAnyway={(record) => {
+            onCreateNew(newWorkFromExternal(record, entryMethodRef.current))
           }}
-          onRetry={(result) => {
-            void selectExternal(result)
+          onRetry={(record) => {
+            void selectExternal(record)
           }}
           onCancel={abandonSelection}
         />

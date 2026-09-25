@@ -1,10 +1,12 @@
 /** @jest-environment jsdom */
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { BookLookupResult, WorkDetailResponse } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
+import type { SearchAddress } from '@/app/lib/search-page'
 import { SearchStep } from './SearchStep'
 
 jest.mock('@/app/lib/api', () => {
@@ -89,7 +91,14 @@ function deferred<T>() {
  * стосуються, мусять на нього все одно відповісти — інакше секція зовнішніх
  * результатів показала б збій, якого сценарій не перевіряє.
  */
-const NO_EXTERNAL_RESULTS = { results: [], sources: [] }
+const NO_EXTERNAL_RESULTS = {
+  results: [],
+  sources: [],
+  page: 1,
+  pageSize: 10,
+  more: 'NO' as const,
+  complete: true,
+}
 
 /** Маршрутизація моку за шляхом — надійніша за порядок викликів, бо запити паралельні. */
 function routeApi(handlers: Record<string, () => unknown>) {
@@ -102,16 +111,89 @@ function routeApi(handlers: Record<string, () => unknown>) {
   })
 }
 
-function renderSearch(initialQuery = '') {
-  const callbacks = {
+type Callbacks = {
+  onFoundEdition: jest.Mock
+  onFoundWork: jest.Mock
+  onCreateNew: jest.Mock
+}
+
+/**
+ * A stand-in for the wizard's address: the step is driven by an ADDRESS (query,
+ * page, page size), so the harness holds it in state exactly as the URL would —
+ * submitting the form, scanning and changing the page size all call `onNavigate`,
+ * which moves the "address" and re-renders the step with it.
+ */
+function Harness({
+  initial,
+  callbacks,
+  addresses,
+}: {
+  initial: SearchAddress
+  callbacks: Callbacks
+  addresses: SearchAddress[]
+}) {
+  const [address, setAddress] = useState(initial)
+
+  return (
+    <SearchStep
+      address={address}
+      hrefFor={(target) =>
+        `/catalog/new?q=${encodeURIComponent(target.q)}&page=${String(target.page)}&pageSize=${String(target.pageSize)}`
+      }
+      onNavigate={(target) => {
+        addresses.push(target)
+        setAddress(target)
+      }}
+      {...callbacks}
+    />
+  )
+}
+
+function renderSearch(initialQuery = '', initial: Partial<SearchAddress> = {}) {
+  const callbacks: Callbacks = {
+    onFoundEdition: jest.fn(),
+    onFoundWork: jest.fn(),
+    onCreateNew: jest.fn(),
+  }
+  const addresses: SearchAddress[] = []
+  const view = render(
+    <Harness
+      initial={{ q: initialQuery, page: 1, pageSize: 10, ...initial }}
+      callbacks={callbacks}
+      addresses={addresses}
+    />,
+  )
+
+  return Object.assign(callbacks, { addresses, view })
+}
+
+/** A step whose address the test moves by hand — Back/Forward and direct links. */
+function renderPaged(initial: SearchAddress) {
+  const callbacks: Callbacks = {
     onFoundEdition: jest.fn(),
     onFoundWork: jest.fn(),
     onCreateNew: jest.fn(),
   }
 
-  render(<SearchStep initialQuery={initialQuery} {...callbacks} />)
+  function view(address: SearchAddress) {
+    return (
+      <SearchStep
+        address={address}
+        hrefFor={(target) => `/catalog/new?q=${target.q}&page=${String(target.page)}`}
+        onNavigate={() => undefined}
+        {...callbacks}
+      />
+    )
+  }
 
-  return callbacks
+  const result = render(view(initial))
+
+  return {
+    ...result,
+    rerender: (address: SearchAddress) => {
+      result.rerender(view(address))
+    },
+  }
 }
 
 beforeEach(() => {
@@ -323,7 +405,7 @@ describe('зовнішній пошук за назвою', () => {
   }
 
   it('локальні результати з’являються, поки зовнішні ще йдуть', async () => {
-    const external = deferred<{ results: unknown[]; sources: unknown[] }>()
+    const external = deferred<Record<string, unknown>>()
 
     routeApi({
       '/catalog/search/external': () => external.promise,
@@ -341,6 +423,10 @@ describe('зовнішній пошук за назвою', () => {
     external.resolve({
       results: [externalWork],
       sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+      page: 1,
+      pageSize: 10,
+      more: 'NO' as const,
+      complete: true,
     })
 
     expect(await screen.findByText('Сад Гетсиманський')).toBeInTheDocument()
@@ -352,6 +438,10 @@ describe('зовнішній пошук за назвою', () => {
         Promise.resolve({
           results: [externalWork],
           sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -374,6 +464,10 @@ describe('зовнішній пошук за назвою', () => {
             { source: 'OPEN_LIBRARY', status: 'ERROR' },
             { source: 'GOOGLE_BOOKS', status: 'OK' },
           ],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -408,6 +502,10 @@ describe('зовнішній пошук за назвою', () => {
         Promise.resolve({
           results: [externalEdition],
           sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -440,6 +538,10 @@ describe('зовнішній пошук за назвою', () => {
         Promise.resolve({
           results: [externalWork],
           sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -465,6 +567,10 @@ describe('зовнішній пошук за назвою', () => {
         Promise.resolve({
           results: [externalEdition],
           sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -475,6 +581,10 @@ describe('зовнішній пошук за назвою', () => {
         return Promise.resolve({
           results: [externalEdition],
           sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         })
       }
 
@@ -511,6 +621,10 @@ describe('зовнішній пошук за назвою', () => {
         return Promise.resolve({
           results: [externalWork],
           sources: [{ source: 'OPEN_LIBRARY', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         })
       }
 
@@ -541,6 +655,10 @@ describe('зовнішній пошук за назвою', () => {
         return Promise.resolve({
           results: [externalEdition],
           sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         })
       }
 
@@ -623,7 +741,14 @@ describe('перегони запитів і вибору', () => {
 
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalEdition], sources: oneSource })
+        return Promise.resolve({
+          results: [externalEdition],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
 
       // The first candidate call belongs to the search itself; the next one is
@@ -663,19 +788,22 @@ describe('перегони запитів і вибору', () => {
 
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalEdition], sources: oneSource })
+        return Promise.resolve({
+          results: [externalEdition],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
       if (!selectionStarted) return Promise.resolve({ candidates: [] })
 
       return dupCheck.promise
     })
 
-    const callbacks = {
-      onFoundEdition: jest.fn(),
-      onFoundWork: jest.fn(),
-      onCreateNew: jest.fn(),
-    }
-    const view = render(<SearchStep initialQuery="" {...callbacks} />)
+    const callbacks = renderSearch('')
+    const view = callbacks.view
     const user = userEvent.setup()
 
     await user.type(screen.getByLabelText('Назва або ISBN'), 'Тигролови')
@@ -709,7 +837,14 @@ describe('перегони запитів і вибору', () => {
 
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalEdition], sources: oneSource })
+        return Promise.resolve({
+          results: [externalEdition],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
       if (path.startsWith('/catalog/lookup')) return Promise.resolve({ result: lookup })
       if (!scanDone) return Promise.resolve({ candidates: [candidate] })
@@ -762,7 +897,14 @@ describe('перегони запитів і вибору', () => {
 
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalWork], sources: oneSource })
+        return Promise.resolve({
+          results: [externalWork],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
 
       const query = decodeURIComponent(path.split('q=')[1] ?? '')
@@ -792,7 +934,14 @@ describe('перегони запитів і вибору', () => {
   it('рік першої публікації твору доходить до форми, а рік тиражу — ні', async () => {
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalWork], sources: oneSource })
+        return Promise.resolve({
+          results: [externalWork],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
 
       return Promise.resolve({ candidates: [] })
@@ -815,7 +964,14 @@ describe('перегони запитів і вибору', () => {
   it('рік ТИРАЖУ не стає роком першої публікації твору', async () => {
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalEdition], sources: oneSource })
+        return Promise.resolve({
+          results: [externalEdition],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
 
       return Promise.resolve({ candidates: [] })
@@ -839,7 +995,14 @@ describe('перегони запитів і вибору', () => {
 
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [externalEdition], sources: oneSource })
+        return Promise.resolve({
+          results: [externalEdition],
+          sources: oneSource,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
       if (attempts === 0) {
         attempts += 1
@@ -878,6 +1041,10 @@ describe('перегони запитів і вибору', () => {
             { source: 'OPEN_LIBRARY', status: 'RATE_LIMITED' },
             { source: 'GOOGLE_BOOKS', status: 'OK' },
           ],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         })
       }
 
@@ -898,7 +1065,14 @@ describe('перегони запитів і вибору', () => {
   it('порожній список джерел не читається як «жодне не відповіло»', async () => {
     mockApiRequest.mockImplementation((path: string) => {
       if (path.startsWith('/catalog/search/external')) {
-        return Promise.resolve({ results: [], sources: [] })
+        return Promise.resolve({
+          results: [],
+          sources: [],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        })
       }
 
       return Promise.resolve({ candidates: [] })
@@ -959,7 +1133,14 @@ describe('спільний список результатів', () => {
   it('малює локальну й зовнішню картку в одному списку', async () => {
     routeApi({
       '/catalog/search/external': () =>
-        Promise.resolve({ results: [externalEdition], sources: okSources }),
+        Promise.resolve({
+          results: [externalEdition],
+          sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [candidate] }),
     })
 
@@ -984,6 +1165,10 @@ describe('спільний список результатів', () => {
             { ...externalEdition, id: 'OPEN_LIBRARY:OL1W', sources: ['OPEN_LIBRARY'] },
           ],
           sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -996,7 +1181,7 @@ describe('спільний список результатів', () => {
   })
 
   it('зовнішні результати ДОПОВНЮЮТЬ список, а не замінюють локальні', async () => {
-    const external = deferred<{ results: unknown[]; sources: unknown[] }>()
+    const external = deferred<Record<string, unknown>>()
 
     routeApi({
       '/catalog/search/external': () => external.promise,
@@ -1013,7 +1198,14 @@ describe('спільний список результатів', () => {
     expect(screen.queryByText(/Нічого схожого не знайшлося/)).not.toBeInTheDocument()
 
     act(() => {
-      external.resolve({ results: [externalEdition], sources: okSources })
+      external.resolve({
+        results: [externalEdition],
+        sources: okSources,
+        page: 1,
+        pageSize: 10,
+        more: 'NO' as const,
+        complete: true,
+      })
     })
 
     await waitFor(() => {
@@ -1031,6 +1223,10 @@ describe('спільний список результатів', () => {
             { source: 'OPEN_LIBRARY', status: 'TIMEOUT' },
             { source: 'GOOGLE_BOOKS', status: 'OK' },
           ],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [candidate] }),
     })
@@ -1042,12 +1238,18 @@ describe('спільний список результатів', () => {
     expect(cardsInList()).toHaveLength(2)
   })
 
-  it('локальна картка має пріоритет над зовнішньою з тим самим ISBN', async () => {
+  it('порядок сервера: спершу наша картка, за нею зовнішня — клієнт нічого не пересортовує', async () => {
     routeApi({
       '/catalog/search/external': () =>
         Promise.resolve({
-          results: [{ ...externalEdition, isbn13: ISBN }],
+          // Навіть «релевантніший» зовнішній запис не обганяє нашу картку: межі
+          // сторінок різав сервер саме за цим порядком.
+          results: [{ ...externalEdition, title: 'Кобзар' }],
           sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [candidate] }),
     })
@@ -1058,8 +1260,9 @@ describe('спільний список результатів', () => {
     await screen.findByRole('button', { name: 'Це моє видання' })
 
     const cards = cardsInList()
-    expect(cards).toHaveLength(1)
+    expect(cards).toHaveLength(2)
     expect(within(cards[0] as HTMLElement).getByText('Наш каталог')).toBeInTheDocument()
+    expect(within(cards[1] as HTMLElement).getByText('Google Books')).toBeInTheDocument()
   })
 
   it('різні видання того самого твору лишаються окремими картками', async () => {
@@ -1081,6 +1284,10 @@ describe('спільний список результатів', () => {
             },
           ],
           sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -1093,7 +1300,7 @@ describe('спільний список результатів', () => {
   })
 
   it('«нічого не знайдено» чекає на завершення зовнішнього пошуку', async () => {
-    const external = deferred<{ results: unknown[]; sources: unknown[] }>()
+    const external = deferred<Record<string, unknown>>()
 
     routeApi({
       '/catalog/search/external': () => external.promise,
@@ -1107,7 +1314,14 @@ describe('спільний список результатів', () => {
     expect(screen.queryByText(/Нічого схожого не знайшлося/)).not.toBeInTheDocument()
 
     act(() => {
-      external.resolve({ results: [], sources: okSources })
+      external.resolve({
+        results: [],
+        sources: okSources,
+        page: 1,
+        pageSize: 10,
+        more: 'NO' as const,
+        complete: true,
+      })
     })
 
     expect(
@@ -1124,6 +1338,10 @@ describe('спільний список результатів', () => {
             { source: 'OPEN_LIBRARY', status: 'TIMEOUT' },
             { source: 'GOOGLE_BOOKS', status: 'ERROR' },
           ],
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
         }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [] }),
     })
@@ -1175,7 +1393,14 @@ describe('обкладинки в результатах', () => {
   it('без обкладинки показує заглушку — і в локальній, і в зовнішній картці', async () => {
     routeApi({
       '/catalog/search/external': () =>
-        Promise.resolve({ results: [externalEdition], sources: okSources }),
+        Promise.resolve({
+          results: [externalEdition],
+          sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [candidate] }),
     })
 
@@ -1195,7 +1420,15 @@ describe('обкладинки в результатах', () => {
     }
 
     routeApi({
-      '/catalog/search/external': () => Promise.resolve({ results: [], sources: okSources }),
+      '/catalog/search/external': () =>
+        Promise.resolve({
+          results: [],
+          sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [withCover] }),
     })
 
@@ -1214,7 +1447,15 @@ describe('обкладинки в результатах', () => {
     }
 
     routeApi({
-      '/catalog/search/external': () => Promise.resolve({ results: [], sources: okSources }),
+      '/catalog/search/external': () =>
+        Promise.resolve({
+          results: [],
+          sources: okSources,
+          page: 1,
+          pageSize: 10,
+          more: 'NO' as const,
+          complete: true,
+        }),
       '/catalog/search/candidates': () => Promise.resolve({ candidates: [withCover] }),
     })
 
@@ -1242,5 +1483,212 @@ describe('обкладинки в результатах', () => {
     // картка знахідки, і в неї теж є ліва колонка.
     await screen.findByText('Lookup title')
     expect(placeholders()).toHaveLength(1)
+  })
+})
+
+describe('пагінація в майстрі (спільний список і керування)', () => {
+  const externalEdition = {
+    id: 'GOOGLE_BOOKS:v1',
+    kind: 'EDITION' as const,
+    sources: ['GOOGLE_BOOKS' as const],
+    title: 'Кобзар',
+    authors: ['Тарас Шевченко'],
+    publishedYear: 2021,
+    publisher: 'А-БА-БА-ГА-ЛА-МА-ГА',
+  }
+
+  const externalPage = (overrides: Record<string, unknown> = {}) => ({
+    results: [],
+    sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+    page: 1,
+    pageSize: 10,
+    more: 'NO' as const,
+    complete: true,
+    ...overrides,
+  })
+
+  const candidatesPage = (overrides: Record<string, unknown> = {}) => ({
+    candidates: [candidate],
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    hasMore: false,
+    ...overrides,
+  })
+
+  const queryOf = (path: string): URLSearchParams => new URLSearchParams(path.split('?')[1] ?? '')
+
+  it('пошук з адреси (пряме посилання/перезавантаження) одразу питає саме цю сторінку й розмір', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage({ page: 2, pageSize: 20 })),
+      '/catalog/search/candidates': () =>
+        Promise.resolve(candidatesPage({ page: 2, pageSize: 20 })),
+    })
+
+    renderSearch('Кобзар', { page: 2, pageSize: 20 })
+
+    await screen.findByRole('button', { name: 'Це моє видання' })
+
+    const paths = mockApiRequest.mock.calls.map(([path]: [string]) => path)
+    expect(paths).toHaveLength(2)
+    for (const path of paths) {
+      expect(queryOf(path).get('page')).toBe('2')
+      expect(queryOf(path).get('pageSize')).toBe('20')
+    }
+  })
+
+  it('без взаємодії, лише з адреси: пошук стартує сам і сканер не потрібен', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage()),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage()),
+    })
+
+    renderSearch('Кобзар')
+
+    expect(await screen.findByText('Кобзар')).toBeInTheDocument()
+  })
+
+  it('«Далі» веде на адресу наступної сторінки цього ж запиту й розміру', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage({ more: 'YES' })),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage()),
+    })
+
+    renderSearch('Кобзар', { pageSize: 20 })
+
+    const next = await screen.findByRole('link', { name: 'Наступна сторінка' })
+    expect(next).toHaveAttribute(
+      'href',
+      `/catalog/new?q=${encodeURIComponent('Кобзар')}&page=2&pageSize=20`,
+    )
+  })
+
+  it('локальне hasMore теж дає «Далі»', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage()),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage({ hasMore: true })),
+    })
+
+    renderSearch('Кобзар')
+
+    expect(await screen.findByRole('link', { name: 'Наступна сторінка' })).toBeInTheDocument()
+  })
+
+  it('вибір розміру повертає на сторінку 1, зберігаючи запит', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage({ page: 3 })),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage({ page: 3 })),
+    })
+
+    const step = renderSearch('Кобзар', { page: 3 })
+    const user = userEvent.setup()
+
+    await user.selectOptions(await screen.findByLabelText('Результатів на сторінці'), '50')
+
+    expect(step.addresses.at(-1)).toEqual({ q: 'Кобзар', page: 1, pageSize: 50 })
+  })
+
+  it('новий запит скидає сторінку, але зберігає розмір', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage({ page: 3 })),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage({ page: 3 })),
+    })
+
+    const step = renderSearch('Кобзар', { page: 3, pageSize: 20 })
+    const user = userEvent.setup()
+
+    const field = screen.getByLabelText('Назва або ISBN')
+    await user.clear(field)
+    await user.type(field, 'Сад')
+    await user.click(screen.getByRole('button', { name: 'Шукати' }))
+
+    expect(step.addresses.at(-1)).toEqual({ q: 'Сад', page: 1, pageSize: 20 })
+  })
+
+  it('сторінка ISBN-запиту не запускає зовнішній пошук за назвою', async () => {
+    routeApi({
+      '/catalog/lookup': () => Promise.resolve({ result: lookup }),
+      '/catalog/search/candidates': () => Promise.resolve(candidatesPage()),
+    })
+
+    renderSearch(ISBN)
+
+    await screen.findByRole('button', { name: 'Це моє видання' })
+
+    const paths = mockApiRequest.mock.calls.map(([path]: [string]) => path)
+    expect(paths.some((path) => path.startsWith('/catalog/search/external'))).toBe(false)
+  })
+
+  it('застаріла відповідь для ІНШОЇ сторінки не малюється під поточною', async () => {
+    const stale = deferred<unknown>()
+
+    mockApiRequest.mockImplementation((path: string) => {
+      if (path.startsWith('/catalog/search/external')) return Promise.resolve(externalPage())
+      if (path.startsWith('/catalog/search/candidates')) {
+        return queryOf(path).get('page') === '1'
+          ? stale.promise
+          : Promise.resolve(candidatesPage({ page: 2, candidates: [] }))
+      }
+
+      return Promise.reject(new Error(`Unexpected path: ${path}`))
+    })
+
+    const { rerender } = renderPaged({ q: 'Кобзар', page: 1, pageSize: 10 })
+
+    rerender({ q: 'Кобзар', page: 2, pageSize: 10 })
+    stale.resolve(candidatesPage({ page: 1 }))
+
+    await screen.findByText(/На цій сторінці результатів немає/)
+    expect(screen.queryByRole('button', { name: 'Це моє видання' })).not.toBeInTheDocument()
+  })
+
+  it('перевірка дублікатів не залежить від поточної сторінки', async () => {
+    const paths: string[] = []
+
+    mockApiRequest.mockImplementation((path: string) => {
+      paths.push(path)
+
+      if (path.startsWith('/catalog/search/external')) {
+        return Promise.resolve(externalPage({ page: 4, results: [externalEdition] }))
+      }
+
+      return Promise.resolve(candidatesPage({ page: 4, candidates: [] }))
+    })
+
+    renderSearch('Кобзар', { page: 4, pageSize: 50 })
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: 'Вибрати це видання' }))
+    await waitFor(() => {
+      expect(paths.filter((path) => path.startsWith('/catalog/search/candidates'))).toHaveLength(2)
+    })
+
+    // Перший виклик — сам список (сторінка 4, розмір 50); наступні — перевірка
+    // дублікатів: без `page` і `pageSize`, тобто перший екран за назвою й автором.
+    const checks = paths.filter((path) => path.startsWith('/catalog/search/candidates')).slice(1)
+
+    for (const path of checks) {
+      expect(queryOf(path).has('page')).toBe(false)
+      expect(queryOf(path).has('pageSize')).toBe(false)
+    }
+  })
+
+  it('Back/Forward: зміна адреси перемальовує список, а не залишає стару відповідь', async () => {
+    routeApi({
+      '/catalog/search/external': () => Promise.resolve(externalPage()),
+      '/catalog/search/candidates': (): unknown => Promise.resolve(candidatesPage()),
+    })
+
+    const { rerender } = renderPaged({ q: 'Кобзар', page: 1, pageSize: 10 })
+    await screen.findByRole('button', { name: 'Це моє видання' })
+
+    mockApiRequest.mockClear()
+    rerender({ q: 'Кобзар', page: 2, pageSize: 10 })
+
+    await waitFor(() => {
+      expect(mockApiRequest).toHaveBeenCalled()
+    })
+    const paths = mockApiRequest.mock.calls.map(([path]: [string]) => path)
+    expect(paths.every((path) => queryOf(path).get('page') === '2')).toBe(true)
   })
 })

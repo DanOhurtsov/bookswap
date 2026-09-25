@@ -47,9 +47,16 @@ export function ExternalSearchStatus({ state }: ExternalSearchStatusProps) {
     return <p className="status status--pending">Зовнішні каталоги не відповіли: {state.message}</p>
   }
 
+  // The server ran out of its per-request budget and the rest is still being
+  // fetched: what is on screen is a PARTIAL page, and saying so is what keeps it
+  // from reading as the end of the list.
+  const loadingMore = !state.complete
+
   const unavailable = state.sources.filter((report) => report.status !== 'OK')
 
-  if (unavailable.length === 0) return null
+  if (unavailable.length === 0) {
+    return loadingMore ? <p className="status status--pending">Довантажую ще результати…</p> : null
+  }
 
   // An unavailable source is named explicitly, including when the others did
   // find something. Without this line "one book was found" would look like a
@@ -57,6 +64,7 @@ export function ExternalSearchStatus({ state }: ExternalSearchStatusProps) {
   return (
     <p className="status status--pending">
       {unavailable.map(describeUnavailable).join('; ')}. Список може бути неповним.
+      {loadingMore && ' Довантажую ще результати…'}
     </p>
   )
 }
