@@ -25,13 +25,7 @@ const trimmed = ({ value }: { value: unknown }): unknown =>
  * `LookupQueryDto`: a bad page or a too-short query must answer 400 BEFORE any
  * database scan or outbound call.
  */
-export class PagedSearchQueryDto {
-  @Transform(trimmed)
-  @IsString()
-  @MinLength(CATALOG_LIMITS.queryMin, { message: 'Мінімум два символи' })
-  @MaxLength(CATALOG_LIMITS.queryMax)
-  q!: string
-
+export class PageQueryDto {
   /**
    * 1-based, and an absent `page` means the first one — an address without it is
    * a normal address, not a malformed one.
@@ -61,4 +55,12 @@ export class PagedSearchQueryDto {
   @IsInt({ message: 'Розмір сторінки має бути цілим' })
   @IsIn(SEARCH_PAGE_SIZES, { message: `Розмір сторінки — один із ${SEARCH_PAGE_SIZES.join(', ')}` })
   pageSize: number = DEFAULT_SEARCH_PAGE_SIZE
+}
+
+export class PagedSearchQueryDto extends PageQueryDto {
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(CATALOG_LIMITS.queryMin, { message: 'Мінімум два символи' })
+  @MaxLength(CATALOG_LIMITS.queryMax)
+  q!: string
 }

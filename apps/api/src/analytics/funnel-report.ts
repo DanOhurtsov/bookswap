@@ -7,8 +7,6 @@ export const EMPTY_ANALYTICS_MESSAGES = [
   'The funnel report cannot be calculated.',
 ] as const
 
-export const NOT_INSTRUMENTED_NOTE = 'not instrumented — Stage 9'
-
 export interface FunnelReportQuery {
   fromDay: string
   toDay: string
@@ -82,25 +80,31 @@ export interface FunnelReportInput extends FunnelReportQuery {
   bookAddedByMethod: BookAddedMethodBreakdown
 }
 
-interface InstrumentedStep {
+export interface FunnelStep {
   position: number
   key: string
   label: string
   count: number
   percentage: number
-  note: null
 }
 
-interface UninstrumentedStep {
-  position: number
-  key: string
-  label: string
-  count: null
-  percentage: null
-  note: typeof NOT_INSTRUMENTED_NOTE
+/**
+ * Етап 9 (docs/plan/stage-9-network-activation.md, §2): мережеві метрики.
+ *
+ * Лише агрегати за когортою: жодного запиту, назви чи id книжки. Відсоток —
+ * `null`, коли знаменник нульовий: «0%» читалося б як виміряний провал.
+ */
+export interface NetworkMetrics {
+  invites: { sent: number; accepted: number; acceptancePercent: number | null }
+  discovery: {
+    searchedUsers: number
+    foundUsers: number
+    searchToFoundPercent: number | null
+    foundAnyUsers: number
+    foundThenRequestedUsers: number
+    foundToRequestPercent: number | null
+  }
 }
-
-export type FunnelStep = InstrumentedStep | UninstrumentedStep
 
 export interface EmptyFunnelReport {
   status: 'empty'
@@ -113,6 +117,7 @@ export interface PopulatedFunnelReport {
   earliestStoredAnalyticsEvent: string
   warnings: string[]
   steps: FunnelStep[]
+  network: NetworkMetrics
   temporaryMetrics: {
     successfulReturnedLoansTotal: number
     successfulReturnedLoansPerActiveUser: number | null
@@ -138,7 +143,8 @@ interface StepDefinition {
   position: number
   key: string
   label: string
-  type: ProductEventType
+  /** Крок зараховується за будь-яким із цих типів (`friend_book_found` має два джерела). */
+  types: readonly ProductEventType[]
   minimum: number
 }
 
@@ -147,44 +153,78 @@ const STEP_DEFINITIONS: StepDefinition[] = [
     position: 2,
     key: 'book_added_first',
     label: 'book_added (перша)',
-    type: 'BOOK_ADDED',
+    types: ['BOOK_ADDED'],
     minimum: 1,
   },
   {
     position: 3,
     key: 'book_added_tenth',
     label: 'book_added (10-та)',
-    type: 'BOOK_ADDED',
+    types: ['BOOK_ADDED'],
     minimum: 10,
   },
+  { position: 4, key: 'invite_sent', label: 'invite_sent', types: ['INVITE_SENT'], minimum: 1 },
   {
-    position: 4,
+    position: 5,
+    key: 'invite_accepted',
+    label: 'invite_accepted',
+    types: ['INVITE_ACCEPTED'],
+    minimum: 1,
+  },
+  {
+    position: 6,
     key: 'friend_accepted',
     label: 'friend_accepted',
-    type: 'FRIEND_ACCEPTED',
+    types: ['FRIEND_ACCEPTED'],
     minimum: 1,
   },
   {
     position: 7,
-    key: 'loan_requested',
-    label: 'loan_requested',
-    type: 'LOAN_REQUESTED',
+    key: 'friend_inventory_became_usable',
+    label: 'friend_inventory_became_usable',
+    types: ['FRIEND_INVENTORY_USABLE'],
     minimum: 1,
   },
-  { position: 8, key: 'loan_approved', label: 'loan_approved', type: 'LOAN_APPROVED', minimum: 1 },
+  {
+    position: 8,
+    key: 'friend_book_found',
+    label: 'friend_book_found',
+    types: ['FRIEND_BOOK_FOUND', 'WORK_HOLDERS_FOUND'],
+    minimum: 1,
+  },
   {
     position: 9,
-    key: 'loan_handed_over',
-    label: 'loan_handed_over',
-    type: 'LOAN_HANDED_OVER',
+    key: 'loan_requested',
+    label: 'loan_requested',
+    types: ['LOAN_REQUESTED'],
     minimum: 1,
   },
-  { position: 10, key: 'loan_returned', label: 'loan_returned', type: 'LOAN_RETURNED', minimum: 1 },
+  {
+    position: 10,
+    key: 'loan_approved',
+    label: 'loan_approved',
+    types: ['LOAN_APPROVED'],
+    minimum: 1,
+  },
   {
     position: 11,
+    key: 'loan_handed_over',
+    label: 'loan_handed_over',
+    types: ['LOAN_HANDED_OVER'],
+    minimum: 1,
+  },
+  {
+    position: 12,
+    key: 'loan_returned',
+    label: 'loan_returned',
+    types: ['LOAN_RETURNED'],
+    minimum: 1,
+  },
+  {
+    position: 13,
     key: 'loan_requested_second',
     label: 'loan_requested (2-га)',
-    type: 'LOAN_REQUESTED',
+    types: ['LOAN_REQUESTED'],
     minimum: 2,
   },
 ]
@@ -220,11 +260,11 @@ function activityFor(input: FunnelReportInput): MemberActivity[] {
   }))
 }
 
-function instrumentedSteps(activity: MemberActivity[], registrations: number): InstrumentedStep[] {
+function instrumentedSteps(activity: MemberActivity[], registrations: number): FunnelStep[] {
   return STEP_DEFINITIONS.map((definition) => {
     const count = activity.filter(
       (member) =>
-        member.events.filter((event) => event.type === definition.type).length >=
+        member.events.filter((event) => definition.types.includes(event.type)).length >=
         definition.minimum,
     ).length
 
@@ -234,13 +274,52 @@ function instrumentedSteps(activity: MemberActivity[], registrations: number): I
       label: definition.label,
       count,
       percentage: percentage(count, registrations),
-      note: null,
     }
   })
 }
 
-function uninstrumentedStep(position: number, key: string, label: string): UninstrumentedStep {
-  return { position, key, label, count: null, percentage: null, note: NOT_INSTRUMENTED_NOTE }
+function ratioPercent(part: number, whole: number): number | null {
+  return whole === 0 ? null : Math.round((part / whole) * 100)
+}
+
+/** Мережеві агрегати за тією самою когортою й тими самими вікнами, що й кроки воронки. */
+function networkMetrics(activity: MemberActivity[]): NetworkMetrics {
+  const count = (type: ProductEventType): number =>
+    activity.flatMap((member) => member.events).filter((event) => event.type === type).length
+  const users = (predicate: (member: MemberActivity) => boolean): number =>
+    activity.filter(predicate).length
+  const has = (member: MemberActivity, ...types: ProductEventType[]): boolean =>
+    member.events.some((event) => types.includes(event.type))
+
+  const sent = count('INVITE_SENT')
+  const accepted = count('INVITE_ACCEPTED')
+  const searchedUsers = users((member) => has(member, 'DISCOVERY_SEARCHED'))
+  const foundUsers = users((member) => has(member, 'FRIEND_BOOK_FOUND'))
+  const foundAnyUsers = users((member) => has(member, 'FRIEND_BOOK_FOUND', 'WORK_HOLDERS_FOUND'))
+  const foundThenRequestedUsers = users((member) => {
+    const foundAt = member.events
+      .filter((event) => event.type === 'FRIEND_BOOK_FOUND' || event.type === 'WORK_HOLDERS_FOUND')
+      .map((event) => event.occurredAt.getTime())
+      .sort((a, b) => a - b)[0]
+
+    if (foundAt === undefined) return false
+
+    return member.events.some(
+      (event) => event.type === 'LOAN_REQUESTED' && event.occurredAt.getTime() >= foundAt,
+    )
+  })
+
+  return {
+    invites: { sent, accepted, acceptancePercent: ratioPercent(accepted, sent) },
+    discovery: {
+      searchedUsers,
+      foundUsers,
+      searchToFoundPercent: ratioPercent(foundUsers, searchedUsers),
+      foundAnyUsers,
+      foundThenRequestedUsers,
+      foundToRequestPercent: ratioPercent(foundThenRequestedUsers, foundAnyUsers),
+    },
+  }
 }
 
 function reportWarnings(fromDay: string, earliestDay: string): string[] {
@@ -370,7 +449,6 @@ export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
 
   const registrations = input.signups.length
   const activity = activityFor(input)
-  const trackedSteps = instrumentedSteps(activity, registrations)
   const steps: FunnelStep[] = [
     {
       position: 1,
@@ -378,12 +456,8 @@ export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
       label: 'signup',
       count: registrations,
       percentage: registrations === 0 ? 0 : 100,
-      note: null,
     },
-    ...trackedSteps.filter((step) => step.position < 5),
-    uninstrumentedStep(5, 'friend_inventory_became_usable', 'friend_inventory_became_usable'),
-    uninstrumentedStep(6, 'friend_book_found', 'friend_book_found'),
-    ...trackedSteps.filter((step) => step.position > 6),
+    ...instrumentedSteps(activity, registrations),
   ]
   const returnedLoans = activity
     .flatMap((member) => member.events)
@@ -402,6 +476,7 @@ export function calculateFunnelReport(input: FunnelReportInput): FunnelReport {
     earliestStoredAnalyticsEvent: earliestDay,
     warnings: reportWarnings(input.fromDay, earliestDay),
     steps,
+    network: networkMetrics(activity),
     temporaryMetrics: {
       successfulReturnedLoansTotal: returnedLoans,
       successfulReturnedLoansPerActiveUser:

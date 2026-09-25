@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * docs/plan/stage-8-activation.md, §4 — рівно сім типів, жодних інших у 8a.
+ * docs/plan/stage-8-activation.md, §4 — сім типів 8a; шість типів Етапу 9 додано нижче.
  *
  * На відміну від `NotificationType` (`packages/shared/src/domain/notification.ts`),
  * ця таксономія навмисно НЕ дублюється в Prisma-enum: `ProductEvent.type` — String
@@ -16,6 +16,14 @@ export const PRODUCT_EVENT_TYPE = [
   'LOAN_APPROVED',
   'LOAN_HANDED_OVER',
   'LOAN_RETURNED',
+  // Етап 9 (docs/plan/stage-9-network-activation.md, §2): мережа й пошук. Усі з
+  // порожніми `properties` — без тексту запиту, назв і id книжок.
+  'INVITE_SENT',
+  'INVITE_ACCEPTED',
+  'FRIEND_INVENTORY_USABLE',
+  'DISCOVERY_SEARCHED',
+  'FRIEND_BOOK_FOUND',
+  'WORK_HOLDERS_FOUND',
 ] as const
 
 export const productEventTypeSchema = z.enum(PRODUCT_EVENT_TYPE)
@@ -42,6 +50,12 @@ export const PRODUCT_EVENT_PROPERTIES_SCHEMA = {
   LOAN_APPROVED: emptyPropertiesSchema,
   LOAN_HANDED_OVER: emptyPropertiesSchema,
   LOAN_RETURNED: emptyPropertiesSchema,
+  INVITE_SENT: emptyPropertiesSchema,
+  INVITE_ACCEPTED: emptyPropertiesSchema,
+  FRIEND_INVENTORY_USABLE: emptyPropertiesSchema,
+  DISCOVERY_SEARCHED: emptyPropertiesSchema,
+  FRIEND_BOOK_FOUND: emptyPropertiesSchema,
+  WORK_HOLDERS_FOUND: emptyPropertiesSchema,
 } as const satisfies Record<ProductEventType, z.ZodTypeAny>
 
 /**
@@ -73,6 +87,12 @@ export const productEventInputSchema = z.discriminatedUnion('type', [
   eventSchema('LOAN_APPROVED', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_APPROVED),
   eventSchema('LOAN_HANDED_OVER', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_HANDED_OVER),
   eventSchema('LOAN_RETURNED', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_RETURNED),
+  eventSchema('INVITE_SENT', PRODUCT_EVENT_PROPERTIES_SCHEMA.INVITE_SENT),
+  eventSchema('INVITE_ACCEPTED', PRODUCT_EVENT_PROPERTIES_SCHEMA.INVITE_ACCEPTED),
+  eventSchema('FRIEND_INVENTORY_USABLE', PRODUCT_EVENT_PROPERTIES_SCHEMA.FRIEND_INVENTORY_USABLE),
+  eventSchema('DISCOVERY_SEARCHED', PRODUCT_EVENT_PROPERTIES_SCHEMA.DISCOVERY_SEARCHED),
+  eventSchema('FRIEND_BOOK_FOUND', PRODUCT_EVENT_PROPERTIES_SCHEMA.FRIEND_BOOK_FOUND),
+  eventSchema('WORK_HOLDERS_FOUND', PRODUCT_EVENT_PROPERTIES_SCHEMA.WORK_HOLDERS_FOUND),
 ])
 
 export type ProductEventInput = z.infer<typeof productEventInputSchema>

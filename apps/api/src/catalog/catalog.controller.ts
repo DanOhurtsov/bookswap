@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
+import { API_ERROR_CODES, discoveryScopeViolation } from '@bookswap/shared'
 import type {
   ApiError,
   CatalogDiscoveryResponse,
@@ -23,15 +24,18 @@ import type {
   TranslationPatchResponse,
   TranslationResponse,
   WorkDetailResponse,
+  WorkHoldersResponse,
   WorkPatchResponse,
 } from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
+import { ApiException } from '../common/api.exception'
 import { SessionGuard } from '../auth/session.guard'
 import { CATALOG_WRITE_RATE_LIMIT, CATALOG_WRITE_RATE_WINDOW_MS } from '../common/rate-limit.config'
 import { CanonicalWorkService } from './canonical/canonical-work.service'
 import { redirectToCanonicalWork } from './canonical/work-redirect'
 import { CatalogService } from './catalog.service'
 import { CatalogDiscoveryService } from './search/catalog-discovery.service'
+import { WorkHoldersService } from './search/work-holders.service'
 import { PatchEditionDto, PatchTranslationDto, PatchWorkDto } from './dto/catalog-correction.dto'
 import {
   CatalogSearchDto,
@@ -39,6 +43,7 @@ import {
   CreateEditionDto,
   CreateTranslationDto,
   CreateWorkDto,
+  WorkHoldersQueryDto,
 } from './dto/catalog.dto'
 import type { Response } from 'express'
 import type { UserModel } from '../generated/prisma/models'
@@ -66,6 +71,7 @@ export class CatalogController {
     private readonly catalog: CatalogService,
     private readonly canonical: CanonicalWorkService,
     private readonly discovery: CatalogDiscoveryService,
+    private readonly workHolders: WorkHoldersService,
   ) {}
 
   /** Physical copies visible to the viewer, with an explicit wider public scope. */
@@ -76,7 +82,13 @@ export class CatalogController {
     @CurrentUser() user: UserModel,
     @Query() dto: CatalogDiscoveryDto,
   ): Promise<CatalogDiscoveryResponse> {
-    return this.discovery.search(user.id, dto.q, dto.page, dto.pageSize, dto.scope)
+    const violation = discoveryScopeViolation(dto)
+
+    if (violation !== null) {
+      throw new ApiException(API_ERROR_CODES.VALIDATION_ERROR, violation, HttpStatus.BAD_REQUEST)
+    }
+
+    return this.discovery.search(user.id, dto)
   }
 
   @Get('catalog/search')
@@ -102,6 +114,29 @@ export class CatalogController {
     if (resolved.moved) return redirectToCanonicalWork(response, resolved)
 
     return this.catalog.getWork(user.id, resolved.workId)
+  }
+
+  /** «Хто має цю книжку?»: друзі глядача з примірниками, згруповано за перекладом. */
+  @Get('works/:id/holders')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(CATALOG_SEARCH_LIMIT)
+  async holders(
+    @CurrentUser() user: UserModel,
+    @Param('id') id: string,
+    @Query() dto: WorkHoldersQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<WorkHoldersResponse | ApiError> {
+    const resolved = await this.canonical.resolve(id)
+
+    if (resolved.moved) {
+      const query = new URLSearchParams({ availability: dto.availability })
+
+      if (dto.translationId !== undefined) query.set('translationId', dto.translationId)
+
+      return redirectToCanonicalWork(response, resolved, `/holders?${query.toString()}`)
+    }
+
+    return this.workHolders.holders(user.id, resolved.workId, dto)
   }
 
   @Get('works/:id/translations')

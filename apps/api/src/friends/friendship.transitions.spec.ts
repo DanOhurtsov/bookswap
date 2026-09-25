@@ -16,10 +16,20 @@ import {
  */
 
 const STATES: readonly FriendshipState[] = ['NONE', ...FRIENDSHIP_STATUS]
-const ACTIONS: readonly FriendshipAction[] = ['request', 'accept', 'decline', 'remove', 'block']
+const ACTIONS: readonly FriendshipAction[] = [
+  'request',
+  'accept',
+  'decline',
+  'remove',
+  'block',
+  'invite',
+]
 const ROLES: readonly ActorRole[] = ['NONE', 'REQUESTER', 'RECIPIENT', 'BLOCKER', 'BLOCKED']
 
-const created = (status: 'PENDING' | 'BLOCKED'): TransitionResult => ({ kind: 'create', status })
+const created = (status: 'PENDING' | 'BLOCKED' | 'ACCEPTED'): TransitionResult => ({
+  kind: 'create',
+  status,
+})
 const updated = (to: (typeof FRIENDSHIP_STATUS)[number]): TransitionResult => ({
   kind: 'update',
   to,
@@ -43,6 +53,13 @@ function expected(
 ): TransitionResult {
   if (state === 'BLOCKED') {
     return action === 'remove' && role === 'BLOCKER' ? deleted : refused('BLOCKED')
+  }
+
+  if (action === 'invite') {
+    if (state === 'NONE') return created('ACCEPTED')
+    if (state === 'ACCEPTED') return { kind: 'unchanged' }
+
+    return updated('ACCEPTED')
   }
 
   if (action === 'block') {
@@ -81,7 +98,7 @@ describe('resolveTransition — уся матриця', () => {
 
   it('покриває всі стани й дії, які існують у домені', () => {
     expect(STATES).toHaveLength(FRIENDSHIP_STATUS.length + 1)
-    expect(ACTIONS).toHaveLength(5)
+    expect(ACTIONS).toHaveLength(6)
   })
 })
 
@@ -168,5 +185,25 @@ describe('заборонені переходи — те, що має ламат
   it('заблокований не знімає блок сам — інакше блокування не означало б нічого', () => {
     expect(resolveTransition('BLOCKED', 'remove', 'BLOCKED')).toEqual(refused('BLOCKED'))
     expect(resolveTransition('BLOCKED', 'remove', 'RECIPIENT')).toEqual(refused('BLOCKED'))
+  })
+})
+
+describe('прийняття запрошення (Етап 9)', () => {
+  it('незнайомі → одразу ACCEPTED: обидві згоди вже є', () => {
+    expect(resolveTransition('NONE', 'invite', 'NONE')).toEqual(created('ACCEPTED'))
+  })
+
+  it('висячий запит у будь-який бік стає дружбою', () => {
+    expect(resolveTransition('PENDING', 'invite', 'REQUESTER')).toEqual(updated('ACCEPTED'))
+    expect(resolveTransition('PENDING', 'invite', 'RECIPIENT')).toEqual(updated('ACCEPTED'))
+  })
+
+  it('повторне прийняття ідемпотентне', () => {
+    expect(resolveTransition('ACCEPTED', 'invite', 'REQUESTER')).toEqual({ kind: 'unchanged' })
+  })
+
+  it('блок у будь-який бік — відмова, дружбу не створити запрошенням', () => {
+    expect(resolveTransition('BLOCKED', 'invite', 'BLOCKER')).toEqual(refused('BLOCKED'))
+    expect(resolveTransition('BLOCKED', 'invite', 'BLOCKED')).toEqual(refused('BLOCKED'))
   })
 })

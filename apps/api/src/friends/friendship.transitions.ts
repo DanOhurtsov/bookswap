@@ -13,15 +13,17 @@ import type { ActorRole, FriendshipState } from '../access/friendship.pair'
  * не має права дивитися на `Friendship.status`.
  */
 
-export type FriendshipAction = 'request' | 'accept' | 'decline' | 'remove' | 'block'
+export type FriendshipAction = 'request' | 'accept' | 'decline' | 'remove' | 'block' | 'invite'
 
 export type TransitionOutcome =
   /** Рядка немає — створити з цим статусом. */
-  | { kind: 'create'; status: Extract<FriendshipStatus, 'PENDING' | 'BLOCKED'> }
+  | { kind: 'create'; status: Extract<FriendshipStatus, 'PENDING' | 'BLOCKED' | 'ACCEPTED'> }
   /** Рядок є — перевести в цей статус. */
   | { kind: 'update'; to: FriendshipStatus }
   /** Рядок є — видалити. Видалення дружби НЕ чіпає активні `Loan` (§5.2). */
   | { kind: 'delete' }
+  /** Пара вже в потрібному стані: ідемпотентний успіх без запису. */
+  | { kind: 'unchanged' }
 
 export type RefusalReason =
   /** Пара заблокована, або знімати блок намагається не той, хто його поставив. */
@@ -60,6 +62,8 @@ export function resolveTransition(
       return toDecline(state, actor)
     case 'remove':
       return toRemove(state)
+    case 'invite':
+      return toInvite(state)
     case 'block':
       // §6.2: заблокувати можна з будь-якого стану, включно з «незнайомі».
       return state === 'NONE'
@@ -112,6 +116,26 @@ function toDecline(state: FriendshipState, actor: ActorRole): TransitionResult {
   // Відкликати власний запит — це `remove`, а не `decline`: сліду DECLINED після
   // скасування власного запиту бути не повинно.
   return actor === 'RECIPIENT' ? { kind: 'update', to: 'DECLINED' } : REFUSE('ROLE')
+}
+
+/**
+ * Етап 9: прийняття запрошення. Запрошувач погодився, створивши запрошення, а
+ * запрошений щойно явно натиснув «Прийняти» — тож обидві згоди є, і дружба
+ * одразу `ACCEPTED`. Роль не важлива: висячий запит у будь-який бік теж стає
+ * дружбою, бо намір обох сторін той самий.
+ */
+function toInvite(state: FriendshipState): TransitionResult {
+  switch (state) {
+    case 'NONE':
+      return { kind: 'create', status: 'ACCEPTED' }
+    case 'PENDING':
+    case 'DECLINED':
+      return { kind: 'update', to: 'ACCEPTED' }
+    case 'ACCEPTED':
+      return { kind: 'unchanged' }
+    case 'BLOCKED':
+      return REFUSE('BLOCKED')
+  }
 }
 
 function toRemove(state: FriendshipState): TransitionResult {

@@ -17,12 +17,19 @@ import {
 } from 'class-validator'
 import {
   AUTHOR_ROLE,
+  CATALOG_DISCOVERY_AVAILABILITY,
   CATALOG_DISCOVERY_SCOPES,
+  CATALOG_DISCOVERY_TRANSLATION,
+  DISCOVERY_QUERY_MAX,
+  DISCOVERY_QUERY_MIN,
   CATALOG_LIMITS,
   EDITION_FORMAT,
   normalizeIsbn13,
+  WORK_HOLDERS_AVAILABILITY,
   type AuthorRole,
+  type CatalogDiscoveryAvailability,
   type CatalogDiscoveryScope,
+  type CatalogDiscoveryTranslation,
   type SearchPageSize,
   type EditionFormat,
 } from '@bookswap/shared'
@@ -32,7 +39,7 @@ import {
   IsLanguageCode,
   IsOptionalNotNull,
 } from '../../common/validators'
-import { PagedSearchQueryDto } from './paged-search-query.dto'
+import { PageQueryDto, PagedSearchQueryDto } from './paged-search-query.dto'
 
 // Експортовані: `catalog-correction.dto.ts` (PATCH) повторює ці ж перетворення
 // на тих самих полях, і саме тому бере їх звідси, а не переписує вдруге.
@@ -55,13 +62,52 @@ export const normalizeIsbn = ({ value }: { value: unknown }): unknown =>
  */
 export class CatalogSearchDto extends PagedSearchQueryDto {}
 
+/** `GET /works/:id/holders`: один переклад (`original` — оригінал) і фільтр доступності. */
+export class WorkHoldersQueryDto {
+  @IsOptional()
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(CATALOG_LIMITS.idMax)
+  translationId?: string
+
+  @IsOptional()
+  @IsIn(WORK_HOLDERS_AVAILABILITY)
+  availability: (typeof WORK_HOLDERS_AVAILABILITY)[number] = 'ANY'
+}
+
 /** The browsing scope is independent of metadata search used by the add-book wizard. */
-export class CatalogDiscoveryDto extends PagedSearchQueryDto {
+export class CatalogDiscoveryDto extends PageQueryDto {
   declare pageSize: SearchPageSize
+
+  /** Порожній `?q=` — те саме, що відсутній: перегляд без тексту. */
+  @Transform(({ value }: { value: unknown }) => {
+    const text = typeof value === 'string' ? value.trim() : value
+
+    return text === '' ? undefined : text
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(DISCOVERY_QUERY_MIN, { message: 'Мінімум два символи' })
+  @MaxLength(DISCOVERY_QUERY_MAX)
+  q?: string
 
   @IsOptional()
   @IsIn(CATALOG_DISCOVERY_SCOPES)
   scope: CatalogDiscoveryScope = 'CIRCLE'
+
+  @IsOptional()
+  @IsIn(CATALOG_DISCOVERY_AVAILABILITY)
+  availability: CatalogDiscoveryAvailability = 'AVAILABLE'
+
+  @IsOptional()
+  @Transform(normalizeLanguage)
+  @IsLanguageCode()
+  language?: string
+
+  @IsOptional()
+  @IsIn(CATALOG_DISCOVERY_TRANSLATION)
+  translation: CatalogDiscoveryTranslation = 'ANY'
 }
 
 /**

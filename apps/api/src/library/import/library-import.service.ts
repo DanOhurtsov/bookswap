@@ -13,6 +13,7 @@ import {
   type LibraryImportRowValues,
 } from '@bookswap/shared'
 import { AnalyticsService } from '../../analytics/analytics.service'
+import { NetworkActivationService } from '../../analytics/network-activation.service'
 import { LookupService } from '../../catalog/lookup/lookup.service'
 import { ApiException } from '../../common/api.exception'
 import { isUniqueViolationOn } from '../../common/prisma-errors'
@@ -85,6 +86,7 @@ export class LibraryImportService {
     private readonly lookup: LookupService,
     private readonly writer: LibraryImportWriter,
     private readonly analytics: AnalyticsService,
+    private readonly network: NetworkActivationService,
   ) {}
 
   async preview(input: {
@@ -326,6 +328,10 @@ export class LibraryImportService {
         }),
       ),
     )
+
+    // Один прохід на імпорт, а не на кожну книжку: `usable network` — властивість
+    // власника, і друзям він не залежить від кількості створених примірників.
+    if (copyIds.length > 0) await this.network.onInventoryAdded(ownerId)
   }
 
   /** A preview resolves outside any lock; the read-only transaction only pins the trigram threshold. */
@@ -651,14 +657,17 @@ function choiceOf(
 }
 
 /** Identity for the purposes of a stored choice: what decides which `Work` a row belongs to. */
-function sameBook(before: LibraryImportRowValues | null, after: LibraryImportRowValues): boolean {
+export function sameBook(
+  before: LibraryImportRowValues | null,
+  after: LibraryImportRowValues,
+): boolean {
   if (before === null) return false
 
   return (
     before.isbn13 === after.isbn13 &&
     before.title === after.title &&
     before.origLang === after.origLang &&
-    (before.authors ?? []).join(' ') === (after.authors ?? []).join(' ')
+    (before.authors ?? []).join('\0') === (after.authors ?? []).join('\0')
   )
 }
 

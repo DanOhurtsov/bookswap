@@ -36,6 +36,7 @@ import {
 } from '@/features/catalog/correction/index.client'
 import { ApiRequestError, apiRequest, describeError } from '../../../lib/api'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '../../../lib/labels'
+import { HoldersPanel } from '@/features/network/index.client'
 import { useWork, type WorkReloadOutcome } from '../../../lib/use-catalog'
 import { useWorkHistory } from '../../../lib/use-history'
 import { useSession } from '../../../lib/use-session'
@@ -172,6 +173,8 @@ export default function WorkPage() {
       </dl>
 
       {work.description !== null && <p>{work.description}</p>}
+
+      <HoldersPanel workId={work.id} />
 
       <section className="friends-section">
         <h2>Переклади</h2>

@@ -111,8 +111,36 @@ describe('пошта (§7.2)', () => {
         EMAIL_PROVIDER: 'resend',
         RESEND_API_KEY: 're_x',
         EMAIL_FROM: 'BookSwap <hi@example.com>',
+        INVITE_EMAIL_HMAC_SECRET: 's'.repeat(32),
       }),
     ).not.toThrow()
+  })
+
+  describe('INVITE_EMAIL_HMAC_SECRET (Етап 9)', () => {
+    const production = {
+      ...required,
+      NODE_ENV: 'production',
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_x',
+      EMAIL_FROM: 'BookSwap <hi@example.com>',
+    }
+
+    it('у production обов’язковий', () => {
+      expect(() => validateEnv(production)).toThrow(/INVITE_EMAIL_HMAC_SECRET/)
+    })
+
+    it('коротший за 32 символи відхиляється в будь-якому середовищі', () => {
+      expect(() => validateEnv({ ...production, INVITE_EMAIL_HMAC_SECRET: 'short' })).toThrow(
+        /INVITE_EMAIL_HMAC_SECRET/,
+      )
+      expect(() => validateEnv({ ...required, INVITE_EMAIL_HMAC_SECRET: 'short' })).toThrow(
+        /INVITE_EMAIL_HMAC_SECRET/,
+      )
+    })
+
+    it('поза production ключ необов’язковий', () => {
+      expect(() => validateEnv(required)).not.toThrow()
+    })
   })
 })
 

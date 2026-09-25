@@ -11,5 +11,6 @@ import { FriendsService } from './friends.service'
   imports: [AuthModule, AccessModule, AnalyticsModule, NotificationsModule],
   controllers: [FriendsController],
   providers: [FriendsService],
+  exports: [FriendsService],
 })
 export class FriendsModule {}

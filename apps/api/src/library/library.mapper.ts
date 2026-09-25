@@ -93,7 +93,10 @@ function asExclusiveStatus(status: LoanStatus): ExclusiveLoanStatus | undefined 
  * примірника не змінює взагалі, тож після надісланого `REQUESTED` книжка
  * лишається `AVAILABLE`, і рішення за статусом дозволило б натиснути вдруге.
  */
-export function viewerLoanOf(copy: CopyRow, viewerId: string): ViewerLoan | null {
+export function viewerLoanOf(
+  copy: { loans: Pick<CopyLoanRow, 'id' | 'status' | 'borrowerId'>[] },
+  viewerId: string,
+): ViewerLoan | null {
   let best: ViewerLoan | null = null
 
   for (const loan of copy.loans) {
@@ -147,7 +150,9 @@ export function pendingRequestCountOf(copy: CopyRow): number {
  * `UNAVAILABLE` (власник не дає або книжку втрачено) вона обіцяла б повернення,
  * якого ніхто не обіцяв.
  */
-export function expectedReturnOf(copy: CopyRow): string | null {
+export function expectedReturnOf(
+  copy: Pick<CopyRow, 'status'> & { loans: Pick<CopyLoanRow, 'status' | 'dueAt'>[] },
+): string | null {
   if (copy.status !== 'RESERVED' && copy.status !== 'LENT_OUT') return null
 
   for (const loan of copy.loans) {
@@ -173,7 +178,13 @@ export function expectedReturnOf(copy: CopyRow): string | null {
  * в §9-функціях і в сервісі, який ухвалює остаточне рішення. Тут — лише
  * передбачення відповіді, і e2e-тести звіряють його з реальним POST.
  */
-export function canRequestCopy(copy: CopyRow, role: ViewerRole, viewerId: string): boolean {
+export function canRequestCopy(
+  copy: Pick<CopyRow, 'ownerId' | 'currentHolderId' | 'status'> & {
+    loans: Pick<CopyLoanRow, 'id' | 'status' | 'borrowerId'>[]
+  },
+  role: ViewerRole,
+  viewerId: string,
+): boolean {
   if (role !== 'FRIEND') return false
   if (copy.ownerId === viewerId) return false
   if (copy.status !== 'AVAILABLE') return false

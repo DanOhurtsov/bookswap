@@ -14,6 +14,7 @@ import {
 import { AccessService, blocked } from '../access/access.service'
 import { copyVisibleTo, holderNamesVisibleTo, isVisibleTo } from '../access/visibility'
 import { AnalyticsService } from '../analytics/analytics.service'
+import { NetworkActivationService } from '../analytics/network-activation.service'
 import { TextNormalizer } from '../catalog/text-normalizer'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
@@ -92,6 +93,7 @@ export class LibraryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly analytics: AnalyticsService,
+    private readonly network: NetworkActivationService,
     private readonly access: AccessService,
     private readonly normalizer: TextNormalizer,
   ) {}
@@ -226,6 +228,7 @@ export class LibraryService {
       domainEntityId: copy.id,
       properties: { method: request.entryMethod ?? 'MANUAL' },
     })
+    await this.network.onInventoryAdded(userId)
 
     return { copy: toOwnCopy(copy) }
   }

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import type { CatalogDiscoveryResult } from '@bookswap/shared'
 import type { LocalCandidate } from '../model/unified-results'
@@ -17,6 +18,8 @@ type LocalResultCardProps = {
   note?: string
   searchedIsbn?: string
   locations?: CatalogDiscoveryResult['locations']
+  /** Per-owner copy list with actions (the catalog page plugs the request flow in here). */
+  renderLocationActions?: (location: CatalogDiscoveryResult['locations'][number]) => ReactNode
   /** Offering an existing edition is the catalog's privilege — omitted, no buttons. */
   onUseEdition?: (editionId: string) => void
   onUseWork?: () => void
@@ -47,6 +50,7 @@ export function LocalResultCard({
   note,
   searchedIsbn,
   locations,
+  renderLocationActions,
   onUseEdition,
   onUseWork,
 }: LocalResultCardProps) {
@@ -122,12 +126,13 @@ export function LocalResultCard({
                   : `У ${location.owner.displayName}`}
               </Link>{' '}
               · доступних примірників: {location.availableCopies}
-              {location.relation === 'OTHER' && (
+              {renderLocationActions === undefined && location.relation === 'OTHER' && (
                 <>
                   {' '}
                   · <Link href="/friends">Спочатку додайте власника в друзі</Link>
                 </>
               )}
+              {renderLocationActions?.(location)}
             </li>
           ))}
         </ul>

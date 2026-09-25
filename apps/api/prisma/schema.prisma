@@ -54,21 +54,23 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
 
-  copiesOwned        Copy[]                   @relation("CopyOwner")
-  copiesHeld         Copy[]                   @relation("CopyHolder")
-  loansAsBorrower    Loan[]                   @relation("LoanBorrower")
-  loansAsOwner       Loan[]                   @relation("LoanOwner")
-  reviews            Review[]
-  translationRatings TranslationRating[]
-  friendshipsA       Friendship[]             @relation("FriendA")
-  friendshipsB       Friendship[]             @relation("FriendB")
-  friendshipsBlocked Friendship[]             @relation("FriendshipBlockedBy")
-  wishlist           WishlistItem[]
-  notifications      Notification[]
-  notificationPrefs  NotificationPreference[]
-  productEvents      ProductEvent[]
-  catalogRevisions   CatalogRevision[]
-  libraryImports     LibraryImport[]
+  copiesOwned         Copy[]                   @relation("CopyOwner")
+  copiesHeld          Copy[]                   @relation("CopyHolder")
+  loansAsBorrower     Loan[]                   @relation("LoanBorrower")
+  loansAsOwner        Loan[]                   @relation("LoanOwner")
+  reviews             Review[]
+  translationRatings  TranslationRating[]
+  friendshipsA        Friendship[]             @relation("FriendA")
+  friendshipsB        Friendship[]             @relation("FriendB")
+  friendshipsBlocked  Friendship[]             @relation("FriendshipBlockedBy")
+  wishlist            WishlistItem[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference[]
+  productEvents       ProductEvent[]
+  catalogRevisions    CatalogRevision[]
+  libraryImports      LibraryImport[]
+  invitationsSent     Invitation[]
+  invitationsAccepted InvitationAcceptance[]
 
   @@index([displayName])
 }
@@ -771,4 +773,50 @@ enum LibraryImportRowStatus {
   NEEDS_REVIEW
   INVALID
   SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Stage 9: invitations (docs/plan/stage-9-network-activation.md, §6, §9)
+// ---------------------------------------------------------------------------
+
+enum InvitationKind {
+  LINK
+  EMAIL
+}
+
+/// A capability to ask for a friendship. Only the SHA-256 of the token is stored
+/// (as for sessions and mail tokens). A raw e-mail address is never stored:
+/// `recipientEmailHash` exists only for anti-abuse limits.
+model Invitation {
+  id        String         @id @default(cuid())
+  inviterId String
+  inviter   User           @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+  kind      InvitationKind
+
+  tokenHash          String  @unique
+  recipientEmailHash String?
+  maxUses            Int
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  acceptances InvitationAcceptance[]
+
+  @@index([inviterId, createdAt])
+  @@index([recipientEmailHash, createdAt])
+}
+
+/// One row per (invitation, person). The unique key makes a repeat open
+/// idempotent; the number of rows is the invitation's use count.
+model InvitationAcceptance {
+  id           String     @id @default(cuid())
+  invitationId String
+  invitation   Invitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([invitationId, userId])
+  @@index([userId])
 }

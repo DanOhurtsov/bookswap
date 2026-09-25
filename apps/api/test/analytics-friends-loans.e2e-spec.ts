@@ -205,7 +205,8 @@ describe('Friend and loan product analytics (e2e)', () => {
     const returned = await actOnLoan(app, owner, loanId, { action: 'return' }).expect(200)
 
     expect(loanResponseSchema.parse(returned.body).loan.status).toBe('RETURNED')
-    expect(createMany).toHaveBeenCalledTimes(6)
+    // 2× FRIEND_ACCEPTED + FRIEND_INVENTORY_USABLE (у друга є видима доступна книжка) + 4 події лоану.
+    expect(createMany).toHaveBeenCalledTimes(7)
     await expect(
       prisma.friendship.findFirst({
         where: { OR: [{ userAId: owner.id }, { userBId: owner.id }] },

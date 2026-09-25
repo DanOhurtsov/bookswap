@@ -10,7 +10,7 @@ import {
   type WorkDetailResponse,
 } from '@bookswap/shared'
 import { apiRequest, apiRequestWithRedirect, describeError } from './api'
-import { askedFor } from './search-page'
+import { discoveryQuery, type DiscoveryFilters } from './discovery-filters'
 import { useKeyedRequest } from './use-keyed-request'
 
 /**
@@ -25,25 +25,26 @@ export type CatalogDiscoveryState =
   | { status: 'error'; message: string }
 
 /**
- * Discovery of physical copies for the selected viewer scope and URL page.
- * An empty query stays idle; stale responses never render for another key.
+ * Discovery of physical copies for the selected viewer scope, filters and URL
+ * page. In the circle an empty query is a browse; in the legacy `ALL` scope it
+ * stays idle. Stale responses never render for another key.
  */
 export function useCatalogDiscovery(
   query: string,
   page: number,
   pageSize: number,
   scope: CatalogDiscoveryScope,
+  filters: DiscoveryFilters,
   refresh = 0,
 ): CatalogDiscoveryState {
   const trimmed = query.trim()
-  const enabled = trimmed.length >= CATALOG_LIMITS.queryMin
+  const enabled =
+    trimmed.length >= CATALOG_LIMITS.queryMin || (scope === 'CIRCLE' && trimmed === '')
 
-  const key = `${scope}\u0000${String(refresh)}\u0000${askedFor(trimmed, page, pageSize)}`
+  const search = discoveryQuery({ q: trimmed, page, pageSize, scope, filters })
+  const key = `${String(refresh)}\u0000${search}`
   const state = useKeyedRequest(enabled ? key : undefined, (signal) =>
-    apiRequest(
-      `/catalog/discover?q=${encodeURIComponent(trimmed)}&page=${String(page)}&pageSize=${String(pageSize)}&scope=${scope}`,
-      { schema: catalogDiscoveryResponseSchema, signal },
-    ),
+    apiRequest(`/catalog/discover?${search}`, { schema: catalogDiscoveryResponseSchema, signal }),
   )
 
   if (state.status === 'ready') return { status: 'ready', response: state.value }
