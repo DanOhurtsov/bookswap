@@ -7,6 +7,12 @@
 - [Етап 8b–8h — inventory activation](./stage-8-inventory.md) — затверджений
   execution plan для barcode/camera scan, CSV import, repeat-add, виправлення
   metadata й onboarding до перших 10 книг.
+- [Етап 9 — пошук за назвою в зовнішніх каталогах](./stage-9-external-title-search.md)
+  — погоджене розширення §6.3; продовження — [пагінація спільного списку
+  `/catalog`](./stage-9-search-pagination.md).
+- [Етап 9 — каталог фізичних книжок](./stage-9-owned-catalog-discovery.md) —
+  пошук доступних примірників у своїй бібліотеці, у друзів та публічних
+  бібліотеках користувачів.
 - Перед початком кожного етапу з roadmap для нього створюється окремий execution
   plan із технічними рішеннями, підетапами й Definition of done.
 
