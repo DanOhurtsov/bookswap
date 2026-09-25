@@ -489,6 +489,28 @@ describe('ExternalSearchService', () => {
   })
 
   describe('регресії ревʼю', () => {
+    it('дедуплікація ISBN діє ДО розрахунку more: відкинутий запис не дає хибного YES', async () => {
+      // 10 своїх записів і 11-й, що вже є в нашому каталозі: після відсіву понад
+      // сторінку нічого немає, а потік вичерпано.
+      const records: ExternalSearchResult[] = series(11).map((record, index) => ({
+        ...edition(`GOOGLE_BOOKS:v${String(index)}`, record.title),
+        isbn13: index === 10 ? '9786177585113' : undefined,
+      }))
+
+      googleBooks.setBehaviour(streaming(records))
+      const shared = new ExternalSearchService(
+        [openLibrary, googleBooks],
+        new ExternalSearchCache(),
+        new ProviderRateLimiter(),
+        localOf(0, ['9786177585113']),
+      )
+
+      const response = await shared.search('книжка', 1, 10)
+
+      expect(response.results).toHaveLength(10)
+      expect(response.more).toBe('NO')
+    })
+
     it('№1: «далі» не зникає лише тому, що бюджет запиту — один блок', async () => {
       process.env.CATALOG_EXTERNAL_SEARCH_BLOCK_SIZE = '10'
       openLibrary.setBehaviour(streaming(series(30)))
