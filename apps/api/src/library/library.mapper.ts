@@ -42,7 +42,8 @@ export type UserRow = PublicUserRow
 
 /** Незавершений лоан на примірнику — рівно те, що потрібно для §6.5. */
 export type CopyLoanRow = Pick<LoanModel, 'id' | 'status' | 'borrowerId' | 'dueAt'> & {
-  borrower: UserRow
+  /** Stage 10 (T1): `null` для гостьової позики. */
+  borrower: UserRow | null
 }
 
 export type CopyRow = Pick<
@@ -50,6 +51,7 @@ export type CopyRow = Pick<
   | 'id'
   | 'ownerId'
   | 'currentHolderId'
+  | 'heldByContactId'
   | 'status'
   | 'visibility'
   | 'condition'
@@ -59,7 +61,8 @@ export type CopyRow = Pick<
 > & {
   edition: EditionRow & { work: WorkRow & { authors: WorkAuthorRow[] } }
   owner: UserRow
-  currentHolder: UserRow
+  /** Stage 10 (T1-a): `null`, коли книжка вдома, у гостя-контакта або тримача стерто (D3). */
+  currentHolder: UserRow | null
   /** Лише незавершені (`OPEN_LOAN_STATUS`) — термінальні тут ні на що не впливають. */
   loans: CopyLoanRow[]
 }
@@ -125,6 +128,10 @@ export function ownerLoanOf(copy: CopyRow): OwnerLoan | null {
 
     if (status === undefined) continue
 
+    // Гостьова позика (Stage 10, T1) не має зареєстрованого контрагента. Її подання
+    // власнику (з аліасом, D4) додасть крок 10f; до того `activeLoan` для неї порожній.
+    if (loan.borrower === null) return null
+
     return { id: loan.id, status, counterpart: toPublicUser(loan.borrower) }
   }
 
@@ -179,7 +186,7 @@ export function expectedReturnOf(
  * передбачення відповіді, і e2e-тести звіряють його з реальним POST.
  */
 export function canRequestCopy(
-  copy: Pick<CopyRow, 'ownerId' | 'currentHolderId' | 'status'> & {
+  copy: Pick<CopyRow, 'ownerId' | 'currentHolderId' | 'heldByContactId' | 'status'> & {
     loans: Pick<CopyLoanRow, 'id' | 'status' | 'borrowerId'>[]
   },
   role: ViewerRole,
@@ -201,9 +208,15 @@ export interface LibraryGroupOf<TCopy> {
   counts: LibraryCounts
 }
 
-/** Інваріант §5.3.2 в термінах інтерфейсу: «вдома» = тримач і є власником. */
-export function isHome(copy: Pick<CopyRow, 'ownerId' | 'currentHolderId'>): boolean {
-  return copy.ownerId === copy.currentHolderId
+/**
+ * Інваріант §5.3.2 в термінах інтерфейсу: «вдома» = тримач і є власником, а контакт-гість
+ * її не тримає. Той самий вираз, що в CHECK-ах `Copy` (міграція `stage10_expand`); `null`
+ * тримач (гість чи стерто за D3) — «не вдома».
+ */
+export function isHome(
+  copy: Pick<CopyRow, 'ownerId' | 'currentHolderId' | 'heldByContactId'>,
+): boolean {
+  return copy.currentHolderId === copy.ownerId && copy.heldByContactId === null
 }
 
 /** Дата придбання без часу: «о котрій годині ви купили книжку» не означає нічого. */
@@ -225,7 +238,8 @@ export function toOwnCopy(copy: CopyRow): OwnCopy {
     isHome: home,
     // Власник бачить імена завжди (§6.6) — його власний прапорець
     // `showHolderNames` керує тим, що бачать інші, а не він сам.
-    holder: home ? null : toPublicUser(copy.currentHolder),
+    // Гостя-тримача власнику покаже крок 10f (аліас, D4); до того — без імені.
+    holder: home || copy.currentHolder === null ? null : toPublicUser(copy.currentHolder),
     activeLoan: ownerLoanOf(copy),
     pendingRequestCount: pendingRequestCountOf(copy),
   }
@@ -253,7 +267,11 @@ export function toVisibleCopy(copy: CopyRow, viewer: Viewer): VisibleCopy {
     status: copy.status,
     condition: copy.condition,
     isHome: home,
-    holder: home || !viewer.showHolderNames ? null : toPublicUser(copy.currentHolder),
+    // Гість-тримач для друзів завжди анонімний (D4): `currentHolder = null` → без імені.
+    holder:
+      home || !viewer.showHolderNames || copy.currentHolder === null
+        ? null
+        : toPublicUser(copy.currentHolder),
     // Тільки свій лоан. Чиї ще запити висять на цьому примірнику — не справа
     // гостя бібліотеки: `pendingRequestCount` існує лише у власника.
     myActiveLoan: viewerLoanOf(copy, viewer.id),

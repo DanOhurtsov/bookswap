@@ -71,6 +71,8 @@ model User {
   libraryImports      LibraryImport[]
   invitationsSent     Invitation[]
   invitationsAccepted InvitationAcceptance[]
+  externalBorrowers   ExternalBorrower[]
+  loanEvents          LoanEvent[]
 
   @@index([displayName])
 }
@@ -420,7 +422,13 @@ model Copy {
   ownerId   String
 
   /// Хто фізично тримає книгу зараз. Дорівнює ownerId, коли книга вдома (інваріант §5.3.2).
-  currentHolderId String
+  /// Stage 10 (T1-a): NULL, коли книга в гостя (`heldByContactId`) або тримач стерто за D3.
+  /// Рядки Етапу 10a ще ніколи не мають NULL — гостьових записів немає.
+  currentHolderId String?
+  /// Stage 10 (D1): контакт-гість, що тримає книгу. Взаємовиключне з `currentHolderId`.
+  heldByContactId String?
+  /// Stage 10: «більше не у власності». Зараз завжди NULL (API з'явиться в 10c).
+  archivedAt      DateTime?
 
   status     CopyStatus @default(AVAILABLE)
   /// §4.5: ортогонально до status. Прихована книга може бути одночасно позиченою.
@@ -432,11 +440,13 @@ model Copy {
 
   edition       Edition @relation(fields: [editionId], references: [id])
   owner         User    @relation("CopyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  currentHolder User    @relation("CopyHolder", fields: [currentHolderId], references: [id])
+  currentHolder User?   @relation("CopyHolder", fields: [currentHolderId], references: [id], onDelete: Restrict)
+  heldByContact ExternalBorrower? @relation("CopyHeldByContact", fields: [heldByContactId], references: [id], onDelete: SetNull)
   loans         Loan[]
 
   @@index([ownerId, status])
   @@index([currentHolderId])
+  @@index([heldByContactId])
   @@index([editionId])
 }
 
@@ -468,13 +478,23 @@ model Loan {
   copyId     String
   /// денормалізовано з Copy на момент створення
   ownerId    String
-  borrowerId String
+  /// Stage 10: NULL лише для гостьових позик (`borrowerKind = GUEST`).
+  borrowerId String?
   status     LoanStatus @default(REQUESTED)
+
+  /// Stage 10 (T1): REGISTERED — `borrowerId`; GUEST — `borrowerContactId` (NULL після D3-чистки).
+  borrowerKind      BorrowerKind @default(REGISTERED)
+  borrowerContactId String?
+  origin            LoanOrigin   @default(REQUESTED)
+  /// Stage 10: коли запис створено. Для наявних рядків = `requestedAt`.
+  createdAt         DateTime     @default(now())
 
   message      String?
   responseNote String?
 
-  requestedAt DateTime  @default(now())
+  /// Stage 10 (T2): NULL для записаних власником позик (`origin ≠ REQUESTED`) — запиту не було.
+  /// DEFAULT `now()` збережено свідомо, щоб код попереднього релізу не писав NULL під час rollout.
+  requestedAt DateTime? @default(now())
   respondedAt DateTime?
   handedAt    DateTime?
   dueAt       DateTime?
@@ -482,9 +502,12 @@ model Loan {
 
   copy     Copy @relation(fields: [copyId], references: [id], onDelete: Cascade)
   owner    User @relation("LoanOwner", fields: [ownerId], references: [id])
-  borrower User @relation("LoanBorrower", fields: [borrowerId], references: [id])
+  borrower User? @relation("LoanBorrower", fields: [borrowerId], references: [id], onDelete: Restrict)
+  borrowerContact ExternalBorrower? @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id], onDelete: SetNull)
+  events   LoanEvent[]
 
   @@index([copyId, status])
+  @@index([borrowerContactId])
   @@index([borrowerId, status])
   @@index([ownerId, status])
 }
@@ -499,6 +522,73 @@ enum LoanStatus {
   HANDED_OVER
   RETURNED
   LOST
+  /// Stage 10 (T3): власник записав наявну позику, чекає відповіді позичальника. Ще не використовується.
+  PENDING_CONFIRMATION
+  /// Stage 10 (T3): позичальник відмовився від запису власника. Ще не використовується.
+  DECLINED
+}
+
+enum BorrowerKind {
+  REGISTERED
+  GUEST
+}
+
+enum LoanOrigin {
+  REQUESTED
+  RECORDED_EXISTING
+  RECORDED_GUEST
+}
+
+/// Stage 10 (T4): типи подій `LoanEvent`. Значення `LINK_*` додасть крок 10i.
+enum LoanEventType {
+  RECORD_PROPOSED
+  RECORD_AMENDED
+  RECORD_CONFIRMED
+  RECORD_DECLINED
+  RECORD_WITHDRAWN
+  GUEST_LOAN_RECORDED
+  LOAN_RETURNED
+  LOAN_LOST
+  RECOVERED
+}
+
+/// Stage 10 (D1): контакт-гість у межах бібліотеки одного власника. Не `User`, не спільний
+/// каталог. `alias` — єдине PII; email не зберігається (T6). Функцію заблоковано D2
+/// (release blocker): таблиця існує, але 10a її не заповнює.
+model ExternalBorrower {
+  id              String    @id @default(cuid())
+  ownerId         String
+  alias           String
+  /// D2: коли власник заявив «я повідомив(-ла) гостя». НЕ згода і НЕ правова підстава.
+  ownerInformedAt DateTime?
+  /// D3: NULL — є активна позика; інакше момент видалення контакту.
+  retainUntil     DateTime?
+  createdAt       DateTime  @default(now())
+
+  owner         User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  loans         Loan[]  @relation("LoanBorrowerContact")
+  heldCopies    Copy[]  @relation("CopyHeldByContact")
+
+  @@index([ownerId])
+  @@index([retainUntil])
+}
+
+/// Stage 10 (T4): append-only audit trail. `payload` — strict-схема на тип, без alias/email.
+/// Рядок `Loan` не можна видалити, поки є події (RESTRICT).
+model LoanEvent {
+  id          String        @id @default(cuid())
+  loanId      String
+  type        LoanEventType
+  actorId     String?
+  occurredAt  DateTime      @default(now())
+  /// Фактична дата події (напр. дата знахідки), якщо відрізняється від `occurredAt`.
+  effectiveAt DateTime?
+  payload     Json          @default("{}")
+
+  loan  Loan  @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([loanId, occurredAt])
 }
 
 // ---------------------------------------------------------------------------

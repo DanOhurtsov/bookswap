@@ -23,7 +23,7 @@ export function HistoryEntryLine({ entry }: { entry: HistoryEntry }) {
         {entry.isOverdue && ' · прострочено'}
       </span>
       <span className="book__meta">
-        Попросили {formatDate(entry.requestedAt)}
+        {entry.requestedAt !== null && `Попросили ${formatDate(entry.requestedAt)}`}
         {entry.handedAt !== null && ` · передали ${formatDate(entry.handedAt)}`}
         {entry.returnedAt !== null && ` · повернули ${formatDate(entry.returnedAt)}`}
       </span>

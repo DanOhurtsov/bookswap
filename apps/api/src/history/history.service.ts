@@ -11,7 +11,13 @@ import { toEdition, toWork, toWorkAuthors } from '../catalog/catalog.mapper'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
-import { byRequestedAt, toHistoryCopy, toHistoryEntry, toNamedEntry } from './history.mapper'
+import {
+  byRequestedAt,
+  hasRegisteredBorrower,
+  toHistoryCopy,
+  toHistoryEntry,
+  toNamedEntry,
+} from './history.mapper'
 import type { FriendRelation } from '@bookswap/shared'
 
 /** Каталожний контекст примірника — рівно те, що читає `history.mapper`. */
@@ -177,7 +183,11 @@ export class HistoryService {
     })
 
     const now = new Date()
-    const ordered = [...loans].sort((one, other) => byRequestedAt(other, one))
+    // Гостьові позики (`borrower = null`) з'являться в «Моїй історії» власника разом з
+    // аліасом у кроці 10f; до того їх не існує, а іменована проєкція без імені неможлива.
+    const ordered = loans
+      .filter(hasRegisteredBorrower)
+      .sort((one, other) => byRequestedAt(other, one))
     const project = (loan: (typeof ordered)[number]): MyHistoryResponse['borrowed'][number] => ({
       entry: toNamedEntry(loan, now),
       copy: toHistoryCopy(loan.copy),

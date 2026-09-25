@@ -1,5 +1,6 @@
 import {
   AUTHOR_ROLE,
+  BORROWER_KIND,
   CATALOG_ENTITY_TYPE,
   CHANNEL,
   CONDITION,
@@ -12,6 +13,8 @@ import {
   IMMEDIATE_NOTIFICATION_TYPE,
   LIBRARY_IMPORT_ROW_STATUS,
   LIBRARY_IMPORT_STATUS,
+  LOAN_EVENT_TYPE,
+  LOAN_ORIGIN,
   LOAN_STATUS,
   NOTIFICATION_TYPE,
   OPEN_LOAN_STATUS,
@@ -21,6 +24,7 @@ import {
 } from '@bookswap/shared'
 import type {
   AuthorRole as SharedAuthorRole,
+  BorrowerKind as SharedBorrowerKind,
   CatalogEntityType as SharedCatalogEntityType,
   Channel as SharedChannel,
   Condition as SharedCondition,
@@ -30,12 +34,15 @@ import type {
   FriendshipStatus as SharedFriendshipStatus,
   LibraryImportRowStatus as SharedLibraryImportRowStatus,
   LibraryImportStatus as SharedLibraryImportStatus,
+  LoanEventType as SharedLoanEventType,
+  LoanOrigin as SharedLoanOrigin,
   LoanStatus as SharedLoanStatus,
   NotificationType as SharedNotificationType,
   Visibility as SharedVisibility,
 } from '@bookswap/shared'
 import {
   AuthorRole as PrismaAuthorRole,
+  BorrowerKind as PrismaBorrowerKind,
   CatalogEntityType as PrismaCatalogEntityType,
   Channel as PrismaChannel,
   Condition as PrismaCondition,
@@ -45,12 +52,15 @@ import {
   FriendshipStatus as PrismaFriendshipStatus,
   LibraryImportRowStatus as PrismaLibraryImportRowStatus,
   LibraryImportStatus as PrismaLibraryImportStatus,
+  LoanEventType as PrismaLoanEventType,
+  LoanOrigin as PrismaLoanOrigin,
   LoanStatus as PrismaLoanStatus,
   NotificationType as PrismaNotificationType,
   Visibility as PrismaVisibility,
 } from '../generated/prisma/enums'
 import type {
   AuthorRole as PrismaAuthorRoleType,
+  BorrowerKind as PrismaBorrowerKindType,
   CatalogEntityType as PrismaCatalogEntityTypeType,
   Channel as PrismaChannelType,
   Condition as PrismaConditionType,
@@ -60,6 +70,8 @@ import type {
   FriendshipStatus as PrismaFriendshipStatusType,
   LibraryImportRowStatus as PrismaLibraryImportRowStatusType,
   LibraryImportStatus as PrismaLibraryImportStatusType,
+  LoanEventType as PrismaLoanEventTypeType,
+  LoanOrigin as PrismaLoanOriginType,
   LoanStatus as PrismaLoanStatusType,
   NotificationType as PrismaNotificationTypeType,
   Visibility as PrismaVisibilityType,
@@ -80,6 +92,9 @@ const _editionFormatMatches: Equal<SharedEditionFormat, PrismaEditionFormatType>
 const _copyStatusMatches: Equal<SharedCopyStatus, PrismaCopyStatusType> = true
 const _conditionMatches: Equal<SharedCondition, PrismaConditionType> = true
 const _loanStatusMatches: Equal<SharedLoanStatus, PrismaLoanStatusType> = true
+const _borrowerKindMatches: Equal<SharedBorrowerKind, PrismaBorrowerKindType> = true
+const _loanOriginMatches: Equal<SharedLoanOrigin, PrismaLoanOriginType> = true
+const _loanEventTypeMatches: Equal<SharedLoanEventType, PrismaLoanEventTypeType> = true
 const _notificationTypeMatches: Equal<SharedNotificationType, PrismaNotificationTypeType> = true
 const _channelMatches: Equal<SharedChannel, PrismaChannelType> = true
 const _deliveryStatusMatches: Equal<SharedDeliveryStatus, PrismaDeliveryStatusType> = true
@@ -199,15 +214,20 @@ describe('LoanStatus: shared ↔ Prisma', () => {
   })
 
   it('відповідає §4.6', () => {
-    expect([...LOAN_STATUS].sort()).toEqual([
-      'APPROVED',
-      'CANCELLED',
-      'HANDED_OVER',
-      'LOST',
-      'REJECTED',
-      'REQUESTED',
-      'RETURNED',
-    ])
+    expect([...LOAN_STATUS].sort()).toEqual(
+      [
+        'APPROVED',
+        'CANCELLED',
+        'HANDED_OVER',
+        'LOST',
+        'REJECTED',
+        'REQUESTED',
+        'RETURNED',
+        // Stage 10 (T3): є в схемі з кроку 10a, у даних — з 10e.
+        'PENDING_CONFIRMATION',
+        'DECLINED',
+      ].sort(),
+    )
   })
 
   /**
@@ -241,6 +261,28 @@ describe('LoanStatus: shared ↔ Prisma', () => {
     }
 
     expect([...EXCLUSIVE_LOAN_STATUS]).not.toContain('REQUESTED')
+  })
+})
+
+describe('Stage 10: BorrowerKind, LoanOrigin, LoanEventType: shared ↔ Prisma', () => {
+  it('BorrowerKind містить ті самі значення', () => {
+    expect([...BORROWER_KIND].sort()).toEqual(Object.values(PrismaBorrowerKind).sort())
+    expect(_borrowerKindMatches).toBe(true)
+  })
+
+  it('LoanOrigin містить ті самі значення', () => {
+    expect([...LOAN_ORIGIN].sort()).toEqual(Object.values(PrismaLoanOrigin).sort())
+    expect(_loanOriginMatches).toBe(true)
+  })
+
+  it('LoanEventType містить ті самі значення', () => {
+    expect([...LOAN_EVENT_TYPE].sort()).toEqual(Object.values(PrismaLoanEventType).sort())
+    expect(_loanEventTypeMatches).toBe(true)
+  })
+
+  it('ексклюзивні й відкриті статуси не розширено: нові статуси ще не займають примірник', () => {
+    expect([...EXCLUSIVE_LOAN_STATUS].sort()).toEqual(['APPROVED', 'HANDED_OVER'])
+    expect([...OPEN_LOAN_STATUS]).not.toContain('PENDING_CONFIRMATION')
   })
 })
 

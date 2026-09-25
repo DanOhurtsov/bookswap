@@ -54,8 +54,8 @@ describe('resolveTransition: вичерпна матриця', () => {
     ),
   )
 
-  it('перебирає всі 7 × 6 × 2 комбінацій — жодна не лишається невизначеною', () => {
-    expect(combinations).toHaveLength(84)
+  it('перебирає всі 9 × 6 × 2 комбінацій — жодна не лишається невизначеною', () => {
+    expect(combinations).toHaveLength(108)
   })
 
   it.each(combinations)('$from --$action--> для $actor', ({ from, action, actor }: Row) => {
@@ -69,7 +69,15 @@ describe('resolveTransition: вичерпна матриця', () => {
 })
 
 describe('термінальні статуси §5.1', () => {
-  const terminal: LoanStatus[] = ['REJECTED', 'CANCELLED', 'RETURNED', 'LOST']
+  // Stage 10: `PENDING_CONFIRMATION`/`DECLINED` до кроку 10e так само не мають жодного request-flow переходу.
+  const terminal: LoanStatus[] = [
+    'REJECTED',
+    'CANCELLED',
+    'RETURNED',
+    'LOST',
+    'PENDING_CONFIRMATION',
+    'DECLINED',
+  ]
 
   it.each(terminal)('з %s не веде жоден перехід — ні для кого', (from) => {
     for (const action of LOAN_ACTIONS) {

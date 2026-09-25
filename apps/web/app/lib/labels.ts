@@ -54,6 +54,9 @@ export const LOAN_STATUS_LABELS: Readonly<Record<LoanStatus, string>> = {
   HANDED_OVER: 'На руках',
   RETURNED: 'Повернено',
   LOST: 'Втрачено',
+  // Stage 10: статуси з'являться в даних лише з кроку 10e; підписи потрібні типу `Record`.
+  PENDING_CONFIRMATION: 'Очікує підтвердження',
+  DECLINED: 'Відхилено позичальником',
 }
 
 /** Підписи кнопок §8. Дієслово від першої особи того, хто тисне. */

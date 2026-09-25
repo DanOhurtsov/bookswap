@@ -28,7 +28,11 @@ const historyFactsSchema = z.object({
   status: loanStatusSchema,
   /** §5.2: похідне від `HANDED_OVER` і `dueAt`, а не окремий статус. */
   isOverdue: z.boolean(),
-  requestedAt: z.iso.datetime(),
+  /**
+   * Stage 10 (T2): `null` для записаних власником позик — запиту не було, і дата не вигадується.
+   * До кроку 10e значення завжди непорожнє.
+   */
+  requestedAt: z.iso.datetime().nullable(),
   respondedAt: z.iso.datetime().nullable(),
   handedAt: z.iso.datetime().nullable(),
   returnedAt: z.iso.datetime().nullable(),

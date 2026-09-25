@@ -112,7 +112,8 @@ export class LibraryService {
   async listOut(userId: string): Promise<LibraryResponse> {
     const copies = await this.findCopies({
       ownerId: userId,
-      currentHolderId: { not: userId },
+      // `not` у Prisma виключає NULL; тримач-гість (Stage 10) має `currentHolderId = NULL` і теж «не вдома».
+      OR: [{ currentHolderId: null }, { currentHolderId: { not: userId } }],
     })
 
     return { groups: groupByEdition(copies, toOwnCopy) }

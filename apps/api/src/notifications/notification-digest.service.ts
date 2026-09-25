@@ -201,12 +201,15 @@ export class NotificationDigestService implements OnModuleInit, OnModuleDestroy 
    */
   private async emit(type: NotificationType, now: Date): Promise<number> {
     const loans = await this.prisma.loan.findMany({
-      where: { status: 'HANDED_OVER', dueAt: { not: null } },
+      // Stage 10 (T1): гостьова позика (`borrowerId = NULL`) не має кому адресувати нагадування —
+      // гостю нічого не надсилається, а власникові гостьові прострочення не входять у 10a.
+      where: { status: 'HANDED_OVER', dueAt: { not: null }, borrowerId: { not: null } },
       select: { id: true, copyId: true, borrowerId: true, dueAt: true },
     })
 
     const matching = loans.filter(
-      (loan): loan is DueLoan => loan.dueAt !== null && matchesDigestType(type, loan.dueAt, now),
+      (loan): loan is DueLoan =>
+        loan.dueAt !== null && loan.borrowerId !== null && matchesDigestType(type, loan.dueAt, now),
     )
 
     if (matching.length === 0) return 0

@@ -89,6 +89,14 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * Stage 10: `PENDING_CONFIRMATION` і `DECLINED` є в схемі, але ще недосяжні (їх створює крок
+ * 10e), тож у фільтрі їх немає — інакше він пропонував би порожній вибір.
+ */
+const FILTERABLE_LOAN_STATUS = LOAN_STATUS.filter(
+  (value) => value !== 'PENDING_CONFIRMATION' && value !== 'DECLINED',
+)
+
 const ROLE_LABELS: Readonly<Record<LoanRole, string>> = {
   owner: 'Мої книжки',
   borrower: 'Я прошу',
@@ -187,7 +195,7 @@ function LoanListView({ user }: { user: Me }) {
     router.replace(`/loans?${next.toString()}`)
   }
 
-  const status = LOAN_STATUS.find((value) => value === statusFilter)
+  const status = FILTERABLE_LOAN_STATUS.find((value) => value === statusFilter)
   const { state, reload } = useLoans({ role, status })
   const actions = useLoanActions(reload)
 
@@ -226,7 +234,7 @@ function LoanListView({ user }: { user: Me }) {
           }}
         >
           <option value="">будь-який</option>
-          {LOAN_STATUS.map((value) => (
+          {FILTERABLE_LOAN_STATUS.map((value) => (
             <option key={value} value={value}>
               {LOAN_STATUS_LABELS[value]}
             </option>

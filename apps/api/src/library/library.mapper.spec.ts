@@ -29,6 +29,7 @@ function copyRow(overrides: Partial<CopyRow> = {}): CopyRow {
     id: 'copy-1',
     ownerId: MARTA.id,
     currentHolderId: MARTA.id,
+    heldByContactId: null,
     status: 'AVAILABLE',
     visibility: 'FRIENDS',
     condition: 'GOOD',
@@ -103,6 +104,47 @@ describe('isHome', () => {
   it('вдома — це тримач, який дорівнює власнику (інваріант §5.3.2)', () => {
     expect(isHome(copyRow())).toBe(true)
     expect(isHome(lentOut())).toBe(false)
+  })
+
+  /** Stage 10 (T1-a): гість-тримач і невідомий тримач (стерто за D3) — «не вдома». */
+  it('тримач-гість чи NULL-тримач — не вдома', () => {
+    expect(isHome(copyRow({ currentHolderId: null, heldByContactId: 'contact-1' }))).toBe(false)
+    expect(isHome(copyRow({ currentHolderId: null, heldByContactId: null }))).toBe(false)
+  })
+})
+
+describe('копія в гостя (Stage 10, T1-a)', () => {
+  const heldByGuest = (): CopyRow =>
+    copyRow({
+      status: 'LENT_OUT',
+      currentHolderId: null,
+      heldByContactId: 'contact-1',
+      currentHolder: null,
+    })
+
+  it('власник: не вдома, тримача-користувача немає', () => {
+    const copy = toOwnCopy(heldByGuest())
+
+    expect(copy.isHome).toBe(false)
+    expect(copy.holder).toBeNull()
+  })
+
+  it('друг навіть із showHolderNames = true не бачить нічого про гостя (D4)', () => {
+    const copy = toVisibleCopy(heldByGuest(), guest(true))
+
+    expect(copy.isHome).toBe(false)
+    expect(copy.holder).toBeNull()
+    expect(copy.canRequest).toBe(false)
+  })
+
+  it('активна гостьова позика не ламає ownerLoanOf', () => {
+    const row = heldByGuest()
+
+    row.loans = [
+      { id: 'loan-g', status: 'HANDED_OVER', borrowerId: null, dueAt: null, borrower: null },
+    ]
+
+    expect(toOwnCopy(row).activeLoan).toBeNull()
   })
 })
 

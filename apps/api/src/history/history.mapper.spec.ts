@@ -1,8 +1,10 @@
 import {
+  byRequestedAt,
   toAnonymousEntry,
   toHistoryEntry,
   toNamedEntry,
   type HistoryLoanRow,
+  type NamedHistoryLoanRow,
 } from './history.mapper'
 
 /**
@@ -18,10 +20,11 @@ const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
 
 const NOW = new Date('2026-06-15T12:00:00.000Z')
 
-function loanRow(overrides: Partial<HistoryLoanRow> = {}): HistoryLoanRow {
+function loanRow(overrides: Partial<NamedHistoryLoanRow> = {}): NamedHistoryLoanRow {
   return {
     id: 'loan-1',
     status: 'RETURNED',
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
     requestedAt: new Date('2026-06-01T10:00:00.000Z'),
     respondedAt: new Date('2026-06-02T10:00:00.000Z'),
     handedAt: new Date('2026-06-03T10:00:00.000Z'),
@@ -128,5 +131,46 @@ describe('toHistoryEntry', () => {
     expect(anonymous.status).toBe(named.status)
     expect(anonymous.requestedAt).toBe(named.requestedAt)
     expect(anonymous.dueAt).toBe(named.dueAt)
+  })
+})
+
+/**
+ * Stage 10 (T1, D4): гостьова позика не має зареєстрованого позичальника. До кроку 10f
+ * гостя не показує ніхто — навіть власник, — тож і `showNames = true` дає анонімний запис.
+ */
+describe('гостьова позика без зареєстрованого позичальника (Stage 10)', () => {
+  const guestLoan: HistoryLoanRow = { ...loanRow(), borrower: null }
+
+  it('showNames = true все одно дає анонімну проєкцію без ключів особи', () => {
+    const entry = toHistoryEntry(guestLoan, true, NOW)
+
+    expect(entry.names).toBe(false)
+
+    for (const key of IDENTIFYING_KEYS) {
+      expect(entry).not.toHaveProperty(key)
+    }
+  })
+
+  it('зареєстрований позичальник і showNames = true — як і раніше іменована', () => {
+    expect(toHistoryEntry(loanRow(), true, NOW).names).toBe(true)
+  })
+})
+
+describe('записана власником позика без requestedAt (Stage 10, T2)', () => {
+  it('requestedAt = null не вигадується і не ламає проєкцію', () => {
+    const entry = toHistoryEntry(loanRow({ requestedAt: null }), false, NOW)
+
+    expect(entry.requestedAt).toBeNull()
+  })
+
+  it('byRequestedAt падає назад на createdAt, коли запиту не було', () => {
+    const early = loanRow({
+      id: 'a',
+      requestedAt: null,
+      createdAt: new Date('2026-05-01T00:00:00Z'),
+    })
+    const late = loanRow({ id: 'b', requestedAt: new Date('2026-06-01T00:00:00Z') })
+
+    expect(byRequestedAt(early, late)).toBeLessThan(0)
   })
 })

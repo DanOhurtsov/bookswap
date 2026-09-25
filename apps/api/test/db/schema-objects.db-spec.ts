@@ -178,8 +178,13 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
       ORDER BY conname
     `
 
-    expect(rows.map((row) => row.conname)).toEqual(['loan_borrower_not_owner'])
-    expect(rows[0]?.definition).toMatch(/"borrowerId" <> "ownerId"/)
+    // Stage 10 (10a) додав два CHECK-и; `loan_borrower_not_owner` не змінено.
+    expect(rows.map((row) => row.conname)).toEqual([
+      'loan_borrower_kind_valid',
+      'loan_borrower_not_owner',
+      'loan_requested_has_request_time',
+    ])
+    expect(rows[1]?.definition).toMatch(/"borrowerId" <> "ownerId"/)
   })
 
   /**
@@ -201,6 +206,8 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
       'copy_available_is_home',
       'copy_away_is_lent_or_unavailable',
       'copy_lent_out_is_away',
+      // Stage 10 (10a, T1-a): тримач — користувач або контакт, не обидва.
+      'copy_single_holder',
     ])
 
     // 1. Вільна книжка завжди вдома.
@@ -214,7 +221,11 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[1]?.definition).not.toMatch(/RESERVED/)
 
     // 3. Зворотний бік: LENT_OUT означає, що книжка фізично в іншої людини.
-    expect(rows[2]?.definition).toMatch(/"currentHolderId" <> "ownerId"/)
+    //    Stage 10: «не вдома» = NOT(home), де home враховує NULL-тримача (COALESCE) і контакт.
+    expect(rows[2]?.definition).toMatch(/NOT/)
+    expect(rows[2]?.definition).toMatch(/COALESCE/)
+    expect(rows[2]?.definition).toMatch(/"heldByContactId" IS NULL/)
+    expect(rows[3]?.definition).toMatch(/"currentHolderId" IS NULL/)
   })
 
   it('blockedById має зовнішній ключ на User — від нього залежить право (§6.2)', async () => {

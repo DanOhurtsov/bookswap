@@ -91,6 +91,11 @@ export function resolveTransition(
     case 'RETURNED':
     case 'LOST':
       return REFUSE('STATE')
+    // Stage 10 (T3): статуси існують у схемі з кроку 10a, але переходи з них додасть
+    // крок 10e. Доти жоден рядок так не позначений, а request-flow дії з них неможливі.
+    case 'PENDING_CONFIRMATION':
+    case 'DECLINED':
+      return REFUSE('STATE')
   }
 }
 

@@ -68,6 +68,7 @@ export class NetworkInventory {
         id: true,
         ownerId: true,
         currentHolderId: true,
+        heldByContactId: true,
         editionId: true,
         status: true,
         visibility: true,

@@ -160,3 +160,17 @@ describe('historyCopySchema', () => {
     expect(JSON.stringify(response)).not.toContain('user-marta')
   })
 })
+
+describe('requestedAt (Stage 10, T2)', () => {
+  it('допускає null для записаних власником позик — запиту не було', () => {
+    expect(
+      historyEntrySchema.parse({ ...facts, requestedAt: null, names: false }).requestedAt,
+    ).toBeNull()
+  })
+
+  it('усе ще відхиляє некоректну дату', () => {
+    expect(
+      historyEntrySchema.safeParse({ ...facts, requestedAt: '2026-06-01', names: false }).success,
+    ).toBe(false)
+  })
+})

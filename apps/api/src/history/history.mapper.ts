@@ -30,10 +30,30 @@ import type { CopyModel, LoanModel } from '../generated/prisma/models'
 
 export type HistoryLoanRow = Pick<
   LoanModel,
-  'id' | 'status' | 'requestedAt' | 'respondedAt' | 'handedAt' | 'returnedAt' | 'dueAt'
+  | 'id'
+  | 'status'
+  | 'createdAt'
+  | 'requestedAt'
+  | 'respondedAt'
+  | 'handedAt'
+  | 'returnedAt'
+  | 'dueAt'
 > & {
   owner: PublicUserRow
-  borrower: PublicUserRow
+  /**
+   * Stage 10 (T1): `null` для гостьової позики. Гостя бачить лише власник і лише з кроку 10f
+   * (D4); до того — і тут, і для всіх — запис анонімний.
+   */
+  borrower: PublicUserRow | null
+}
+
+/** Позика із зареєстрованим позичальником — єдина, що має іменовану проєкцію до кроку 10f. */
+export type NamedHistoryLoanRow = HistoryLoanRow & { borrower: PublicUserRow }
+
+export function hasRegisteredBorrower<T extends HistoryLoanRow>(
+  loan: T,
+): loan is T & NamedHistoryLoanRow {
+  return loan.borrower !== null
 }
 
 export type HistoryCopyRow = Pick<CopyModel, 'id' | 'status' | 'condition'> & {
@@ -48,7 +68,7 @@ function factsOf(
   return {
     status: loan.status,
     isOverdue: isOverdue(loan, now),
-    requestedAt: loan.requestedAt.toISOString(),
+    requestedAt: loan.requestedAt?.toISOString() ?? null,
     respondedAt: loan.respondedAt?.toISOString() ?? null,
     handedAt: loan.handedAt?.toISOString() ?? null,
     returnedAt: loan.returnedAt?.toISOString() ?? null,
@@ -57,7 +77,7 @@ function factsOf(
 }
 
 /** §6.6: власнику завжди, другові — за `showHolderNames`. */
-export function toNamedEntry(loan: HistoryLoanRow, now: Date = new Date()): NamedHistoryEntry {
+export function toNamedEntry(loan: NamedHistoryLoanRow, now: Date = new Date()): NamedHistoryEntry {
   return {
     ...factsOf(loan, now),
     names: true,
@@ -83,7 +103,9 @@ export function toHistoryEntry(
   showNames: boolean,
   now: Date = new Date(),
 ): HistoryEntry {
-  return showNames ? toNamedEntry(loan, now) : toAnonymousEntry(loan, now)
+  return showNames && hasRegisteredBorrower(loan)
+    ? toNamedEntry(loan, now)
+    : toAnonymousEntry(loan, now)
 }
 
 /**
@@ -107,5 +129,8 @@ export function toHistoryCopy(copy: HistoryCopyRow): HistoryCopy {
 
 /** Хронологія §6.6: від найдавнішого запиту до найновішого. */
 export function byRequestedAt(one: HistoryLoanRow, other: HistoryLoanRow): number {
-  return one.requestedAt.getTime() - other.requestedAt.getTime() || one.id.localeCompare(other.id)
+  return (
+    (one.requestedAt ?? one.createdAt).getTime() -
+      (other.requestedAt ?? other.createdAt).getTime() || one.id.localeCompare(other.id)
+  )
 }

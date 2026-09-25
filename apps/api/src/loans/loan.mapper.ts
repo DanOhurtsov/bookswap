@@ -25,19 +25,47 @@ export type LoanCopyRow = Pick<CopyModel, 'id' | 'status' | 'condition'> & {
 
 export type LoanRow = Pick<
   LoanModel,
-  | 'id'
-  | 'status'
-  | 'message'
-  | 'responseNote'
-  | 'requestedAt'
-  | 'respondedAt'
-  | 'handedAt'
-  | 'returnedAt'
-  | 'dueAt'
+  'id' | 'status' | 'message' | 'responseNote' | 'respondedAt' | 'handedAt' | 'returnedAt' | 'dueAt'
 > & {
+  requestedAt: Date
   copy: LoanCopyRow
   owner: PublicUserRow
   borrower: PublicUserRow
+}
+
+/**
+ * Stage 10 (T1, T2): `borrower` і `requestedAt` у БД nullable — гостьові й записані власником
+ * позики не мають ні зареєстрованого позичальника, ні запиту. Цей API віддає лише позики
+ * request-flow; решта отримає власні контракти в кроках 10e/10f.
+ */
+export type StoredLoanRow = Pick<
+  LoanModel,
+  'requestedAt' | 'borrowerId' | 'origin' | 'borrowerKind'
+> & {
+  borrower: PublicUserRow | null
+}
+
+export type RequestFlowLoan<T extends StoredLoanRow> = Omit<
+  T,
+  'requestedAt' | 'borrower' | 'borrowerId'
+> & { requestedAt: Date; borrower: PublicUserRow; borrowerId: string }
+
+/**
+ * `null` — позика не з request-flow (гостьова чи записана власником): вона не
+ * представляється в `LoanResponse`, тож для цього API її «не існує».
+ */
+export function asRequestFlowLoan<T extends StoredLoanRow>(row: T): RequestFlowLoan<T> | null {
+  // Межа визначається походженням і видом позичальника, а не лише «випадковою» ненульовістю полів:
+  // записана власником позика із зареєстрованим позичальником теж має `requestedAt` (дефолт БД).
+  if (row.origin !== 'REQUESTED' || row.borrowerKind !== 'REGISTERED') return null
+  if (row.borrower === null || row.borrowerId === null || row.requestedAt === null) return null
+
+  return {
+    ...row,
+    borrower: row.borrower,
+    borrowerId: row.borrowerId,
+    requestedAt: row.requestedAt,
+  }
 }
 
 /**

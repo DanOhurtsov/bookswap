@@ -19,6 +19,10 @@ export const LOAN_STATUS = [
   'HANDED_OVER',
   'RETURNED',
   'LOST',
+  // Stage 10 (docs/plan/stage-10-real-world-history.md, T3). Значення є в схемі з кроку 10a,
+  // але в даних зʼявляться лише з кроку 10e: до того їх ніхто не створює.
+  'PENDING_CONFIRMATION',
+  'DECLINED',
 ] as const
 
 export const loanStatusSchema = z.enum(LOAN_STATUS)
@@ -87,3 +91,37 @@ export const LOAN_ROLES = ['owner', 'borrower'] as const
 export const loanRoleSchema = z.enum(LOAN_ROLES)
 
 export type LoanRole = z.infer<typeof loanRoleSchema>
+
+/**
+ * Stage 10 (T1): чи позичальник — зареєстрований користувач, чи гість-контакт (D1).
+ * Дзеркало Prisma-enum; розсинхрон ловить `enum-parity.spec.ts`.
+ */
+export const BORROWER_KIND = ['REGISTERED', 'GUEST'] as const
+
+export const borrowerKindSchema = z.enum(BORROWER_KIND)
+
+export type BorrowerKind = z.infer<typeof borrowerKindSchema>
+
+/** Stage 10 (T1): звідки взявся `Loan` — запит, записана власником наявна позика чи гостьова. */
+export const LOAN_ORIGIN = ['REQUESTED', 'RECORDED_EXISTING', 'RECORDED_GUEST'] as const
+
+export const loanOriginSchema = z.enum(LOAN_ORIGIN)
+
+export type LoanOrigin = z.infer<typeof loanOriginSchema>
+
+/** Stage 10 (T4): типи подій audit trail. Значення `LINK_*` додасть крок 10i. */
+export const LOAN_EVENT_TYPE = [
+  'RECORD_PROPOSED',
+  'RECORD_AMENDED',
+  'RECORD_CONFIRMED',
+  'RECORD_DECLINED',
+  'RECORD_WITHDRAWN',
+  'GUEST_LOAN_RECORDED',
+  'LOAN_RETURNED',
+  'LOAN_LOST',
+  'RECOVERED',
+] as const
+
+export const loanEventTypeSchema = z.enum(LOAN_EVENT_TYPE)
+
+export type LoanEventType = z.infer<typeof loanEventTypeSchema>

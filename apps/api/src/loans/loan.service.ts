@@ -19,7 +19,14 @@ import { isUniqueViolationOn } from '../common/prisma-errors'
 import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
-import { toDueDate, toLoan, type LoanRow } from './loan.mapper'
+import {
+  asRequestFlowLoan,
+  toDueDate,
+  toLoan,
+  type LoanRow,
+  type StoredLoanRow,
+  type RequestFlowLoan,
+} from './loan.mapper'
 import {
   resolveTransition,
   type LoanActor,
@@ -50,6 +57,21 @@ const WITH_CONTEXT = {
   owner: { select: PUBLIC_USER_FIELDS },
   borrower: { select: PUBLIC_USER_FIELDS },
 } as const
+
+/**
+ * Stage 10 (T1): цей сервіс веде лише позики request-flow. Гостьові й записані власником
+ * (`origin ≠ REQUESTED`) отримають власні шляхи в кроках 10e/10f, а тут не з'являються.
+ */
+const REQUEST_FLOW = { origin: 'REQUESTED', borrowerKind: 'REGISTERED' } as const
+
+function requireRequestFlow<T extends StoredLoanRow>(row: T): RequestFlowLoan<T> {
+  const flow = asRequestFlowLoan(row)
+
+  if (flow === null)
+    throw new Error('Очікувалась позика request-flow із зареєстрованим позичальником')
+
+  return flow
+}
 
 /** Рядок, який повертає локувальний запит. Одне поле — більше й не треба. */
 interface CopyLockRow {
@@ -113,14 +135,18 @@ export class LoanService {
     if (filters.role !== 'owner') sides.push({ borrowerId: userId })
 
     const rows = await this.prisma.loan.findMany({
-      where: { OR: sides, ...(filters.status === undefined ? {} : { status: filters.status }) },
+      where: {
+        OR: sides,
+        ...REQUEST_FLOW,
+        ...(filters.status === undefined ? {} : { status: filters.status }),
+      },
       include: WITH_CONTEXT,
       orderBy: { requestedAt: 'desc' },
     })
 
     const now = new Date()
 
-    return { loans: rows.map((row) => toLoan(row, now)) }
+    return { loans: rows.map((row) => toLoan(requireRequestFlow(row), now)) }
   }
 
   /**
@@ -130,7 +156,11 @@ export class LoanService {
    * Той самий вибір, що в `PATCH /friends/requests/:id`.
    */
   async get(userId: string, loanId: string): Promise<LoanResponse> {
-    const loan = await this.prisma.loan.findUnique({ where: { id: loanId }, include: WITH_CONTEXT })
+    const stored = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: WITH_CONTEXT,
+    })
+    const loan = stored === null ? null : asRequestFlowLoan(stored)
 
     if (loan === null || !isParticipant(loan, userId)) throw notFound('Позичання не знайдено')
 
@@ -243,7 +273,7 @@ export class LoanService {
         tx,
       )
 
-      return created
+      return requireRequestFlow(created)
     })
 
     this.logger.log(`Лоан ${loan.id}: — → REQUESTED, актор ${borrowerId}`)
@@ -255,7 +285,7 @@ export class LoanService {
 
     await this.analytics.record({
       type: 'LOAN_REQUESTED',
-      subjectUserId: loan.borrowerId,
+      subjectUserId: borrowerId,
       domainEntityId: loan.id,
       properties: {},
     })
@@ -343,6 +373,7 @@ export class LoanService {
         FROM "Loan" l
         JOIN "Copy" c ON c."id" = l."copyId"
         WHERE l."id" = ${loanId}
+          AND l."origin" = 'REQUESTED' AND l."borrowerKind" = 'REGISTERED'
           AND (l."ownerId" = ${actorId} OR l."borrowerId" = ${actorId})
         FOR UPDATE OF c
       `
@@ -356,8 +387,9 @@ export class LoanService {
       //    рядок `Loan` лишився б зі снапшоту, взятого до очікування на локу. Тоді
       //    той, хто програв гонку апруву, побачив би свій лоан ще `REQUESTED` і
       //    спробував би апрувнути вже відхилений запит.
-      const loan = await tx.loan.findUnique({ where: { id: loanId }, include: WITH_CONTEXT })
+      const stored = await tx.loan.findUnique({ where: { id: loanId }, include: WITH_CONTEXT })
       const copy = await tx.copy.findUnique({ where: { id: locked.copyId } })
+      const loan = stored === null ? null : asRequestFlowLoan(stored)
 
       if (loan === null || copy === null) throw notFound('Позичання не знайдено')
 
@@ -436,10 +468,9 @@ export class LoanService {
         )
       }
 
-      const after = await tx.loan.findUniqueOrThrow({
-        where: { id: loan.id },
-        include: WITH_CONTEXT,
-      })
+      const after = requireRequestFlow(
+        await tx.loan.findUniqueOrThrow({ where: { id: loan.id }, include: WITH_CONTEXT }),
+      )
 
       return { loan: after, from: loan.status, to: outcome.to, rejectedRivalIds }
     })
@@ -487,6 +518,12 @@ export class LoanService {
     }
 
     for (const rival of rejected) {
+      // `REQUESTED` існує лише в request-flow, де позичальник зареєстрований (`borrowerKind`
+      // = REGISTERED ⇒ `borrowerId` NOT NULL, CHECK `loan_borrower_kind_valid`).
+      if (rival.borrowerId === null) {
+        throw new Error(`Лоан ${rival.id}: REQUESTED без зареєстрованого позичальника`)
+      }
+
       await this.notifications.create(
         {
           userId: rival.borrowerId,
