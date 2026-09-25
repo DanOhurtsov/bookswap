@@ -18,6 +18,12 @@ describe('externalSearchCacheKey', () => {
     )
   })
 
+  it('складає ключ із полів, розділених символом NUL', () => {
+    expect(externalSearchCacheKey('OPEN_LIBRARY', 'Тигролови', 2, 10)).toBe(
+      ['OPEN_LIBRARY', '10', '2', 'тигролови'].join(String.fromCharCode(0)),
+    )
+  })
+
   it('розрізняє джерела', () => {
     expect(externalSearchCacheKey('OPEN_LIBRARY', 'тигролови', 0, 10)).not.toBe(
       externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 10),
