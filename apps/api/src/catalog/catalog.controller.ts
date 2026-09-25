@@ -14,6 +14,7 @@ import {
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import type {
   ApiError,
+  CatalogDiscoveryResponse,
   CatalogSearchResponse,
   EditionDetailResponse,
   EditionPatchResponse,
@@ -30,9 +31,11 @@ import { CATALOG_WRITE_RATE_LIMIT, CATALOG_WRITE_RATE_WINDOW_MS } from '../commo
 import { CanonicalWorkService } from './canonical/canonical-work.service'
 import { redirectToCanonicalWork } from './canonical/work-redirect'
 import { CatalogService } from './catalog.service'
+import { CatalogDiscoveryService } from './search/catalog-discovery.service'
 import { PatchEditionDto, PatchTranslationDto, PatchWorkDto } from './dto/catalog-correction.dto'
 import {
   CatalogSearchDto,
+  CatalogDiscoveryDto,
   CreateEditionDto,
   CreateTranslationDto,
   CreateWorkDto,
@@ -62,13 +65,25 @@ export class CatalogController {
   constructor(
     private readonly catalog: CatalogService,
     private readonly canonical: CanonicalWorkService,
+    private readonly discovery: CatalogDiscoveryService,
   ) {}
+
+  /** Physical copies visible to the viewer, with an explicit wider public scope. */
+  @Get('catalog/discover')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(CATALOG_SEARCH_LIMIT)
+  discover(
+    @CurrentUser() user: UserModel,
+    @Query() dto: CatalogDiscoveryDto,
+  ): Promise<CatalogDiscoveryResponse> {
+    return this.discovery.search(user.id, dto.q, dto.page, dto.pageSize, dto.scope)
+  }
 
   @Get('catalog/search')
   @UseGuards(ThrottlerGuard)
   @Throttle(CATALOG_SEARCH_LIMIT)
   search(@Query() dto: CatalogSearchDto): Promise<CatalogSearchResponse> {
-    return this.catalog.search(dto.q)
+    return this.catalog.search(dto.q, dto.page, dto.pageSize)
   }
 
   /**

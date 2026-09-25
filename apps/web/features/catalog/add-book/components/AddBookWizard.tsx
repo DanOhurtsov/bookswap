@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { workDetailResponseSchema } from '@bookswap/shared'
 import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
+import { readSearchAddress, searchHref, type SearchAddress } from '@/app/lib/search-page'
 import { useSession } from '@/app/lib/use-session'
 import { FormStatus } from '@/components/Form/FormStatus'
 import {
@@ -19,6 +20,7 @@ import {
   type AddBookStep,
 } from '../model/add-book-step'
 import { readAddBookEntryMode } from '../model/add-book-entry-mode'
+import { useExternalSelectionHandoff } from '../model/external-handoff'
 import { DEFAULT_COPY_DEFAULTS, type CopyDefaults } from '../model/copy-defaults'
 import { AddBookShell } from './AddBookShell'
 import { AddBookSuccess } from './AddBookSuccess'
@@ -39,8 +41,19 @@ export function AddBookWizard() {
   const parameters = useSearchParams()
   const { state: session } = useSession()
   const presetWorkId = parameters.get('workId')
-  const initialQuery = parameters.get('q') ?? ''
+  // The search — query, page, page size — lives in the address, as on `/catalog`:
+  // a direct link, Back/Forward and a reload restore the list. Everything else in
+  // the address (`mode`, `workId`, `external`) is the wizard's own and is carried
+  // along untouched.
+  const address = readSearchAddress(parameters)
+  const initialQuery = address.q
   const entryMode = readAddBookEntryMode(parameters.get('mode'))
+  // `/catalog` names the handover in the URL; the record itself travels in
+  // session storage and is resumed only when both the token and the query it
+  // was chosen under match — see `useExternalSelectionHandoff`.
+  const externalToken = parameters.get('external')
+
+  const externalSelection = useExternalSelectionHandoff(externalToken, initialQuery)
 
   const [step, setStep] = useState<AddBookStep>(createSearchStep)
   const [copyDefaults, setCopyDefaults] = useState<CopyDefaults>(DEFAULT_COPY_DEFAULTS)
@@ -49,6 +62,19 @@ export function AddBookWizard() {
   useEffect(() => {
     if (session.status === 'guest') router.replace('/login')
   }, [session.status, router])
+
+  // `page`/`pageSize` written as something they are not: show page 1 of the
+  // default size and correct the address (`replace`, so Back never returns to the
+  // malformed one).
+  const searchAddressValid = address.valid
+
+  useEffect(() => {
+    if (!searchAddressValid && initialQuery !== '') {
+      router.replace(
+        searchHref('/catalog/new', parameters, { q: initialQuery, page: 1, pageSize: 10 }),
+      )
+    }
+  }, [searchAddressValid, initialQuery, parameters, router])
 
   // Прихід зі сторінки твору: метадані вже є, лишається доповнити їх виданням.
   useEffect(() => {
@@ -106,8 +132,29 @@ export function AddBookWizard() {
 
       {step.kind === 'search' && (
         <SearchStep
-          key={`${entryMode}:${initialQuery}`}
-          initialQuery={initialQuery}
+          key={entryMode}
+          address={address}
+          // A new QUERY drops the `external` handover: its token is bound to the
+          // query it was chosen under. Paging within a query keeps it.
+          hrefFor={(target) =>
+            searchHref(
+              '/catalog/new',
+              parameters,
+              target,
+              target.q === address.q ? [] : ['external'],
+            )
+          }
+          onNavigate={(target: SearchAddress) => {
+            router.push(
+              searchHref(
+                '/catalog/new',
+                parameters,
+                target,
+                target.q === address.q ? [] : ['external'],
+              ),
+            )
+          }}
+          initialExternalSelection={externalSelection}
           onFoundEdition={(selection) => {
             setStep(selectExistingEdition(selection))
           }}
@@ -124,6 +171,7 @@ export function AddBookWizard() {
         <WorkStep
           initialTitle={step.initialTitle}
           lookup={step.lookup}
+          firstPubYear={step.firstPubYear}
           onCreated={(workId, title) => {
             setStep(continueAfterWork(step, { workId, title }))
           }}

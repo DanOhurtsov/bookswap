@@ -379,6 +379,34 @@ button:not([data-ui='button']):disabled {
   flex: 1 1 16rem;
 }
 
+/* --- Сторінки результатів --------------------------------------------------
+   Кількості сторінок тут немає навмисно: зовнішні джерела її чесно не
+   повідомляють (`docs/plan/stage-9-search-pagination.md`). */
+.search-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+}
+
+.search-pagination nav {
+  width: auto;
+  margin: 0;
+}
+
+.search-pagination__size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--bookswap-muted);
+}
+
+.search-pagination__size select {
+  width: auto;
+}
+
 /* --- Підтвердження -------------------------------------------------------- */
 .dialog {
   max-width: 28rem;
@@ -450,6 +478,24 @@ button:not([data-ui='button']):disabled {
   background: var(--field-bg);
 }
 
+/* Заглушка для книжки без обкладинки. Та сама клітинка, ті самі розміри й
+   заокруглення, що й у справжньої обкладинки, — рядок не має стрибати через те,
+   що джерело не знало посилання. Тому це не «порожнє місце», а помітно
+   нейтральний прямокутник з іконкою: відсутність обкладинки має читатися як
+   відсутність, а не як зламане зображення. */
+.lookup-card__cover--empty {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--bookswap-muted);
+}
+
+.lookup-card__cover--empty svg {
+  width: 1.75rem;
+  height: 1.75rem;
+  stroke-width: 1.25;
+}
+
 .lookup-card__content {
   display: grid;
   align-content: start;
@@ -467,6 +513,20 @@ button:not([data-ui='button']):disabled {
   display: grid;
   gap: 0.35rem;
   border-left: 2px solid var(--line);
+}
+
+/*
+ * Рядок видання — власна сітка, а не рядок тексту з кнопкою всередині.
+ *
+ * Без цього `<span>` і `<button>` лежать в одному інлайновому контексті: коли
+ * опис видання переноситься на другий рядок, кнопка зі своїми відступами
+ * налазить на текст попереднього. Видно це лише на довгих описах (видавництво,
+ * рік, мова, формат, сторінки, перекладач, ISBN), тому й трималося непоміченим.
+ */
+.book__editions > li {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
 }
 
 .copy {

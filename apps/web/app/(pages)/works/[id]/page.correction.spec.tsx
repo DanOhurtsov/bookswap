@@ -603,7 +603,14 @@ it('пошук автора: мережева помилка показує erro
   }
 
   mockApiRequest.mockImplementationOnce(() =>
-    Promise.resolve<CatalogSearchResponse>({ results: [], authorMatches: [found] }),
+    Promise.resolve<CatalogSearchResponse>({
+      results: [],
+      authorMatches: [found],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      hasMore: false,
+    }),
   )
 
   await user.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
@@ -635,7 +642,14 @@ it('вибір наявного автора з пошуку: PATCH несе aut
   }
 
   mockApiRequest.mockImplementationOnce(() =>
-    Promise.resolve<CatalogSearchResponse>({ results: [], authorMatches: [found] }),
+    Promise.resolve<CatalogSearchResponse>({
+      results: [],
+      authorMatches: [found],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      hasMore: false,
+    }),
   )
 
   const searchButtons = screen.getAllByRole('button', { name: 'Чи є такий уже в каталозі?' })

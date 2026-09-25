@@ -3,22 +3,20 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { catalogSearchRequestSchema, type CatalogSearchResult } from '@bookswap/shared'
-import { AuthorLine, EditionLine } from '@/components/BookParts'
+import {
+  DEFAULT_SEARCH_PAGE_SIZE,
+  SEARCH_MAX_PAGE,
+  catalogQuerySchema,
+  type CatalogDiscoveryScope,
+} from '@bookswap/shared'
+import { readSearchAddress, searchHref, type SearchAddress } from '@/app/lib/search-page'
+import { useCatalogDiscovery } from '@/app/lib/use-catalog'
 import { useSession } from '@/app/lib/use-session'
 import { FieldErrors, validate } from '@/app/lib/validation'
-import { useCatalogSearch } from '@/app/lib/use-catalog'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { TextField } from '@/components/Form/FormFields'
+import { LocalResultCard, SearchPagination } from '@/features/catalog/add-book/index.client'
 
-/**
- * §6.3, кроки 1–2: людина вводить назву або ISBN і бачить «Можливо, це одна з
- * цих?» — разом із виданнями, бо саме на них вона впізнає своє.
- *
- * Це найважливіший екран сервісу: він прибирає більшість дублікатів ще до їхньої
- * появи. Тому кнопка «Створити новий твір» стоїть ПІД результатами, а не поруч
- * із пошуком — спершу подивись, чи його вже завели.
- */
 export default function CatalogPage() {
   return (
     <Suspense
@@ -28,7 +26,7 @@ export default function CatalogPage() {
         </Shell>
       }
     >
-      <CatalogSearch />
+      <CatalogDiscovery />
     </Suspense>
   )
 }
@@ -36,49 +34,79 @@ export default function CatalogPage() {
 function Shell({ children }: { children: ReactNode }) {
   return (
     <main className="page">
-      <h1>Каталог</h1>
+      <h1>Каталог друзів</h1>
       {children}
     </main>
   )
 }
 
-function CatalogSearch() {
+const MATCH_LABELS = {
+  TITLE: 'збіг за назвою',
+  AUTHOR: 'збіг за автором',
+  ISBN: 'точний збіг за ISBN',
+} as const
+
+function CatalogDiscovery() {
   const router = useRouter()
   const parameters = useSearchParams()
   const { state: session } = useSession()
-
-  // Запит живе в URL: посилання на пошук можна надіслати, і кнопка «назад»
-  // працює так, як людина очікує.
-  const submitted = parameters.get('q') ?? ''
+  const address = readSearchAddress(parameters)
+  const { q: submitted, page, pageSize } = address
+  const rawScope = parameters.get('scope')
+  const scope: CatalogDiscoveryScope = rawScope === 'ALL' ? 'ALL' : 'CIRCLE'
+  const scopeValid = rawScope === null || rawScope === 'CIRCLE' || rawScope === 'ALL'
   const [query, setQuery] = useState(submitted)
   const [syncedWith, setSyncedWith] = useState(submitted)
+  const [refresh, setRefresh] = useState(0)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const search = useCatalogSearch(submitted)
+  const search = useCatalogDiscovery(submitted, page, pageSize, scope, refresh)
+
+  function hrefFor(target: SearchAddress, targetScope = scope): string {
+    const base = searchHref('/catalog', parameters, target, ['scope'])
+    return targetScope === 'ALL' ? `${base}&scope=ALL` : base
+  }
 
   useEffect(() => {
     if (session.status === 'guest') router.replace('/login')
   }, [session.status, router])
 
-  // Кнопка «назад» міняє `?q=` — поле має піти за нею. Підлаштування стану під
-  // час рендеру, а не в ефекті: ефект дав би зайвий прохід рендеру з розʼїханими
-  // полем і адресою, і React цього прямо не радить.
   if (submitted !== syncedWith) {
     setSyncedWith(submitted)
     setQuery(submitted)
   }
 
+  useEffect(() => {
+    if ((!address.valid || !scopeValid) && submitted !== '') {
+      const base = searchHref(
+        '/catalog',
+        parameters,
+        {
+          q: submitted,
+          page: 1,
+          pageSize: DEFAULT_SEARCH_PAGE_SIZE,
+        },
+        ['scope'],
+      )
+      router.replace(scopeValid && scope === 'ALL' ? `${base}&scope=ALL` : base)
+    }
+  }, [address.valid, scopeValid, scope, submitted, parameters, router])
+
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
+    const parsed = validate(catalogQuerySchema, { q: query })
 
-    const result = validate(catalogSearchRequestSchema, { q: query })
-
-    if (!result.ok) {
-      setErrors(result.errors)
+    if (!parsed.ok) {
+      setErrors(parsed.errors)
       return
     }
 
     setErrors({})
-    router.push(`/catalog?q=${encodeURIComponent(result.data.q)}`)
+
+    if (parsed.data.q === submitted && page === 1) {
+      setRefresh((current) => current + 1)
+    } else {
+      router.push(hrefFor({ q: parsed.data.q, page: 1, pageSize }))
+    }
   }
 
   if (session.status === 'loading') {
@@ -97,11 +125,11 @@ function CatalogSearch() {
     )
   }
 
+  const response = search.status === 'ready' ? search.response : undefined
+
   return (
     <Shell>
-      <p className="lede">
-        Спершу пошукайте книжку тут: якщо її вже завели, вам лишиться додати собі примірник.
-      </p>
+      <p className="lede">Шукайте фізичні книжки, які зараз є вдома у вас або друзів.</p>
 
       <form className="search" onSubmit={submit} noValidate>
         <TextField
@@ -109,7 +137,7 @@ function CatalogSearch() {
           label="Назва, автор або ISBN"
           name="q"
           autoComplete="off"
-          hint="Мінімум два символи. Друкарська помилка пошуку не завадить."
+          hint="Мінімум два символи. Пошук тільки серед доступних примірників користувачів BookSwap."
           value={query}
           error={errors.q ?? errors.form}
           onChange={(event) => {
@@ -119,70 +147,76 @@ function CatalogSearch() {
         <button type="submit">Знайти</button>
       </form>
 
+      <label className="search-pagination__size">
+        Показувати книжки
+        <select
+          value={scope}
+          onChange={(event) => {
+            const nextScope = event.target.value === 'ALL' ? 'ALL' : 'CIRCLE'
+            router.push(hrefFor({ q: submitted, page: 1, pageSize }, nextScope))
+          }}
+        >
+          <option value="CIRCLE">Мої та друзів</option>
+          <option value="ALL">Усіх користувачів</option>
+        </select>
+      </label>
+
+      {scope === 'ALL' && (
+        <p className="form__aside">
+          Книжки інших користувачів видно, якщо їхня бібліотека публічна. Позичати можна після
+          додавання власника в друзі.
+        </p>
+      )}
+
+      {search.status === 'idle' && <p className="empty">Уведіть щонайменше два символи.</p>}
       {search.status === 'loading' && <p className="status status--pending">Шукаю…</p>}
       {search.status === 'error' && <FormStatus error={new Error(search.message)} />}
 
-      {search.status === 'idle' && (
-        <p className="empty">Уведіть щонайменше два символи — і побачите, що вже є в базі.</p>
+      {response !== undefined && response.results.length > 0 && (
+        <ul className="books">
+          {response.results.map((result) => (
+            <LocalResultCard
+              key={result.work.id}
+              candidate={result}
+              href={`/works/${result.work.id}`}
+              note={MATCH_LABELS[result.matchedOn]}
+              locations={result.locations}
+            />
+          ))}
+        </ul>
       )}
 
-      {search.status === 'ready' && (
-        <>
-          {search.response.results.length === 0 ? (
-            <p className="empty">
-              Нічого схожого не знайшлося. Схоже, цього твору в базі ще немає — заведіть його.
-            </p>
-          ) : (
-            <ul className="books">
-              {search.response.results.map((result) => (
-                <WorkCard key={result.work.id} result={result} />
-              ))}
-            </ul>
-          )}
-
-          <p className="form__aside">
-            Не знайшли своє?{' '}
-            <Link href={`/catalog/new?q=${encodeURIComponent(submitted)}`}>
-              Додати книжку вручну
-            </Link>
-          </p>
-        </>
+      {response !== undefined && response.results.length === 0 && (
+        <p className="empty">
+          {page > 1
+            ? 'На цій сторінці книжок немає.'
+            : scope === 'CIRCLE'
+              ? 'Серед ваших книжок і книжок друзів доступних примірників не знайшлося.'
+              : 'Серед доступних користувачам примірників нічого не знайшлося.'}
+        </p>
       )}
 
+      {search.status !== 'idle' && (
+        <SearchPagination
+          page={page}
+          pageSize={pageSize}
+          next={response?.hasMore === true && page < SEARCH_MAX_PAGE ? 'PROVEN' : 'NONE'}
+          currentHasRows={(response?.results.length ?? 0) > 0}
+          hrefFor={(target) => hrefFor({ q: submitted, ...target })}
+          onPageSizeChange={(size) => {
+            router.push(hrefFor({ q: submitted, page: 1, pageSize: size }))
+          }}
+        />
+      )}
+
+      <p className="form__aside">
+        Не знайшли книжку?{' '}
+        <Link href={`/catalog/new?q=${encodeURIComponent(submitted)}`}>Додати свою книжку</Link>
+      </p>
       <p className="form__aside">
         <Link href="/library">Моя бібліотека</Link> · <Link href="/friends">Друзі</Link> ·{' '}
         <Link href="/">На головну</Link>
       </p>
     </Shell>
-  )
-}
-
-const MATCH_LABELS: Readonly<Record<CatalogSearchResult['matchedOn'], string>> = {
-  TITLE: 'збіг за назвою',
-  AUTHOR: 'збіг за автором',
-  ISBN: 'точний збіг за ISBN',
-}
-
-function WorkCard({ result }: { result: CatalogSearchResult }) {
-  return (
-    <li className="book">
-      <Link className="book__title" href={`/works/${result.work.id}`}>
-        {result.work.title}
-      </Link>
-      <AuthorLine authors={result.authors} />
-      <span className="book__meta">{MATCH_LABELS[result.matchedOn]}</span>
-
-      {result.editions.length === 0 ? (
-        <p className="empty">Видань ще не додано.</p>
-      ) : (
-        <ul className="book__editions">
-          {result.editions.map((edition) => (
-            <li key={edition.id}>
-              <EditionLine edition={edition} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </li>
   )
 }

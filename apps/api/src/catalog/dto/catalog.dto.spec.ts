@@ -207,6 +207,15 @@ describe('CatalogSearchDto ↔ catalogSearchRequestSchema', () => {
       { name: 'один символ', payload: { q: 'ш' }, valid: false },
       { name: 'самі пробіли', payload: { q: '   ' }, valid: false },
       { name: 'без параметра', payload: {}, valid: false },
+      { name: 'сторінка як рядок', payload: { q: 'шан', page: '3' }, valid: true },
+      { name: 'нульова сторінка', payload: { q: 'шан', page: '0' }, valid: false },
+      { name: 'сторінка глибше 20', payload: { q: 'шан', page: '21' }, valid: false },
+      { name: 'pageSize 10', payload: { q: 'шан', pageSize: '10' }, valid: true },
+      { name: 'pageSize 20', payload: { q: 'шан', pageSize: '20' }, valid: true },
+      { name: 'pageSize 50', payload: { q: 'шан', pageSize: '50' }, valid: true },
+      { name: 'pageSize 15', payload: { q: 'шан', pageSize: '15' }, valid: false },
+      { name: 'pageSize 100', payload: { q: 'шан', pageSize: '100' }, valid: false },
+      { name: 'pageSize не число', payload: { q: 'шан', pageSize: 'abc' }, valid: false },
     ])
   })
 })

@@ -5,6 +5,8 @@ import type { App } from 'supertest/types'
 import {
   API_ERROR_CODES,
   API_PREFIX,
+  DEFAULT_SEARCH_PAGE_SIZE,
+  SEARCH_MAX_PAGE,
   apiErrorSchema,
   catalogSearchResponseSchema,
   editionDetailResponseSchema,
@@ -92,9 +94,16 @@ describe('Каталог (e2e)', () => {
     return workDetailResponseSchema.parse(response.body)
   }
 
-  async function search(query: string): Promise<CatalogSearchResponse> {
+  async function search(
+    query: string,
+    page?: number,
+    pageSize?: number,
+  ): Promise<CatalogSearchResponse> {
+    const suffix =
+      (page === undefined ? '' : `&page=${String(page)}`) +
+      (pageSize === undefined ? '' : `&pageSize=${String(pageSize)}`)
     const response = await request(app.getHttpServer())
-      .get(url(`/catalog/search?q=${encodeURIComponent(query)}`))
+      .get(url(`/catalog/search?q=${encodeURIComponent(query)}${suffix}`))
       .set('Cookie', cookie)
       .expect(200)
 
@@ -741,7 +750,7 @@ describe('Каталог (e2e)', () => {
       expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
     })
 
-    it('віддає не більше 20 творів (§11)', async () => {
+    it('віддає не більше однієї сторінки творів (§11)', async () => {
       const token = marker()
 
       for (let index = 0; index < 22; index += 1) {
@@ -754,7 +763,192 @@ describe('Каталог (e2e)', () => {
 
       const results = await search(`Серія ${token} том`)
 
-      expect(results.results).toHaveLength(20)
+      expect(results.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
+      expect(results).toMatchObject({ page: 1, hasMore: true })
+    })
+  })
+
+  describe('GET /catalog/search — сторінки', () => {
+    /**
+     * `n` творів з одним маркером у назві — щоб запит знаходив саме їх, а не
+     * сусідній тест чи сид. ISBN дають кожному видання, бо на них тримається
+     * `knownIsbn13`.
+     */
+    async function series(count: number): Promise<{ token: string; ids: string[] }> {
+      const token = marker()
+      const ids: string[] = []
+
+      for (let index = 0; index < count; index += 1) {
+        const created = await createWork({
+          title: `Томик ${token} ${String(index).padStart(2, '0')}`,
+          origLang: 'uk',
+          authors: [{ name: `Автор ${token}` }],
+        })
+
+        await request(app.getHttpServer())
+          .post(url(`/works/${created.work.id}/editions`))
+          .set('Cookie', cookie)
+          .send({ publisher: 'КСД', year: 2019, isbn13: isbn() })
+          .expect(201)
+
+        ids.push(created.work.id)
+      }
+
+      return { token, ids }
+    }
+
+    /**
+     * Сторінки 1…N одного запиту.
+     *
+     * Гортаємо, поки сервер каже «є ще», з жорсткою межею: тести цього файлу
+     * ділять одну базу, і в збіги за маркером законно потрапляють сусідні
+     * тести. Саме тому перевірки нижче — про ІНВАРІАНТИ (нічого не задвоїлося,
+     * нічого не загубилося), а не про точний склад сторінки: чужі збіги його
+     * змінюють, а інваріанти — ні.
+     */
+    async function walk(
+      query: string,
+      pageSize?: number,
+      limit = SEARCH_MAX_PAGE,
+    ): Promise<CatalogSearchResponse[]> {
+      const pages: CatalogSearchResponse[] = []
+
+      for (let page = 1; page <= limit; page += 1) {
+        const response = await search(query, page, pageSize)
+        pages.push(response)
+
+        if (!response.hasMore) break
+      }
+
+      return pages
+    }
+
+    it('сторінки нарізають ранжування, не повторюючи й не гублячи творів', async () => {
+      const { token, ids } = await series(22)
+      const pages = await walk(`Томик ${token}`)
+
+      expect(pages.length).toBeGreaterThan(1)
+
+      const seen = pages.flatMap((page) => page.results.map((result) => result.work.id))
+
+      // Жоден твір не показався двічі…
+      expect(new Set(seen).size).toBe(seen.length)
+      // …і жоден із наших не зник між сторінками.
+      for (const id of ids) expect(seen).toContain(id)
+
+      // Повна сторінка скрізь, окрім останньої: інакше рядки губилися б на межі.
+      for (const page of pages.slice(0, -1)) {
+        expect(page.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
+        expect(page.hasMore).toBe(true)
+      }
+
+      expect(pages.at(-1)?.hasMore).toBe(false)
+    })
+
+    it('порядок відтворюваний: та сама сторінка двічі — той самий склад', async () => {
+      const { token } = await series(14)
+      const query = `Томик ${token}`
+
+      const [once, twice] = await Promise.all([search(query, 2), search(query, 2)])
+
+      // Тотальний порядок (`score, titleNorm, id`) — без нього рядок міг би
+      // перестрибнути між сторінками, зникнувши з однієї й задвоївшись на іншій.
+      expect(once.results.map((result) => result.work.id)).toEqual(
+        twice.results.map((result) => result.work.id),
+      )
+    })
+
+    it('total — точна кількість ВСІХ збігів, однакова на кожній сторінці', async () => {
+      const { token, ids } = await series(14)
+      const query = `Томик ${token}`
+
+      const first = await search(query, 1)
+      const second = await search(query, 2)
+
+      // Саме з `total` зовнішній ендпоінт рахує, скільки рядків сторінки наші:
+      // пряме посилання на сторінку 2 не бачило сторінки 1.
+      expect(first.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
+      expect(first.total).toBeGreaterThanOrEqual(ids.length)
+      expect(second.total).toBe(first.total)
+      expect(first.pageSize).toBe(DEFAULT_SEARCH_PAGE_SIZE)
+    })
+
+    it.each([10, 20, 50])(
+      'pageSize=%s — стільки карток на сторінці, без повторів між сторінками',
+      async (size) => {
+        const { token, ids } = await series(24)
+        const pages = await walk(`Томик ${token}`, size)
+        const seen = pages.flatMap((page) => page.results.map((result) => result.work.id))
+
+        expect(new Set(seen).size).toBe(seen.length)
+        for (const id of ids) expect(seen).toContain(id)
+
+        for (const page of pages.slice(0, -1)) {
+          expect(page.results).toHaveLength(size)
+          expect(page.pageSize).toBe(size)
+        }
+      },
+    )
+
+    it('локальна частина повністю в межах сторінки: hasMore — за total, а не за здогадом', async () => {
+      const { token } = await series(12)
+      const first = await search(`Томик ${token}`, 1, 10)
+      const all = await search(`Томик ${token}`, 1, 50)
+
+      expect(first.hasMore).toBe(first.total > 10)
+      expect(all.hasMore).toBe(all.total > 50)
+    })
+
+    it('недопустимий pageSize — 400, а не найближчий допустимий', async () => {
+      for (const pageSize of ['0', '5', '15', '100', 'abc']) {
+        const response = await request(app.getHttpServer())
+          .get(url(`/catalog/search?q=шантарам&pageSize=${pageSize}`))
+          .set('Cookie', cookie)
+          .expect(400)
+
+        expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
+      }
+    })
+
+    it('сторінка за межами збігів порожня, а не повторює останню', async () => {
+      const response = await search(`ніякогослова${String(process.pid)}зовсім`, 4)
+
+      expect(response.results).toEqual([])
+      expect(response).toMatchObject({ page: 4, hasMore: false })
+    })
+
+    it('поламаний номер сторінки — 400, а не мовчазна перша сторінка', async () => {
+      for (const page of ['0', '-2', 'abc', '999']) {
+        const response = await request(app.getHttpServer())
+          .get(url(`/catalog/search?q=шантарам&page=${page}`))
+          .set('Cookie', cookie)
+          .expect(400)
+
+        expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
+      }
+    })
+
+    it('точний збіг за ISBN не має другої сторінки', async () => {
+      const token = marker()
+      const created = await createWork({
+        title: `Єдиний ${token}`,
+        origLang: 'uk',
+        authors: [{ name: `Автор ${token}` }],
+      })
+      const number = isbn()
+
+      await request(app.getHttpServer())
+        .post(url(`/works/${created.work.id}/editions`))
+        .set('Cookie', cookie)
+        .send({ publisher: 'КСД', year: 2019, isbn13: number })
+        .expect(201)
+
+      const first = await search(number, 1)
+      const second = await search(number, 2)
+
+      expect(first.results).toHaveLength(1)
+      expect(first.hasMore).toBe(false)
+      expect(second.results).toEqual([])
     })
   })
 })

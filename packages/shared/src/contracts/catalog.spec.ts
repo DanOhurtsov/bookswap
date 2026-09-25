@@ -1,12 +1,17 @@
 import {
   CATALOG_LIMITS,
-  SEARCH_CANDIDATES_LIMIT,
+  DEFAULT_SEARCH_PAGE_SIZE,
+  SEARCH_MAX_PAGE,
+  SEARCH_PAGE_SIZES,
   catalogSearchRequestSchema,
+  catalogSearchResponseSchema,
+  searchCandidatesRequestSchema,
   createEditionRequestSchema,
   createTranslationRequestSchema,
   createWorkRequestSchema,
   editionSchema,
   searchCandidatesResponseSchema,
+  splitSearchPage,
   translationSchema,
 } from './catalog'
 
@@ -127,6 +132,150 @@ describe('catalogSearchRequestSchema', () => {
     expect(catalogSearchRequestSchema.safeParse({ q: 'ш' }).success).toBe(false)
     expect(catalogSearchRequestSchema.parse({ q: '  шан  ' }).q).toBe('шан')
   })
+
+  it('адреса без page — це перша сторінка, а не помилка', () => {
+    expect(catalogSearchRequestSchema.parse({ q: 'шан' }).page).toBe(1)
+  })
+
+  it('читає номер сторінки з рядка адреси', () => {
+    expect(catalogSearchRequestSchema.parse({ q: 'шан', page: '3' }).page).toBe(3)
+  })
+
+  it('поламаний номер сторінки відхиляється, а не округлюється до першої', () => {
+    // Мовчки віддати іншу сторінку, ніж називає адреса, означало б, що «назад»
+    // веде людину туди, де вона не була.
+    for (const page of ['0', '-1', 'abc', '2.5', String(SEARCH_MAX_PAGE + 1)]) {
+      expect(catalogSearchRequestSchema.safeParse({ q: 'шан', page }).success).toBe(false)
+    }
+  })
+})
+
+describe('pageSize', () => {
+  it('без pageSize — типові 10', () => {
+    expect(catalogSearchRequestSchema.parse({ q: 'шан' }).pageSize).toBe(DEFAULT_SEARCH_PAGE_SIZE)
+  })
+
+  it.each(SEARCH_PAGE_SIZES)('приймає %s з рядка адреси', (size) => {
+    expect(catalogSearchRequestSchema.parse({ q: 'шан', pageSize: String(size) }).pageSize).toBe(
+      size,
+    )
+  })
+
+  it('недопустимий розмір — помилка, а не найближче допустиме', () => {
+    for (const pageSize of ['0', '5', '15', '100', 'abc', '10.5']) {
+      expect(catalogSearchRequestSchema.safeParse({ q: 'шан', pageSize }).success).toBe(false)
+    }
+  })
+})
+
+describe('splitSearchPage', () => {
+  const split = (page: number, pageSize: number, localTotal: number) =>
+    splitSearchPage({ page, pageSize, localTotal })
+
+  it('без локальних збігів усе зовнішнє, зі зсувом за номером сторінки', () => {
+    expect(split(1, 10, 0)).toEqual({
+      localFrom: 0,
+      localCount: 0,
+      externalFrom: 0,
+      externalCount: 10,
+    })
+    expect(split(3, 10, 0)).toMatchObject({ externalFrom: 20, externalCount: 10 })
+  })
+
+  it('перша сторінка ділиться: локальні першими, решта зовнішні', () => {
+    expect(split(1, 10, 3)).toEqual({
+      localFrom: 0,
+      localCount: 3,
+      externalFrom: 0,
+      externalCount: 7,
+    })
+  })
+
+  it('межа: локальні закінчуються рівно на кінці сторінки', () => {
+    expect(split(1, 10, 10)).toMatchObject({ localCount: 10, externalCount: 0 })
+    expect(split(2, 10, 10)).toMatchObject({ localCount: 0, externalFrom: 0, externalCount: 10 })
+  })
+
+  it('сторінка, що перетинає межу, бере хвіст локальних і початок зовнішніх', () => {
+    expect(split(2, 10, 14)).toEqual({
+      localFrom: 10,
+      localCount: 4,
+      externalFrom: 0,
+      externalCount: 6,
+    })
+    expect(split(3, 10, 14)).toMatchObject({ localCount: 0, externalFrom: 6, externalCount: 10 })
+  })
+
+  it('кожна сторінка — рівно pageSize рядків, без повторів і дірок між сторінками', () => {
+    for (const pageSize of SEARCH_PAGE_SIZES) {
+      for (const localTotal of [0, 1, 9, 10, 11, 49, 50, 51, 200]) {
+        let expectedLocal = 0
+        let expectedExternal = 0
+
+        for (let page = 1; page <= SEARCH_MAX_PAGE; page += 1) {
+          const part = split(page, pageSize, localTotal)
+
+          expect(part.localCount + part.externalCount).toBe(pageSize)
+          expect(part.localFrom).toBe(expectedLocal)
+          expect(part.externalFrom).toBe(expectedExternal)
+
+          expectedLocal += part.localCount
+          expectedExternal += part.externalCount
+        }
+      }
+    }
+  })
+})
+
+describe('searchCandidatesRequestSchema', () => {
+  it('без page і pageSize — перший екран: саме так кличе його перевірка дублікатів', () => {
+    expect(searchCandidatesRequestSchema.parse({ q: 'шан' })).toEqual({
+      q: 'шан',
+      page: 1,
+      pageSize: DEFAULT_SEARCH_PAGE_SIZE,
+    })
+  })
+})
+
+describe('catalogSearchResponseSchema', () => {
+  const page = { results: [], authorMatches: [], page: 1, pageSize: 10, total: 0, hasMore: false }
+
+  it('несе сторінку, розмір, точну кількість і ознаку «є ще»', () => {
+    const parsed = catalogSearchResponseSchema.parse({
+      ...page,
+      page: 2,
+      pageSize: 20,
+      total: 45,
+      hasMore: true,
+    })
+
+    expect(parsed).toMatchObject({ page: 2, pageSize: 20, total: 45, hasMore: true })
+  })
+
+  it('не приймає більше за найбільший розмір сторінки', () => {
+    const results = Array.from({ length: Math.max(...SEARCH_PAGE_SIZES) + 1 }, () => ({
+      work: {
+        id: 'w',
+        title: 'Шантарам',
+        origLang: 'en',
+        firstPubYear: null,
+        description: null,
+        createdAt: '2024-01-01T00:00:00.000Z',
+        revision: 1,
+      },
+      authors: [],
+      editions: [],
+      matchedOn: 'TITLE',
+    }))
+
+    expect(catalogSearchResponseSchema.safeParse({ ...page, results }).success).toBe(false)
+  })
+
+  it('без total сторінка не відповідає: керування без нього не порахувати', () => {
+    expect(
+      catalogSearchResponseSchema.safeParse({ results: [], authorMatches: [], page: 1 }).success,
+    ).toBe(false)
+  })
 })
 
 describe('проєкції', () => {
@@ -189,14 +338,28 @@ describe('searchCandidatesResponseSchema', () => {
   }
 
   it('приймає кандидата у формі WorkDetailResponse', () => {
-    const parsed = searchCandidatesResponseSchema.parse({ candidates: [workDetail] })
+    const parsed = searchCandidatesResponseSchema.parse({
+      candidates: [workDetail],
+      page: 1,
+      pageSize: 10,
+      total: 1,
+      hasMore: false,
+    })
 
     expect(parsed.candidates[0]?.work.id).toBe('w-1')
   })
 
-  it('не пропускає більше кандидатів, ніж SEARCH_CANDIDATES_LIMIT', () => {
-    const candidates = Array.from({ length: SEARCH_CANDIDATES_LIMIT + 1 }, () => workDetail)
+  it('не пропускає більше кандидатів, ніж найбільший розмір сторінки', () => {
+    const candidates = Array.from({ length: Math.max(...SEARCH_PAGE_SIZES) + 1 }, () => workDetail)
 
-    expect(searchCandidatesResponseSchema.safeParse({ candidates }).success).toBe(false)
+    expect(
+      searchCandidatesResponseSchema.safeParse({
+        candidates,
+        page: 1,
+        pageSize: 50,
+        total: 51,
+        hasMore: true,
+      }).success,
+    ).toBe(false)
   })
 })

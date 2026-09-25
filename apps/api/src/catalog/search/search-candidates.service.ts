@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import {
-  isValidIsbn13,
-  normalizeIsbn13,
-  SEARCH_CANDIDATES_LIMIT,
+  splitSearchPage,
   type SearchCandidatesResponse,
   type WorkDetailResponse,
 } from '@bookswap/shared'
@@ -15,9 +13,7 @@ import {
   toWorkAuthors,
   type EditionRow,
 } from '../catalog.mapper'
-import { pinSimilarityThreshold, rankWorks } from '../catalog.search'
-import { escapeLikePattern } from '../search-text'
-import { TextNormalizer } from '../text-normalizer'
+import { LocalMatches } from './local-matches.service'
 
 const WITH_CANDIDATE_RELATIONS = {
   authors: { include: { author: true } },
@@ -26,58 +22,39 @@ const WITH_CANDIDATE_RELATIONS = {
 } as const
 
 /**
- * Етап 7c: бекенд-пошук кандидатів перед створенням `Work`/`Edition` (§6.3,
- * крок 2) — «можливо, це одна з цих?».
+ * Етап 7c: бекенд-пошук кандидатів для майстра додавання (§6.3, крок 2) —
+ * «можливо, це одна з цих?».
  *
- * Ранжування за назвою й авторами навмисно те саме, що й у загальному
- * `/catalog/search` (`rankWorks`, `pinSimilarityThreshold`): другий шлях
+ * Ранжування — те саме, що й у `/catalog/search` (`LocalMatches`): другий шлях
  * пошуку в базі — це другий шанс розійтися з першим і мовчки не знайти
  * дублікат, якого перший знаходить. Відмінність цього ендпоінта — форма
- * відповіді (кандидат несе й `Translation`, не лише `Edition`) і те, що це
- * топ-N підказка, а не сторінка результатів (`SEARCH_CANDIDATES_LIMIT`, без
- * пагінації).
+ * відповіді (кандидат несе й `Translation`, не лише `Edition`).
+ *
+ * Тепер він ГОРТАЄТЬСЯ (`page`/`pageSize`, той самий `splitSearchPage`, що й у
+ * `/catalog/search`): майстер показує той самий спільний список. Перевірка
+ * дублікатів кличе його без параметрів — це перший екран (топ-10), і від
+ * сторінки, яку гортає людина, вона не залежить.
  */
 @Injectable()
 export class SearchCandidatesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly normalizer: TextNormalizer,
+    private readonly local: LocalMatches,
   ) {}
 
-  async search(query: string): Promise<SearchCandidatesResponse> {
-    if (isValidIsbn13(query)) return this.searchByIsbn(normalizeIsbn13(query))
+  async search(query: string, page: number, pageSize: number): Promise<SearchCandidatesResponse> {
+    const matches = await this.local.rank(query, { authors: false })
+    const total = matches.works.length
+    const { localFrom, localCount } = splitSearchPage({ page, pageSize, localTotal: total })
+    const ids = matches.works.slice(localFrom, localFrom + localCount).map((row) => row.id)
 
-    const term = await this.normalizer.normalize(query)
-
-    if (term === '') return { candidates: [] }
-
-    const pattern = `%${escapeLikePattern(term)}%`
-
-    // Той самий поріг фіксується на транзакцію, що й у загальному пошуку —
-    // див. `pinSimilarityThreshold`.
-    const ranked = await this.prisma.$transaction(async (tx) => {
-      await pinSimilarityThreshold(tx)
-
-      return rankWorks(tx, term, pattern, SEARCH_CANDIDATES_LIMIT)
-    })
-
-    return { candidates: await this.hydrate(ranked.map((row) => row.id)) }
-  }
-
-  /**
-   * Точний збіг ISBN, якщо він є (§6.3, крок 1). Видання злитого твору
-   * (`mergedIntoId != null`) не рахується збігом: R4 переносить розв'язання
-   * канонічності на Етап 7h, а до нього змержений твір просто не кандидат.
-   */
-  private async searchByIsbn(isbn13: string): Promise<SearchCandidatesResponse> {
-    const edition = await this.prisma.edition.findUnique({
-      where: { isbn13 },
-      select: { workId: true },
-    })
-
-    if (edition === null) return { candidates: [] }
-
-    return { candidates: await this.hydrate([edition.workId]) }
+    return {
+      candidates: await this.hydrate(ids),
+      page,
+      pageSize,
+      total,
+      hasMore: total > page * pageSize,
+    }
   }
 
   /**

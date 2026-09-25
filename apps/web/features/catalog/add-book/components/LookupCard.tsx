@@ -1,5 +1,5 @@
-import Image from 'next/image'
 import type { BookLookupResult, BookLookupSource } from '@bookswap/shared'
+import { BookCover } from '@/components/BookCover'
 
 type LookupCardProps = {
   isbn?: string
@@ -13,7 +13,15 @@ const SOURCE_LABELS: Record<BookLookupSource, string> = {
   ISBNDB: 'ISBNdb',
 }
 
-/** External metadata is only an editable draft; this card never creates a catalog row itself. */
+/**
+ * External metadata is only an editable draft; this card never creates a catalog row itself.
+ *
+ * The cover goes through the same `BookCover` as the result rows, so a lookup
+ * whose source knew no cover looks like every other coverless book rather than
+ * like a card missing its left column. The placeholder is shown, never stored:
+ * `onUse` hands on `lookup` untouched, so nothing reaches the edition form or
+ * the database that the source did not actually report.
+ */
 export function LookupCard({ isbn, lookup, onUse }: LookupCardProps) {
   const imprint = [lookup.publisher, lookup.publishedYear?.toString()]
     .filter((part) => part !== undefined)
@@ -22,15 +30,7 @@ export function LookupCard({ isbn, lookup, onUse }: LookupCardProps) {
 
   return (
     <li className="book lookup-card">
-      {lookup.coverUrl !== undefined && (
-        <Image
-          className="lookup-card__cover"
-          src={lookup.coverUrl}
-          alt={`Обкладинка «${lookup.title}»`}
-          width={72}
-          height={108}
-        />
-      )}
+      <BookCover url={lookup.coverUrl} alt={`Обкладинка «${lookup.title}»`} />
 
       <div className="lookup-card__content">
         <span className="book__meta">Знайдено за ISBN у {source}</span>

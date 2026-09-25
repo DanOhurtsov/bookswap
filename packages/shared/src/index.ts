@@ -71,6 +71,13 @@ export {
 export { LANGUAGE_CODES, isLanguageCode, languageCodeSchema } from './domain/language'
 export { isValidIsbn13, isbn13Schema, normalizeIsbn13 } from './domain/isbn'
 export {
+  comparableText,
+  comparableTokens,
+  relevanceOf,
+  type Relevance,
+  type RelevanceSubject,
+} from './domain/search-relevance'
+export {
   FRIENDSHIP_STATUS,
   FRIEND_RELATION,
   friendRelationSchema,
@@ -142,9 +149,16 @@ export {
   CATALOG_LIMITS,
   CATALOG_MATCH_KINDS,
   CATALOG_SEARCH_LIMIT,
+  CATALOG_SEARCH_MAX_MATCHES,
+  DEFAULT_SEARCH_PAGE_SIZE,
+  SEARCH_PAGE_SIZES,
+  searchPageSizeSchema,
+  splitSearchPage,
   SEARCH_CANDIDATES_LIMIT,
+  SEARCH_MAX_PAGE,
   authorMatchSchema,
   catalogMatchKindSchema,
+  catalogQuerySchema,
   catalogSearchRequestSchema,
   catalogSearchResponseSchema,
   catalogSearchResultSchema,
@@ -156,6 +170,7 @@ export {
   editionSchema,
   searchCandidatesRequestSchema,
   searchCandidatesResponseSchema,
+  searchPageSchema,
   translationListResponseSchema,
   translationResponseSchema,
   translationSchema,
@@ -167,6 +182,9 @@ export {
   workSchema,
   type AuthorMatch,
   type CatalogMatchKind,
+  type CatalogQuery,
+  type SearchPageSize,
+  type SearchPageSplit,
   type CatalogSearchRequest,
   type CatalogSearchResponse,
   type CatalogSearchResult,
@@ -188,6 +206,17 @@ export {
   type WorkDetailResponse,
   type WorkMergedDetails,
 } from './contracts/catalog'
+export {
+  CATALOG_DISCOVERY_SCOPES,
+  catalogDiscoveryLocationSchema,
+  catalogDiscoveryRequestSchema,
+  catalogDiscoveryResponseSchema,
+  catalogDiscoveryResultSchema,
+  catalogDiscoveryScopeSchema,
+  type CatalogDiscoveryResponse,
+  type CatalogDiscoveryResult,
+  type CatalogDiscoveryScope,
+} from './contracts/catalog-discovery'
 export {
   catalogRevisionSnapshotSchemas,
   editionPatchRequestSchema,
@@ -429,6 +458,26 @@ export {
   type BookLookupResult,
   type BookLookupSource,
 } from './contracts/lookup'
+export {
+  EXTERNAL_SEARCH_MORE,
+  EXTERNAL_SEARCH_RECORD_KINDS,
+  EXTERNAL_SEARCH_SOURCE_STATUSES,
+  externalSearchMoreSchema,
+  externalSearchRecordKindSchema,
+  externalSearchRequestSchema,
+  externalSearchResponseSchema,
+  externalSearchResultSchema,
+  externalSearchResultToLookup,
+  externalSearchSourceReportSchema,
+  externalSearchSourceStatusSchema,
+  type ExternalSearchMore,
+  type ExternalSearchRecordKind,
+  type ExternalSearchRequest,
+  type ExternalSearchResponse,
+  type ExternalSearchResult,
+  type ExternalSearchSourceReport,
+  type ExternalSearchSourceStatus,
+} from './contracts/external-search'
 export {
   WISHLIST_LIMITS,
   addWishlistItemRequestSchema,

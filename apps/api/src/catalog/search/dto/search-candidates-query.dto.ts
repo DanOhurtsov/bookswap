@@ -1,18 +1,10 @@
-import { Transform } from 'class-transformer'
-import { IsString, MaxLength, MinLength } from 'class-validator'
-import { CATALOG_LIMITS } from '@bookswap/shared'
-
-const trimmed = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim() : value
+import { PagedSearchQueryDto } from '../../dto/paged-search-query.dto'
 
 /**
  * Той самий вхід, що й у `/catalog/search` (§6.3, крок 2): назва або ISBN в
- * одному полі — розрізняє їх сервіс, а не клієнт.
+ * одному полі плюс `page`/`pageSize`. Успадковано, а не повторено: майстер і
+ * `/catalog` гортають один список, і розбіжність у тому, що приймає кожен,
+ * означала б 400 для адреси, яку сусідній ендпоінт приймає. Без `page` і
+ * `pageSize` — перший екран, який кличе перевірка дублікатів.
  */
-export class SearchCandidatesQueryDto {
-  @Transform(trimmed)
-  @IsString()
-  @MinLength(CATALOG_LIMITS.queryMin, { message: 'Мінімум два символи' })
-  @MaxLength(CATALOG_LIMITS.queryMax)
-  q!: string
-}
+export class SearchCandidatesQueryDto extends PagedSearchQueryDto {}

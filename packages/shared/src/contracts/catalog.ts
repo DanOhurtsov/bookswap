@@ -17,6 +17,101 @@ import { languageCodeSchema } from '../domain/language'
 export const CATALOG_SEARCH_LIMIT = 20
 
 /**
+ * Допустимі розміри сторінки спільного списку — КІЛЬКІСТЬ КАРТОК у списку
+ * загалом, а не «стільки-то локальних плюс стільки-то зовнішніх».
+ *
+ * Розкладає сторінку по джерелах {@link splitSearchPage}; рішення й наслідки —
+ * `docs/plan/stage-9-search-pagination.md`.
+ */
+export const SEARCH_PAGE_SIZES = [10, 20, 50] as const
+
+export type SearchPageSize = (typeof SEARCH_PAGE_SIZES)[number]
+
+export const DEFAULT_SEARCH_PAGE_SIZE: SearchPageSize = 10
+
+/**
+ * Найбільший номер сторінки, який приймає пошук (1-based).
+ *
+ * Без верхньої межі `page=100000` перетворюється на `OFFSET 1000000` у нашій базі
+ * й на таку саму глибину `startIndex` у чужій. Двадцять сторінок — це 400 рядків
+ * на запит «як називається моя книжка»; глибше гортають не люди.
+ */
+export const SEARCH_MAX_PAGE = 20
+
+/**
+ * Скільки збігів локального пошуку матеріалізується під один запит.
+ *
+ * `rankWorks` віддає не сторінку, а весь список збігів до цієї межі. Один
+ * індексований запит дає три речі одразу: сторінку, ТОЧНУ ознаку «є ще» і повний
+ * набір ISBN для дедуплікації проти зовнішніх джерел
+ * ({@link catalogSearchResponseSchema.knownIsbn13}). Обрізання свідоме: глибше
+ * {@link SEARCH_MAX_PAGE} ні «є ще», ні повнота набору ISBN не гарантуються.
+ */
+export const CATALOG_SEARCH_MAX_MATCHES = 200
+
+/**
+ * Номер сторінки з рядка запиту.
+ *
+ * `coerce`, бо в `?page=2` завжди приїжджає рядок; `default(1)` — бо адреса без
+ * `page` означає першу сторінку, а не помилку. Нецілий, нульовий чи завеликий
+ * номер — це 400: мовчки підставити першу сторінку означало б показати НЕ ТЕ, що
+ * просить адреса, і «назад» повело б людину не туди.
+ */
+export const searchPageSchema = z.coerce
+  .number()
+  .int('Номер сторінки має бути цілим')
+  .min(1, 'Сторінки нумеруються з одиниці')
+  .max(SEARCH_MAX_PAGE)
+
+/**
+ * Розмір сторінки з рядка запиту. Значення поза {@link SEARCH_PAGE_SIZES} — 400,
+ * а не найближче допустиме: адреса має означати те, що написано.
+ */
+export const searchPageSizeSchema = z.coerce
+  .number()
+  .int('Розмір сторінки має бути цілим')
+  .refine(
+    (value): value is SearchPageSize => (SEARCH_PAGE_SIZES as readonly number[]).includes(value),
+    {
+      message: `Розмір сторінки — один із ${SEARCH_PAGE_SIZES.join(', ')}`,
+    },
+  )
+
+/**
+ * Як сторінка спільного списку ділиться між джерелами.
+ *
+ * Спільний список — це ЛОКАЛЬНІ збіги (у порядку рангу бази), за якими йде
+ * зовнішній пул. Сторінка N розміру S — рядки `[a, b)`, `a = (N−1)·S`,
+ * `b = N·S`. Чиста функція номера сторінки, розміру та кількості локальних
+ * збігів `L`, тож пряме посилання не потребує історії, а обидва ендпоінти,
+ * порахувавши `L` самі, узгоджено відрізають свою частину й стартують
+ * паралельно.
+ */
+export interface SearchPageSplit {
+  localFrom: number
+  localCount: number
+  externalFrom: number
+  externalCount: number
+}
+
+export function splitSearchPage(input: {
+  page: number
+  pageSize: number
+  localTotal: number
+}): SearchPageSplit {
+  const from = (input.page - 1) * input.pageSize
+  const localFrom = Math.min(from, input.localTotal)
+  const localCount = Math.min(Math.max(input.localTotal - from, 0), input.pageSize)
+
+  return {
+    localFrom,
+    localCount,
+    externalFrom: Math.max(from - input.localTotal, 0),
+    externalCount: input.pageSize - localCount,
+  }
+}
+
+/**
  * Обмеження полів каталогу. Ті самі числа потрібні `class-validator`-декораторам
  * у `apps/api` (§11 вимагає обидва механізми), тож живуть константами.
  */
@@ -132,12 +227,28 @@ export type Edition = z.infer<typeof editionSchema>
 
 // --- Пошук -------------------------------------------------------------------
 
-export const catalogSearchRequestSchema = z.object({
+/**
+ * Сам запит, без сторінки.
+ *
+ * Окремо від {@link catalogSearchRequestSchema}, бо `page` потрібен НЕ всім, хто
+ * приймає `q`: `/catalog/search/candidates` — це підказка «може, така книжка вже
+ * є» перед створенням твору, і пагінації в ній немає навмисно (див.
+ * {@link SEARCH_CANDIDATES_LIMIT}). Спільний тут рівно один рядок поля вводу —
+ * розійтися в межах `q` два ендпоінти не мають права.
+ */
+export const catalogQuerySchema = z.object({
   q: z
     .string()
     .trim()
     .min(CATALOG_LIMITS.queryMin, 'Мінімум два символи')
     .max(CATALOG_LIMITS.queryMax),
+})
+
+export type CatalogQuery = z.infer<typeof catalogQuerySchema>
+
+export const catalogSearchRequestSchema = catalogQuerySchema.extend({
+  page: searchPageSchema.default(1),
+  pageSize: searchPageSizeSchema.default(DEFAULT_SEARCH_PAGE_SIZE),
 })
 
 export type CatalogSearchRequest = z.infer<typeof catalogSearchRequestSchema>
@@ -182,8 +293,24 @@ export const authorMatchSchema = z.object({
 export type AuthorMatch = z.infer<typeof authorMatchSchema>
 
 export const catalogSearchResponseSchema = z.object({
-  results: z.array(catalogSearchResultSchema).max(CATALOG_SEARCH_LIMIT),
+  results: z.array(catalogSearchResultSchema).max(Math.max(...SEARCH_PAGE_SIZES)),
+  /**
+   * Знайдені автори НЕ пагінуються: це не список для гортання, а матеріал для
+   * кроку «виберіть наявного автора». Тому список той самий на кожній сторінці.
+   */
   authorMatches: z.array(authorMatchSchema).max(CATALOG_SEARCH_LIMIT),
+  /** Яку саме сторінку описує ця відповідь (1-based) — те, що просили. */
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  /**
+   * ТОЧНА кількість локальних збігів (не більше {@link CATALOG_SEARCH_MAX_MATCHES}).
+   * З неї обидва ендпоінти рахують, скільки рядків сторінки — локальні
+   * ({@link splitSearchPage}). На екрані це НЕ «усього знайдено»: зовнішні
+   * джерела чесної загальної кількості не мають.
+   */
+  total: z.number().int().nonnegative(),
+  /** Чи лишилися ЛОКАЛЬНІ рядки після цієї сторінки — перелічені, а не оцінка. */
+  hasMore: z.boolean(),
 })
 
 export type CatalogSearchResponse = z.infer<typeof catalogSearchResponseSchema>
@@ -263,15 +390,18 @@ export type WorkMergedDetails = z.infer<typeof workMergedDetailsSchema>
 // --- Кандидати для дедуплікації (§6.3, крок 2; Етап 7c) ----------------------
 
 /**
- * Скільки кандидатів показати перед створенням нового `Work`/`Edition`.
- *
- * Це підказка «може, така книжка вже є», а не список для гортання — тому
- * пагінації свідомо немає: якщо серед перших {@link SEARCH_CANDIDATES_LIMIT}
- * нічого не підійшло, людина створює нове, а не гортає сторінки в пошуках
- * дубліката.
+ * Скільки кандидатів дає перевірка дублікатів без `page`/`pageSize` — топ-N
+ * підказка «може, така книжка вже є». Гортає майстер інший запит (з `page`), а
+ * перевірка дублікатів завжди питає перший екран і від сторінки не залежить.
+ * Ту саму межу використовує імпорт бібліотеки.
  */
 export const SEARCH_CANDIDATES_LIMIT = 10
 
+/**
+ * Той самий вхід, що й у `/catalog/search`. Без `page`/`pageSize` це рівно
+ * перший екран — топ-{@link SEARCH_CANDIDATES_LIMIT}, і саме так його кличе
+ * перевірка дублікатів: вона НЕ залежить від сторінки, яку зараз гортає майстер.
+ */
 export const searchCandidatesRequestSchema = catalogSearchRequestSchema
 
 export type SearchCandidatesRequest = z.infer<typeof searchCandidatesRequestSchema>
@@ -280,9 +410,16 @@ export type SearchCandidatesRequest = z.infer<typeof searchCandidatesRequestSche
  * Кожен кандидат — це `WorkDetailResponse`: та сама форма, що й у `GET
  * /works/:id`, з усіма `Edition` і `Translation` твору. Людина впізнає своє
  * видання за видавництвом і роком так само, як на сторінці твору.
+ *
+ * Слайс і лічильники — ті самі, що й у {@link catalogSearchResponseSchema}: майстер
+ * і `/catalog` гортають один і той самий список.
  */
 export const searchCandidatesResponseSchema = z.object({
-  candidates: z.array(workDetailResponseSchema).max(SEARCH_CANDIDATES_LIMIT),
+  candidates: z.array(workDetailResponseSchema).max(Math.max(...SEARCH_PAGE_SIZES)),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
 })
 
 export type SearchCandidatesResponse = z.infer<typeof searchCandidatesResponseSchema>

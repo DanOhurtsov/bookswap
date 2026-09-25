@@ -498,7 +498,7 @@ describe('Мерж творів (e2e)', () => {
       // Its `authorMatches[].workCount` must count the target and the
       // independent third work — two — and must not count the merged source
       // as a separate book.
-      const results = await catalog.search(`Автор кількох творів ${source}`)
+      const results = await catalog.search(`Автор кількох творів ${source}`, 1, 10)
       const match = results.authorMatches.find((author) => author.id === shared)
 
       expect(match?.workCount).toBe(2)

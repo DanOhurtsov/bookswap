@@ -1,4 +1,5 @@
 import type { RawQueryRunner } from './search-text'
+import { Prisma } from '../generated/prisma/client'
 
 /**
  * Сирий SQL пошуку. Живе окремо від сервісу, щоб запит читався як запит.
@@ -58,13 +59,28 @@ export async function pinSimilarityThreshold(client: RawQueryRunner): Promise<vo
  * `mergedIntoId IS NULL` прибирає з видачі те, що вже злите в канонічний запис
  * (§6.3). Сам мердж — наступний етап; умова коштує рядок і не дає забути про неї
  * тоді, коли дублікати вже зʼявляться.
+ *
+ * **Порядок тотальний — `w.id` останнім ключем.** Це не косметика, а вимога
+ * пагінації: `ORDER BY score DESC, titleNorm ASC` двох творів з однаковою оцінкою
+ * й однаковою нормалізованою назвою не розрізняє, і Postgres має право віддати їх
+ * у різному порядку в різних запитах. На одній сторінці це непомітно, на
+ * сторінках — рівно та поломка, коли між сусідніми сторінками один твір зникає, а
+ * інший показується двічі. Див. `docs/plan/stage-9-search-pagination.md`.
  */
 export function rankWorks(
   client: RawQueryRunner,
   term: string,
   pattern: string,
   limit: number,
+  allowedWorkIds?: readonly string[],
 ): Promise<RankedWork[]> {
+  if (allowedWorkIds?.length === 0) return Promise.resolve([])
+
+  const allowed =
+    allowedWorkIds === undefined
+      ? Prisma.empty
+      : Prisma.sql`AND w.id IN (${Prisma.join([...allowedWorkIds])})`
+
   return client.$queryRaw<RankedWork[]>`
     SELECT w.id AS id,
            similarity(w."titleNorm", ${term}::text) AS "titleScore",
@@ -73,6 +89,7 @@ export function rankWorks(
     LEFT JOIN "WorkAuthor" wa ON wa."workId" = w.id
     LEFT JOIN "Author" a ON a.id = wa."authorId"
     WHERE w."mergedIntoId" IS NULL
+      ${allowed}
       AND (
         w."titleNorm" % ${term}::text
         OR a."nameNorm" % ${term}::text
@@ -84,7 +101,8 @@ export function rankWorks(
                similarity(w."titleNorm", ${term}::text),
                COALESCE(MAX(similarity(a."nameNorm", ${term}::text)), 0)
              ) DESC,
-             w."titleNorm" ASC
+             w."titleNorm" ASC,
+             w.id ASC
     LIMIT ${limit}
   `
 }
@@ -104,7 +122,7 @@ export function rankAuthors(
     SELECT a.id AS id, similarity(a."nameNorm", ${term}::text) AS score
     FROM "Author" a
     WHERE a."nameNorm" % ${term}::text OR a."nameNorm" LIKE ${pattern}::text
-    ORDER BY score DESC, a."name" ASC
+    ORDER BY score DESC, a."name" ASC, a.id ASC
     LIMIT ${limit}
   `
 }

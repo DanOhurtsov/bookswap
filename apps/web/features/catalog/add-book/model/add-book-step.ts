@@ -7,6 +7,15 @@ type WorkStep = {
   initialTitle: string
   isbn?: string
   lookup?: BookLookupResult
+  /**
+   * The work's first publication year, when an external source supplied one.
+   *
+   * Separate from `lookup` on purpose: `BookLookupResult` describes an edition,
+   * and every year in it means `Edition.year` (`app/lib/lookup-mapping.ts`).
+   * `Work.firstPubYear` is a different field of a different entity, so only a
+   * work-level year may prefill it — never the year of one printing.
+   */
+  firstPubYear?: number
   entryMethod: CopyEntryMethod
 }
 

@@ -18,6 +18,6 @@ export class SearchCandidatesController {
   @UseGuards(ThrottlerGuard)
   @Throttle(SEARCH_CANDIDATES_RATE_LIMIT)
   candidates(@Query() dto: SearchCandidatesQueryDto): Promise<SearchCandidatesResponse> {
-    return this.search.search(dto.q)
+    return this.search.search(dto.q, dto.page, dto.pageSize)
   }
 }
