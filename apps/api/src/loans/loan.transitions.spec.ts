@@ -1,5 +1,6 @@
 import { LOAN_ACTIONS, LOAN_STATUS, type LoanAction, type LoanStatus } from '@bookswap/shared'
 import { resolveTransition, type LoanActor, type LoanTransition } from './loan.transitions'
+import type { LoanOrigin } from '@bookswap/shared'
 
 /**
  * Таблиця §5.1 повністю — позитивні переходи, негативні й неправильні актори.
@@ -40,7 +41,7 @@ function isAllowed(row: Row): boolean {
 
 /** Звужує результат до переходу — інакше кожна перевірка починалася б із `if`. */
 function transition(from: LoanStatus, action: LoanAction, actor: LoanActor): LoanTransition {
-  const outcome = resolveTransition(from, action, actor)
+  const outcome = resolveTransition(from, action, actor, 'REQUESTED')
 
   if ('kind' in outcome) {
     throw new Error(`Очікувався перехід ${from} --${action}--> для ${actor}, отримано відмову`)
@@ -56,12 +57,12 @@ describe('resolveTransition: вичерпна матриця', () => {
     ),
   )
 
-  it('перебирає всі 9 × 7 × 2 комбінацій — жодна не лишається невизначеною', () => {
-    expect(combinations).toHaveLength(126)
+  it('перебирає всі 9 × 11 × 2 комбінацій — жодна не лишається невизначеною', () => {
+    expect(combinations).toHaveLength(198)
   })
 
   it.each(combinations)('$from --$action--> для $actor', ({ from, action, actor }: Row) => {
-    const outcome = resolveTransition(from, action, actor)
+    const outcome = resolveTransition(from, action, actor, 'REQUESTED')
 
     // Дозволено рівно те, що перелічує §5.1, і нічого більше. Саме ця
     // перевірка ловить випадково розширений перехід: додати рядок у машину, не
@@ -83,7 +84,7 @@ describe('термінальні статуси §5.1', () => {
   it.each(terminal)('з %s не веде жоден перехід — ні для кого', (from) => {
     for (const action of LOAN_ACTIONS) {
       for (const actor of [OWNER, BORROWER]) {
-        expect(resolveTransition(from, action, actor)).toEqual({
+        expect(resolveTransition(from, action, actor, 'REQUESTED')).toEqual({
           kind: 'refused',
           reason: 'STATE',
         })
@@ -96,7 +97,7 @@ describe('LOST (Stage 10, 10d): лише recover, лише власник', () =
   it('усі дії request-flow з LOST — STATE', () => {
     for (const action of LOAN_ACTIONS.filter((value) => value !== 'recover')) {
       for (const actor of [OWNER, BORROWER]) {
-        expect(resolveTransition('LOST', action, actor)).toEqual({
+        expect(resolveTransition('LOST', action, actor, 'REQUESTED')).toEqual({
           kind: 'refused',
           reason: 'STATE',
         })
@@ -105,7 +106,7 @@ describe('LOST (Stage 10, 10d): лише recover, лише власник', () =
   })
 
   it('recover позичальника — ROLE, не STATE', () => {
-    expect(resolveTransition('LOST', 'recover', BORROWER)).toEqual({
+    expect(resolveTransition('LOST', 'recover', BORROWER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
@@ -132,7 +133,7 @@ describe('LOST (Stage 10, 10d): лише recover, лише власник', () =
   it('recover з інших статусів неможливий ні для кого', () => {
     for (const from of LOAN_STATUS.filter((value) => value !== 'LOST')) {
       for (const actor of [OWNER, BORROWER]) {
-        expect(resolveTransition(from, 'recover', actor)).toEqual({
+        expect(resolveTransition(from, 'recover', actor, 'REQUESTED')).toEqual({
           kind: 'refused',
           reason: 'STATE',
         })
@@ -153,33 +154,33 @@ describe('розрізнення відмов', () => {
   it('дія, неможлива з цього статусу, — це STATE, а не ROLE', () => {
     // Повернути ще не передану книжку не може ніхто, тож «вам не можна» (403)
     // сказало б неправду: справа не в тому, хто питає.
-    expect(resolveTransition('REQUESTED', 'return', OWNER)).toEqual({
+    expect(resolveTransition('REQUESTED', 'return', OWNER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'STATE',
     })
   })
 
   it('дія, можлива для іншої сторони, — це ROLE', () => {
-    expect(resolveTransition('REQUESTED', 'approve', BORROWER)).toEqual({
+    expect(resolveTransition('REQUESTED', 'approve', BORROWER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
-    expect(resolveTransition('APPROVED', 'hand_over', OWNER)).toEqual({
+    expect(resolveTransition('APPROVED', 'hand_over', OWNER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
-    expect(resolveTransition('HANDED_OVER', 'return', BORROWER)).toEqual({
+    expect(resolveTransition('HANDED_OVER', 'return', BORROWER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
-    expect(resolveTransition('HANDED_OVER', 'mark_lost', BORROWER)).toEqual({
+    expect(resolveTransition('HANDED_OVER', 'mark_lost', BORROWER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
   })
 
   it('скасувати власний запит може лише позичальник', () => {
-    expect(resolveTransition('REQUESTED', 'cancel', OWNER)).toEqual({
+    expect(resolveTransition('REQUESTED', 'cancel', OWNER, 'REQUESTED')).toEqual({
       kind: 'refused',
       reason: 'ROLE',
     })
@@ -356,3 +357,192 @@ describe('сповіщення §5.1 і §7.5', () => {
     })
   })
 })
+
+/**
+ * Stage 10 (10e, T3, D6): таблиця переходів записаної власником позики (`RECORDED_EXISTING`) — так само
+ * вичерпно, з `origin`-відмовами в обидва боки.
+ */
+describe('resolveTransition: RECORDED_EXISTING (Stage 10, 10e)', () => {
+  const ALLOWED_RECORDED: Row[] = [
+    { from: 'PENDING_CONFIRMATION', action: 'confirm_record', actor: BORROWER },
+    { from: 'PENDING_CONFIRMATION', action: 'decline_record', actor: BORROWER },
+    { from: 'PENDING_CONFIRMATION', action: 'withdraw_record', actor: OWNER },
+    { from: 'PENDING_CONFIRMATION', action: 'amend_record', actor: OWNER },
+    { from: 'HANDED_OVER', action: 'return', actor: OWNER },
+    { from: 'HANDED_OVER', action: 'mark_lost', actor: OWNER },
+    { from: 'LOST', action: 'recover', actor: OWNER },
+  ]
+
+  const combinations = LOAN_STATUS.flatMap((from) =>
+    LOAN_ACTIONS.flatMap((action) =>
+      [OWNER, BORROWER].map((actor): Row => ({ from, action, actor })),
+    ),
+  )
+
+  it.each(combinations)('$from --$action--> для $actor', ({ from, action, actor }: Row) => {
+    const allowed = ALLOWED_RECORDED.some(
+      (row) => row.from === from && row.action === action && row.actor === actor,
+    )
+
+    expect('kind' in resolveTransition(from, action, actor, 'RECORDED_EXISTING')).toBe(!allowed)
+  })
+
+  it('confirm_record: HANDED_OVER, LENT_OUT у позичальника, handedAt не перезаписується, чужі REQUESTED відхиляються', () => {
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'confirm_record', BORROWER, 'RECORDED_EXISTING'),
+    ).toEqual({
+      to: 'HANDED_OVER',
+      requires: { status: 'RESERVED', holder: 'OWNER' },
+      copyStatus: 'LENT_OUT',
+      holder: 'BORROWER',
+      stamp: null,
+      notify: { to: 'OWNER', type: 'LOAN_RECORD_CONFIRMED' },
+      rejectRivals: true,
+      event: 'RECORD_CONFIRMED',
+    })
+  })
+
+  it.each([
+    ['decline_record', BORROWER, 'DECLINED', 'LOAN_RECORD_DECLINED', 'OWNER', 'RECORD_DECLINED'],
+    [
+      'withdraw_record',
+      OWNER,
+      'CANCELLED',
+      'LOAN_RECORD_WITHDRAWN',
+      'BORROWER',
+      'RECORD_WITHDRAWN',
+    ],
+  ] as const)(
+    '%s повертає примірник AVAILABLE і не чіпає чужих REQUESTED',
+    (action, actor, to, type, recipient, event) => {
+      expect(resolveTransition('PENDING_CONFIRMATION', action, actor, 'RECORDED_EXISTING')).toEqual(
+        {
+          to,
+          requires: { status: 'RESERVED', holder: 'OWNER' },
+          copyStatus: 'AVAILABLE',
+          holder: null,
+          stamp: null,
+          notify: { to: recipient, type },
+          rejectRivals: false,
+          event,
+        },
+      )
+    },
+  )
+
+  it('amend_record: статус і примірник не змінюються, сповіщення позичальнику', () => {
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'amend_record', OWNER, 'RECORDED_EXISTING'),
+    ).toEqual({
+      to: 'PENDING_CONFIRMATION',
+      requires: { status: 'RESERVED', holder: 'OWNER' },
+      copyStatus: null,
+      holder: null,
+      stamp: null,
+      notify: { to: 'BORROWER', type: 'LOAN_RECORD_AMENDED' },
+      rejectRivals: false,
+      event: 'RECORD_AMENDED',
+    })
+  })
+
+  it('роль: власник не підтверджує й не відхиляє, позичальник не відкликає й не виправляє (ROLE)', () => {
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'confirm_record', OWNER, 'RECORDED_EXISTING'),
+    ).toEqual({ kind: 'refused', reason: 'ROLE' })
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'decline_record', OWNER, 'RECORDED_EXISTING'),
+    ).toEqual({ kind: 'refused', reason: 'ROLE' })
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'withdraw_record', BORROWER, 'RECORDED_EXISTING'),
+    ).toEqual({ kind: 'refused', reason: 'ROLE' })
+    expect(
+      resolveTransition('PENDING_CONFIRMATION', 'amend_record', BORROWER, 'RECORDED_EXISTING'),
+    ).toEqual({ kind: 'refused', reason: 'ROLE' })
+  })
+
+  it('після підтвердження amend/withdraw/decline неможливі (Q12), а return/mark_lost/recover — за чинними правилами', () => {
+    for (const action of [
+      'amend_record',
+      'withdraw_record',
+      'decline_record',
+      'confirm_record',
+    ] as const) {
+      for (const actor of [OWNER, BORROWER]) {
+        expect(resolveTransition('HANDED_OVER', action, actor, 'RECORDED_EXISTING')).toEqual({
+          kind: 'refused',
+          reason: 'STATE',
+        })
+      }
+    }
+
+    expect(transitionOf('HANDED_OVER', 'return', OWNER, 'RECORDED_EXISTING').event).toBe(
+      'LOAN_RETURNED',
+    )
+    expect(transitionOf('HANDED_OVER', 'mark_lost', OWNER, 'RECORDED_EXISTING').event).toBe(
+      'LOAN_LOST',
+    )
+    expect(transitionOf('LOST', 'recover', OWNER, 'RECORDED_EXISTING').event).toBe('RECOVERED')
+  })
+
+  it('return request-flow позики подій не пише (без задніх подій, §6.8)', () => {
+    expect(transitionOf('HANDED_OVER', 'return', OWNER, 'REQUESTED').event).toBeNull()
+  })
+
+  it('дії request-flow над записаною позикою неможливі (STATE) навіть із синтетичним REQUESTED/APPROVED', () => {
+    for (const from of ['REQUESTED', 'APPROVED'] as const) {
+      for (const action of ['approve', 'reject', 'cancel', 'hand_over'] as const) {
+        for (const actor of [OWNER, BORROWER]) {
+          expect(resolveTransition(from, action, actor, 'RECORDED_EXISTING')).toEqual({
+            kind: 'refused',
+            reason: 'STATE',
+          })
+        }
+      }
+    }
+
+    for (const action of ['approve', 'reject', 'cancel', 'hand_over'] as const) {
+      expect(resolveTransition('PENDING_CONFIRMATION', action, OWNER, 'RECORDED_EXISTING')).toEqual(
+        { kind: 'refused', reason: 'STATE' },
+      )
+    }
+  })
+
+  it('дії запису над origin=REQUESTED неможливі', () => {
+    for (const from of LOAN_STATUS) {
+      for (const action of [
+        'confirm_record',
+        'decline_record',
+        'withdraw_record',
+        'amend_record',
+      ] as const) {
+        for (const actor of [OWNER, BORROWER]) {
+          expect(resolveTransition(from, action, actor, 'REQUESTED')).toEqual({
+            kind: 'refused',
+            reason: 'STATE',
+          })
+        }
+      }
+    }
+  })
+
+  it('RECORDED_GUEST у 10e не має жодного переходу', () => {
+    for (const from of LOAN_STATUS) {
+      for (const action of LOAN_ACTIONS) {
+        expect('kind' in resolveTransition(from, action, OWNER, 'RECORDED_GUEST')).toBe(true)
+      }
+    }
+  })
+})
+
+function transitionOf(
+  from: LoanStatus,
+  action: LoanAction,
+  actor: LoanActor,
+  origin: LoanOrigin,
+): LoanTransition {
+  const outcome = resolveTransition(from, action, actor, origin)
+
+  if ('kind' in outcome) throw new Error(`Очікувався перехід ${from} --${action}--> (${origin})`)
+
+  return outcome
+}

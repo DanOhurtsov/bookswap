@@ -1,6 +1,12 @@
 import { z } from 'zod'
 import { conditionSchema, copyStatusSchema } from '../domain/copy'
-import { loanActionSchema, loanRoleSchema, loanStatusSchema } from '../domain/loan'
+import {
+  loanActionSchema,
+  loanOriginSchema,
+  loanRoleSchema,
+  loanStatusSchema,
+  type LoanAction,
+} from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { publicUserSchema } from './user'
 
@@ -81,7 +87,14 @@ export const loanSchema = z.object({
   isOverdue: z.boolean(),
   message: z.string().nullable(),
   responseNote: z.string().nullable(),
-  requestedAt: z.iso.datetime(),
+  /**
+   * Stage 10 (10e): для `origin = RECORDED_EXISTING` запиту не було — `null`, «Попросили» не вигадується.
+   * Джерелом істини про наявність запиту є `origin`.
+   */
+  origin: loanOriginSchema.extract(['REQUESTED', 'RECORDED_EXISTING']),
+  /** Stage 10 (10e): коли запис створено в системі (для записаної позики — момент запису, а не передачі). */
+  createdAt: z.iso.datetime(),
+  requestedAt: z.iso.datetime().nullable(),
   /** Коли власник відповів на запит. Лишається `null` для скасованих запитів. */
   respondedAt: z.iso.datetime().nullable(),
   handedAt: z.iso.datetime().nullable(),
@@ -129,23 +142,70 @@ export const updateLoanRequestSchema = z
   .object({
     action: loanActionSchema,
     note: noteSchema.optional(),
-    dueAt: dueAtSchema.optional(),
+    // `null` — лише для `amend_record` (Q23: прибрати строк); відсутнє поле — строк не змінюється.
+    dueAt: dueAtSchema.nullable().optional(),
     effectiveAt: dueAtSchema.optional(),
+    handedAt: dueAtSchema.optional(),
   })
   .refine(
-    (value) => value.dueAt === undefined || value.action === 'approve',
-    'Термін повернення встановлюється лише під час підтвердження запиту',
+    (value) =>
+      value.dueAt === undefined || value.action === 'approve' || value.action === 'amend_record',
+    'Термін повернення встановлюється під час підтвердження запиту або виправлення запису',
+  )
+  .refine(
+    (value) => value.dueAt !== null || value.action === 'amend_record',
+    'Прибрати строк повернення можна лише дією amend_record',
   )
   .refine(
     (value) => value.effectiveAt === undefined || value.action === 'recover',
     'Дату знахідки можна вказати лише разом із дією recover',
   )
   .refine(
-    (value) => value.note === undefined || value.action !== 'recover',
-    'Примітка не поєднується з дією recover',
+    (value) => value.handedAt === undefined || value.action === 'amend_record',
+    'Дату передачі можна вказати лише разом із дією amend_record',
+  )
+  .refine(
+    (value) =>
+      value.note === undefined || (value.action !== 'recover' && !isRecordAction(value.action)),
+    'Примітка не поєднується з цією дією',
+  )
+  .refine(
+    (value) =>
+      value.action !== 'amend_record' || value.handedAt !== undefined || value.dueAt !== undefined,
+    'Для amend_record потрібна нова дата передачі або строк повернення',
   )
 
 export type UpdateLoanRequest = z.infer<typeof updateLoanRequestSchema>
+
+export function isRecordAction(action: LoanAction): boolean {
+  return (
+    action === 'confirm_record' ||
+    action === 'decline_record' ||
+    action === 'withdraw_record' ||
+    action === 'amend_record'
+  )
+}
+
+/**
+ * Stage 10 (10e, D6): `POST /loans/recorded` — власник записує вже передану книжку.
+ *
+ * `handedAt` — фактична дата передачі (день, не в майбутньому — це перевіряє сервер за своєю датою UTC);
+ * `dueAt` — необов'язковий строк повернення, не раніше дня передачі. `message` немає: вільного тексту запис
+ * не несе.
+ */
+export const createRecordedLoanRequestSchema = z
+  .object({
+    copyId: idSchema,
+    borrowerId: idSchema,
+    handedAt: dueAtSchema,
+    dueAt: dueAtSchema.optional(),
+  })
+  .refine(
+    (value) => value.dueAt === undefined || value.dueAt >= value.handedAt,
+    'Строк повернення не може бути раніше дати передачі',
+  )
+
+export type CreateRecordedLoanRequest = z.infer<typeof createRecordedLoanRequestSchema>
 
 /** §8: `GET /loans?role=owner|borrower&status=…`. Обидва фільтри незалежні. */
 export const loanQueryRequestSchema = z.object({

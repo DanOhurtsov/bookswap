@@ -416,6 +416,8 @@ export {
 export {
   LOAN_LIMITS,
   createLoanRequestSchema,
+  createRecordedLoanRequestSchema,
+  isRecordAction,
   loanCopySchema,
   loanListResponseSchema,
   loanQueryRequestSchema,
@@ -424,6 +426,7 @@ export {
   loanSchema,
   updateLoanRequestSchema,
   type CreateLoanRequest,
+  type CreateRecordedLoanRequest,
   type Loan,
   type LoanCopy,
   type LoanListResponse,

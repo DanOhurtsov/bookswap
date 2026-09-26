@@ -1,6 +1,8 @@
 import { LOAN_ACTIONS, LOAN_STATUS } from '../domain/loan'
 import {
   createLoanRequestSchema,
+  createRecordedLoanRequestSchema,
+  isRecordAction,
   loanQueryRequestSchema,
   loanSchema,
   updateLoanRequestSchema,
@@ -12,6 +14,8 @@ const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
 const rawLoan = {
   id: 'loan-1',
   status: 'HANDED_OVER',
+  origin: 'REQUESTED',
+  createdAt: '2026-06-01T10:00:00.000Z',
   isOverdue: false,
   message: 'дуже хочу почитати',
   responseNote: null,
@@ -134,9 +138,12 @@ describe('createLoanRequestSchema', () => {
 })
 
 describe('updateLoanRequestSchema', () => {
-  it.each([...LOAN_ACTIONS])('приймає дію %s', (action) => {
-    expect(updateLoanRequestSchema.parse({ action }).action).toBe(action)
-  })
+  it.each([...LOAN_ACTIONS].filter((action) => action !== 'amend_record'))(
+    'приймає дію %s',
+    (action) => {
+      expect(updateLoanRequestSchema.parse({ action }).action).toBe(action)
+    },
+  )
 
   it('не приймає статус замість дії', () => {
     // §8 адресує ДІЮ, а не цільовий статус: інакше клієнт вирішував би, куди
@@ -169,20 +176,101 @@ describe('updateLoanRequestSchema', () => {
     )
   })
 
-  it('термін повернення дозволений лише разом із approve', () => {
-    expect(
-      updateLoanRequestSchema.safeParse({ action: 'approve', dueAt: '2026-06-12' }).success,
-    ).toBe(true)
+  it('термін повернення дозволений лише разом із approve або amend_record', () => {
+    for (const action of ['approve', 'amend_record'] as const) {
+      expect(updateLoanRequestSchema.safeParse({ action, dueAt: '2026-06-12' }).success).toBe(true)
+    }
 
-    for (const action of LOAN_ACTIONS.filter((value) => value !== 'approve')) {
+    for (const action of LOAN_ACTIONS.filter(
+      (value) => value !== 'approve' && value !== 'amend_record',
+    )) {
       expect(updateLoanRequestSchema.safeParse({ action, dueAt: '2026-06-12' }).success).toBe(false)
     }
   })
 
-  it('без терміну будь-яка дія, крім recover, приймає примітку', () => {
-    for (const action of LOAN_ACTIONS.filter((value) => value !== 'recover')) {
+  it('без терміну будь-яка дія request-flow, крім recover, приймає примітку; дії запису — ні (10e)', () => {
+    for (const action of LOAN_ACTIONS.filter(
+      (value) => value !== 'recover' && !isRecordAction(value),
+    )) {
       expect(updateLoanRequestSchema.safeParse({ action, note: 'бо так' }).success).toBe(true)
     }
+  })
+})
+
+describe('Stage 10 (10e): дії запису наявної позики', () => {
+  it('isRecordAction впізнає рівно чотири дії', () => {
+    expect(LOAN_ACTIONS.filter((action) => isRecordAction(action)).sort()).toEqual([
+      'amend_record',
+      'confirm_record',
+      'decline_record',
+      'withdraw_record',
+    ])
+  })
+
+  it('дата передачі — лише з amend_record; amend_record потребує хоча б однієї дати', () => {
+    expect(
+      updateLoanRequestSchema.safeParse({ action: 'amend_record', handedAt: '2026-05-01' }).success,
+    ).toBe(true)
+    expect(updateLoanRequestSchema.safeParse({ action: 'amend_record' }).success).toBe(false)
+
+    for (const action of LOAN_ACTIONS.filter((value) => value !== 'amend_record')) {
+      expect(updateLoanRequestSchema.safeParse({ action, handedAt: '2026-05-01' }).success).toBe(
+        false,
+      )
+    }
+  })
+
+  it('Q23: dueAt у amend_record — відсутнє / null / дата / невалідне; null лише для amend_record', () => {
+    const amend = (extra: Record<string, unknown>) =>
+      updateLoanRequestSchema.safeParse({ action: 'amend_record', ...extra })
+
+    expect(amend({ dueAt: null }).success).toBe(true)
+    expect(amend({ dueAt: '2026-10-01' }).success).toBe(true)
+    expect(amend({ handedAt: '2026-05-01' }).success).toBe(true)
+    expect(amend({ dueAt: 'колись' }).success).toBe(false)
+    expect(amend({ dueAt: '' }).success).toBe(false)
+    expect(amend({}).success).toBe(false)
+    expect(amend({ dueAt: null }).data).toHaveProperty('dueAt', null)
+    expect(amend({ handedAt: '2026-05-01' }).data).not.toHaveProperty('dueAt')
+
+    for (const action of LOAN_ACTIONS.filter((value) => value !== 'amend_record')) {
+      expect(updateLoanRequestSchema.safeParse({ action, dueAt: null }).success).toBe(false)
+    }
+  })
+
+  it('note із діями запису відхиляється', () => {
+    for (const action of ['confirm_record', 'decline_record', 'withdraw_record'] as const) {
+      expect(updateLoanRequestSchema.safeParse({ action }).success).toBe(true)
+      expect(updateLoanRequestSchema.safeParse({ action, note: 'x' }).success).toBe(false)
+    }
+  })
+
+  it('createRecordedLoanRequestSchema: обов’язкові copyId, borrowerId, handedAt; dueAt не раніше передачі', () => {
+    const base = { copyId: 'c-1', borrowerId: 'u-1', handedAt: '2026-05-01' }
+
+    expect(createRecordedLoanRequestSchema.safeParse(base).success).toBe(true)
+    expect(
+      createRecordedLoanRequestSchema.safeParse({ ...base, dueAt: '2026-05-01' }).success,
+    ).toBe(true)
+    expect(
+      createRecordedLoanRequestSchema.safeParse({ ...base, dueAt: '2026-04-30' }).success,
+    ).toBe(false)
+    expect(createRecordedLoanRequestSchema.safeParse({ ...base, handedAt: 'вчора' }).success).toBe(
+      false,
+    )
+
+    for (const key of ['copyId', 'borrowerId', 'handedAt'] as const) {
+      const { [key]: _omitted, ...rest } = base
+
+      expect(createRecordedLoanRequestSchema.safeParse(rest).success).toBe(false)
+    }
+  })
+
+  it('loanSchema: requestedAt = null для записаної позики; origin RECORDED_GUEST не віддається', () => {
+    expect(
+      loanSchema.safeParse({ ...rawLoan, origin: 'RECORDED_EXISTING', requestedAt: null }).success,
+    ).toBe(true)
+    expect(loanSchema.safeParse({ ...rawLoan, origin: 'RECORDED_GUEST' }).success).toBe(false)
   })
 })
 

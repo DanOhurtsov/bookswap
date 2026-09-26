@@ -27,6 +27,12 @@ export const NOTIFICATION_TYPE = [
   'LOAN_OVERDUE',
   'FRIEND_REQUESTED',
   'FRIEND_ACCEPTED',
+  // Stage 10 (10e): життєвий цикл запису наявної позики.
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
+  'LOAN_RECORD_AMENDED',
 ] as const
 
 export const notificationTypeSchema = z.enum(NOTIFICATION_TYPE)
@@ -48,6 +54,12 @@ export const IMMEDIATE_NOTIFICATION_TYPE = [
   'LOAN_RETURNED',
   'FRIEND_REQUESTED',
   'FRIEND_ACCEPTED',
+  // Stage 10 (10e): життєвий цикл запису наявної позики.
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
+  'LOAN_RECORD_AMENDED',
 ] as const
 
 /**
@@ -80,6 +92,9 @@ export const FLOW_CRITICAL_NOTIFICATION_TYPE = [
   'LOAN_DUE_SOON',
   'LOAN_OVERDUE',
   'FRIEND_REQUESTED',
+  // Stage 10 (10e): без відповіді позичальника запис не рухається (виправлення дат — так само).
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_AMENDED',
 ] as const
 
 /** Чи створюється тип щоденною задачею, а не переходом стану. */

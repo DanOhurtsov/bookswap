@@ -47,7 +47,7 @@ export class CreateLoanDto {
 export class UpdateLoanDto {
   @IsIn(LOAN_ACTIONS, {
     message:
-      'Невідома дія: очікується approve, reject, cancel, hand_over, return, mark_lost або recover',
+      'Невідома дія: очікується approve, reject, cancel, hand_over, return, mark_lost, recover, confirm_record, decline_record, withdraw_record або amend_record',
   })
   action!: LoanAction
 
@@ -59,12 +59,39 @@ export class UpdateLoanDto {
 
   @IsOptional()
   @IsIsoDate()
-  dueAt?: string
+  dueAt?: string | null
 
   /** Stage 10 (10d): фактична дата знахідки; лише з `recover`, не в майбутньому (перевіряє сервіс). */
   @IsOptional()
   @IsIsoDate()
   effectiveAt?: string
+
+  /** Stage 10 (10e): нова фактична дата передачі; лише з `amend_record`, не в майбутньому (перевіряє сервіс). */
+  @IsOptional()
+  @IsIsoDate()
+  handedAt?: string
+}
+
+/** Stage 10 (10e, D6): `POST /loans/recorded { copyId, borrowerId, handedAt, dueAt? }`. */
+export class CreateRecordedLoanDto {
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(1, { message: 'Не вказано примірник' })
+  @MaxLength(LOAN_LIMITS.idMax)
+  copyId!: string
+
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(1, { message: 'Не вказано позичальника' })
+  @MaxLength(LOAN_LIMITS.idMax)
+  borrowerId!: string
+
+  @IsIsoDate()
+  handedAt!: string
+
+  @IsOptional()
+  @IsIsoDate()
+  dueAt?: string
 }
 
 /** §8: `GET /loans?role=owner|borrower&status=…`. Обидва фільтри незалежні. */

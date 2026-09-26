@@ -9,6 +9,41 @@ const base: NotificationView = {
   webOrigin: 'https://bookswap.example',
 }
 
+describe('renderNotification: сповіщення запису наявної позики (Stage 10, 10e)', () => {
+  const record = (type: NotificationView['type']) => renderNotification({ ...base, type })
+
+  it('PROPOSED: просить підтвердити або відхилити й попереджає про недоступність; без кнопок Telegram', () => {
+    const rendered = record('LOAN_RECORD_PROPOSED')
+
+    expect(rendered.subject).toContain('Шантарам')
+    expect(rendered.body).toContain('Підтвердьте')
+    expect(rendered.body).toContain('недоступна іншим')
+    expect(rendered.body).toContain('/loans?loanId=loan-1')
+    expect(rendered.actions).toEqual([])
+  })
+
+  it('AMENDED веде до перегляду нових дат; CONFIRMED/DECLINED/WITHDRAWN — інформаційні', () => {
+    expect(record('LOAN_RECORD_AMENDED').body).toContain('нові дати')
+    expect(record('LOAN_RECORD_DECLINED').body).toContain('знову вільна')
+
+    for (const type of ['LOAN_RECORD_CONFIRMED', 'LOAN_RECORD_WITHDRAWN'] as const) {
+      expect(record(type).actions).toEqual([])
+    }
+  })
+
+  it('ці тексти не називають запис «погодженим запитом» (D6: запиту не було)', () => {
+    for (const type of [
+      'LOAN_RECORD_PROPOSED',
+      'LOAN_RECORD_AMENDED',
+      'LOAN_RECORD_CONFIRMED',
+      'LOAN_RECORD_DECLINED',
+      'LOAN_RECORD_WITHDRAWN',
+    ] as const) {
+      expect(record(type).subject).not.toMatch(/запит на|погоджено|просить/i)
+    }
+  })
+})
+
 describe('renderNotification', () => {
   it.each([...NOTIFICATION_TYPE])('дає непорожні тему й тіло для %s', (type) => {
     const rendered = renderNotification({ ...base, type })

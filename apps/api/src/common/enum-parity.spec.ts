@@ -247,8 +247,17 @@ describe('LoanStatus: shared ↔ Prisma', () => {
    * збігатися з множиною часткового унікального індексу §5.3.1.
    */
   it('незавершені й ексклюзивні статуси лишаються підмножинами §4.6', () => {
-    expect([...OPEN_LOAN_STATUS].sort()).toEqual(['APPROVED', 'HANDED_OVER', 'REQUESTED'])
-    expect([...EXCLUSIVE_LOAN_STATUS].sort()).toEqual(['APPROVED', 'HANDED_OVER'])
+    expect([...OPEN_LOAN_STATUS].sort()).toEqual([
+      'APPROVED',
+      'HANDED_OVER',
+      'PENDING_CONFIRMATION',
+      'REQUESTED',
+    ])
+    expect([...EXCLUSIVE_LOAN_STATUS].sort()).toEqual([
+      'APPROVED',
+      'HANDED_OVER',
+      'PENDING_CONFIRMATION',
+    ])
 
     for (const status of OPEN_LOAN_STATUS) {
       expect(Object.values(PrismaLoanStatus)).toContain(status)
@@ -280,9 +289,11 @@ describe('Stage 10: BorrowerKind, LoanOrigin, LoanEventType: shared ↔ Prisma',
     expect(_loanEventTypeMatches).toBe(true)
   })
 
-  it('ексклюзивні й відкриті статуси не розширено: нові статуси ще не займають примірник', () => {
-    expect([...EXCLUSIVE_LOAN_STATUS].sort()).toEqual(['APPROVED', 'HANDED_OVER'])
-    expect([...OPEN_LOAN_STATUS]).not.toContain('PENDING_CONFIRMATION')
+  it('M5 (10e): PENDING_CONFIRMATION ексклюзивний і відкритий, DECLINED — ні', () => {
+    expect([...EXCLUSIVE_LOAN_STATUS]).toContain('PENDING_CONFIRMATION')
+    expect([...OPEN_LOAN_STATUS]).toContain('PENDING_CONFIRMATION')
+    expect([...EXCLUSIVE_LOAN_STATUS]).not.toContain('DECLINED')
+    expect([...OPEN_LOAN_STATUS]).not.toContain('DECLINED')
   })
 })
 

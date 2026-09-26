@@ -1,4 +1,4 @@
-import type { Loan } from '@bookswap/shared'
+import type { Loan, LoanOrigin, LoanStatus } from '@bookswap/shared'
 import {
   toEdition,
   toWork,
@@ -25,9 +25,19 @@ export type LoanCopyRow = Pick<CopyModel, 'id' | 'status' | 'condition' | 'archi
 
 export type LoanRow = Pick<
   LoanModel,
-  'id' | 'status' | 'message' | 'responseNote' | 'respondedAt' | 'handedAt' | 'returnedAt' | 'dueAt'
+  | 'id'
+  | 'status'
+  | 'message'
+  | 'responseNote'
+  | 'respondedAt'
+  | 'handedAt'
+  | 'returnedAt'
+  | 'dueAt'
+  | 'createdAt'
 > & {
-  requestedAt: Date
+  origin: ServedOrigin
+  /** `null` для записаної власником позики: запиту не було (Stage 10, T2). */
+  requestedAt: Date | null
   copy: LoanCopyRow
   owner: PublicUserRow
   borrower: PublicUserRow
@@ -35,38 +45,77 @@ export type LoanRow = Pick<
   events: { occurredAt: Date; effectiveAt: Date | null }[]
 }
 
+/** Походження позик, які віддає `/loans`. `RECORDED_GUEST` — крок 10f. */
+export type ServedOrigin = Extract<LoanOrigin, 'REQUESTED' | 'RECORDED_EXISTING'>
+
 /**
  * Stage 10 (T1, T2): `borrower` і `requestedAt` у БД nullable — гостьові й записані власником
- * позики не мають ні зареєстрованого позичальника, ні запиту. Цей API віддає лише позики
- * request-flow; решта отримає власні контракти в кроках 10e/10f.
+ * позики не мають ні зареєстрованого позичальника, ні запиту. Цей API віддає лише валідні позики
+ * request-flow та записані власником між зареєстрованими друзями (10e).
  */
 export type StoredLoanRow = Pick<
   LoanModel,
-  'requestedAt' | 'borrowerId' | 'origin' | 'borrowerKind'
+  'requestedAt' | 'borrowerId' | 'origin' | 'borrowerKind' | 'status' | 'handedAt'
 > & {
   borrower: PublicUserRow | null
 }
 
-export type RequestFlowLoan<T extends StoredLoanRow> = Omit<
+export type ServedLoan<T extends StoredLoanRow> = Omit<
   T,
-  'requestedAt' | 'borrower' | 'borrowerId'
-> & { requestedAt: Date; borrower: PublicUserRow; borrowerId: string }
+  'requestedAt' | 'borrower' | 'borrowerId' | 'origin'
+> & {
+  requestedAt: Date | null
+  borrower: PublicUserRow
+  borrowerId: string
+  origin: ServedOrigin
+}
+
+/** Статуси, можливі для позики request-flow: статуси запису (`PENDING_CONFIRMATION`, `DECLINED`) їй чужі. */
+export const REQUEST_FLOW_STATUSES: readonly LoanStatus[] = [
+  'REQUESTED',
+  'APPROVED',
+  'REJECTED',
+  'CANCELLED',
+  'HANDED_OVER',
+  'RETURNED',
+  'LOST',
+]
+
+/** Статуси, можливі для записаної власником позики: запиту й погодження в ній не буває. */
+export const RECORDED_STATUSES: readonly LoanStatus[] = [
+  'PENDING_CONFIRMATION',
+  'DECLINED',
+  'CANCELLED',
+  'HANDED_OVER',
+  'RETURNED',
+  'LOST',
+]
 
 /**
- * `null` — позика не з request-flow (гостьова чи записана власником): вона не
- * представляється в `LoanResponse`, тож для цього API її «не існує».
+ * `null` — позика не віддається цим API: гостьова, або несумісна з власним походженням (синтетичний
+ * `RECORDED_EXISTING` зі `status = REQUESTED` чи без `handedAt` не стає легітимним записом).
  */
-export function asRequestFlowLoan<T extends StoredLoanRow>(row: T): RequestFlowLoan<T> | null {
-  // Межа визначається походженням і видом позичальника, а не лише «випадковою» ненульовістю полів:
-  // записана власником позика із зареєстрованим позичальником теж має `requestedAt` (дефолт БД).
-  if (row.origin !== 'REQUESTED' || row.borrowerKind !== 'REGISTERED') return null
-  if (row.borrower === null || row.borrowerId === null || row.requestedAt === null) return null
+export function asServedLoan<T extends StoredLoanRow>(row: T): ServedLoan<T> | null {
+  if (row.borrowerKind !== 'REGISTERED') return null
+  if (row.borrower === null || row.borrowerId === null) return null
+
+  if (row.origin === 'REQUESTED') {
+    if (row.requestedAt === null || !REQUEST_FLOW_STATUSES.includes(row.status)) return null
+
+    return { ...row, origin: row.origin, borrower: row.borrower, borrowerId: row.borrowerId }
+  }
+
+  // Записана власником позика завжди має фактичну дату передачі; `requestedAt` не вигадується (origin —
+  // джерело істини), навіть коли БД дала дефолт `now()`.
+  if (row.origin !== 'RECORDED_EXISTING') return null
+  if (row.handedAt === null || !RECORDED_STATUSES.includes(row.status)) return null
 
   return {
     ...row,
+    origin: row.origin,
+    requestedAt: null,
     borrower: row.borrower,
     borrowerId: row.borrowerId,
-    requestedAt: row.requestedAt,
   }
 }
 
@@ -117,7 +166,9 @@ export function toLoan(loan: LoanRow, now: Date = new Date()): Loan {
     isOverdue: isOverdue(loan, now),
     message: loan.message,
     responseNote: loan.responseNote,
-    requestedAt: loan.requestedAt.toISOString(),
+    origin: loan.origin,
+    createdAt: loan.createdAt.toISOString(),
+    requestedAt: loan.requestedAt?.toISOString() ?? null,
     respondedAt: loan.respondedAt?.toISOString() ?? null,
     handedAt: loan.handedAt?.toISOString() ?? null,
     returnedAt: loan.returnedAt?.toISOString() ?? null,

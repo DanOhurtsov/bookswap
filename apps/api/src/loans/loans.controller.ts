@@ -10,11 +10,16 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
-import { API_ERROR_CODES, type LoanListResponse, type LoanResponse } from '@bookswap/shared'
+import {
+  API_ERROR_CODES,
+  isRecordAction,
+  type LoanListResponse,
+  type LoanResponse,
+} from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
 import { SessionGuard } from '../auth/session.guard'
 import { ApiException } from '../common/api.exception'
-import { CreateLoanDto, LoanQueryDto, UpdateLoanDto } from './dto/loan.dto'
+import { CreateLoanDto, CreateRecordedLoanDto, LoanQueryDto, UpdateLoanDto } from './dto/loan.dto'
 import { LoanService } from './loan.service'
 import type { UserModel } from '../generated/prisma/models'
 
@@ -35,6 +40,16 @@ export class LoansController {
   @HttpCode(HttpStatus.CREATED)
   create(@CurrentUser() user: UserModel, @Body() dto: CreateLoanDto): Promise<LoanResponse> {
     return this.loans.request(user.id, dto)
+  }
+
+  /** Stage 10 (10e, D6): власник записує вже передану книжку; позичальник підтверджує через `PATCH`. */
+  @Post('loans/recorded')
+  @HttpCode(HttpStatus.CREATED)
+  createRecorded(
+    @CurrentUser() user: UserModel,
+    @Body() dto: CreateRecordedLoanDto,
+  ): Promise<LoanResponse> {
+    return this.loans.recordExisting(user.id, dto)
   }
 
   @Get('loans')
@@ -58,10 +73,45 @@ export class LoansController {
     // залежностей не виражає — рівно як «оновити хоч щось» у `PATCH /me`, — тож
     // перевірка стоїть тут. Мовчазне ігнорування було б гіршим: клієнт вважав би,
     // що термін збережено.
-    if (dto.dueAt !== undefined && dto.action !== 'approve') {
+    if (dto.dueAt !== undefined && dto.action !== 'approve' && dto.action !== 'amend_record') {
       throw new ApiException(
         API_ERROR_CODES.VALIDATION_ERROR,
-        'Термін повернення встановлюється лише під час підтвердження запиту',
+        'Термін повернення встановлюється під час підтвердження запиту або виправлення запису',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    // Q23: явний `null` («прибрати строк») дозволений лише для `amend_record`; відсутнє поле — «не змінювати».
+    if (dto.dueAt === null && dto.action !== 'amend_record') {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Прибрати строк повернення можна лише дією amend_record',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    // Stage 10 (10e): `handedAt` — лише з `amend_record`, який без жодної з двох дат беззмістовний;
+    // `note` із діями запису не поєднується (`responseNote` — поле request-flow).
+    if (dto.handedAt !== undefined && dto.action !== 'amend_record') {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Дату передачі можна вказати лише разом із дією amend_record',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    if (dto.action === 'amend_record' && dto.handedAt === undefined && dto.dueAt === undefined) {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Для amend_record потрібна нова дата передачі або строк повернення',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    if (dto.note !== undefined && isRecordAction(dto.action)) {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Примітка не поєднується з діями запису',
         HttpStatus.BAD_REQUEST,
       )
     }

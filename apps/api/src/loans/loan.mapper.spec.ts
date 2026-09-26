@@ -1,4 +1,12 @@
-import { isOverdue, toDueDate, toIsoDay, toLoan, type LoanRow } from './loan.mapper'
+import {
+  asServedLoan,
+  isOverdue,
+  toDueDate,
+  toIsoDay,
+  toLoan,
+  type LoanRow,
+  type StoredLoanRow,
+} from './loan.mapper'
 
 /**
  * §5.2: «`OVERDUE` — не статус». Прострочення виводиться, і саме тому його межі
@@ -13,6 +21,8 @@ const NOW = new Date('2026-06-15T12:00:00.000Z')
 function loanRow(overrides: Partial<LoanRow> = {}): LoanRow {
   return {
     id: 'loan-1',
+    origin: 'REQUESTED',
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
     status: 'HANDED_OVER',
     message: 'дуже хочу почитати',
     responseNote: null,
@@ -196,5 +206,85 @@ describe('toLoan', () => {
     expect(loan.work.title).toBe('Шантарам')
     expect(loan.edition.lang).toBe('uk')
     expect(loan.authors[0]?.name).toBe('Ґреґорі Робертс')
+  })
+})
+
+describe('toLoan: записана власником позика (Stage 10, 10e)', () => {
+  it('requestedAt = null і origin визначає підпис; createdAt — момент запису', () => {
+    const loan = toLoan(
+      loanRow({
+        origin: 'RECORDED_EXISTING',
+        status: 'PENDING_CONFIRMATION',
+        requestedAt: null,
+        respondedAt: null,
+        message: null,
+        createdAt: new Date('2026-06-14T09:00:00.000Z'),
+        handedAt: new Date('2026-05-01T00:00:00.000Z'),
+      }),
+      NOW,
+    )
+
+    expect(loan.origin).toBe('RECORDED_EXISTING')
+    expect(loan.requestedAt).toBeNull()
+    expect(loan.createdAt).toBe('2026-06-14T09:00:00.000Z')
+    expect(loan.handedAt).toBe('2026-05-01T00:00:00.000Z')
+    expect(loan.isOverdue).toBe(false)
+  })
+
+  it('після підтвердження прострочений строк дає isOverdue', () => {
+    const loan = toLoan(
+      loanRow({ origin: 'RECORDED_EXISTING', requestedAt: null, dueAt: toDueDate('2026-06-01') }),
+      NOW,
+    )
+
+    expect(loan.isOverdue).toBe(true)
+  })
+})
+
+describe('asServedLoan (Stage 10, 10e): межі origin', () => {
+  const stored = (overrides: Partial<StoredLoanRow>): StoredLoanRow => ({
+    origin: 'RECORDED_EXISTING',
+    borrowerKind: 'REGISTERED',
+    borrowerId: OLES.id,
+    borrower: OLES,
+    status: 'PENDING_CONFIRMATION',
+    requestedAt: null,
+    handedAt: new Date('2026-05-01T00:00:00.000Z'),
+    ...overrides,
+  })
+
+  it('валідний запис проходить; requestedAt лишається null навіть за дефолту БД now()', () => {
+    expect(asServedLoan(stored({}))).not.toBeNull()
+    expect(asServedLoan(stored({ requestedAt: new Date() }))?.requestedAt).toBeNull()
+  })
+
+  it.each(['REQUESTED', 'APPROVED', 'REJECTED'] as const)(
+    'синтетичний RECORDED_EXISTING зі статусом %s не легітимний',
+    (status) => {
+      expect(asServedLoan(stored({ status }))).toBeNull()
+    },
+  )
+
+  it('запис без handedAt, гостьовий і RECORDED_GUEST не віддаються', () => {
+    expect(asServedLoan(stored({ handedAt: null }))).toBeNull()
+    expect(
+      asServedLoan(stored({ borrowerKind: 'GUEST', borrowerId: null, borrower: null })),
+    ).toBeNull()
+    expect(asServedLoan(stored({ origin: 'RECORDED_GUEST' }))).toBeNull()
+  })
+
+  it.each(['PENDING_CONFIRMATION', 'DECLINED'] as const)(
+    'request-flow позика зі статусом запису %s не легітимна',
+    (status) => {
+      expect(
+        asServedLoan(stored({ origin: 'REQUESTED', status, requestedAt: new Date() })),
+      ).toBeNull()
+    },
+  )
+
+  it('request-flow без requestedAt не віддається', () => {
+    expect(
+      asServedLoan(stored({ origin: 'REQUESTED', status: 'REQUESTED', requestedAt: null })),
+    ).toBeNull()
   })
 })

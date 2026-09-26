@@ -383,6 +383,24 @@ describe('expectedReturnAt — орієнтовна дата поверненн�
     expect(toVisibleCopy(withExclusive('LENT_OUT', null), guest(true)).expectedReturnAt).toBeNull()
   })
 
+  it('Stage 10 (10e): непідтверджений запис (PENDING_CONFIRMATION) дати не віддає — це претензія, а не факт', () => {
+    const pending = copyRow({
+      status: 'RESERVED',
+      loans: [
+        loanRow({
+          id: 'loan-record',
+          status: 'PENDING_CONFIRMATION',
+          borrowerId: BOHDAN.id,
+          borrower: BOHDAN,
+          dueAt: new Date('2026-06-12T23:59:59.999Z'),
+        }),
+      ],
+    })
+
+    expect(toVisibleCopy(pending, guest(true)).expectedReturnAt).toBeNull()
+    expect(toVisibleCopy(pending, guest(true)).canRequest).toBe(false)
+  })
+
   it('для вільного примірника дати немає — вона там безглузда', () => {
     expect(toVisibleCopy(copyRow(), guest(true)).expectedReturnAt).toBeNull()
   })

@@ -625,9 +625,12 @@ pnpm --filter @bookswap/api run merge:works --from <workId> --into <workId>
 POST   /api/v1/loans                  { copyId, message?, proposedDueAt? }
 GET    /api/v1/loans                  ?role=owner|borrower&status=…
 GET    /api/v1/loans/:id
+POST   /api/v1/loans/recorded         { copyId, borrowerId, handedAt, dueAt? }   (Етап 10, 10e)
 PATCH  /api/v1/loans/:id              { action: approve | reject | cancel |
-                                                hand_over | return | mark_lost,
-                                        note?, dueAt? }
+                                                hand_over | return | mark_lost | recover |
+                                                confirm_record | decline_record |
+                                                withdraw_record | amend_record,
+                                        note?, dueAt?, effectiveAt?, handedAt? }
 ```
 
 Один `PATCH` із полем `action` замість шести маршрутів (§8): усі переходи проходять крізь одну точку, де живе валідація стейт-машини. Прямих ендпоінтів «підтвердити» чи «повернути» немає й не буде — кожен із них був би другим місцем, де ухвалюється рішення про перехід.
@@ -654,6 +657,25 @@ PATCH  /api/v1/loans/:id              { action: approve | reject | cancel |
 - **`respondedAt` — це «власник відповів на запит»**, а не «востаннє щось сталося». Тому його ставлять лише `approve`, `reject` і авто-відхилення конкурентів. `REQUESTED → CANCELLED` лишає поле порожнім (відповіді не було), а `APPROVED → CANCELLED` **не перезаписує** значення від апруву. Окремих колонок під `CANCELLED` і `LOST` §4.6 не має, і вигадувати їх без вимоги специфікації не треба.
 - **`reject` і `cancel` із `REQUESTED` не мають передумов на `Copy` і не чіпають його.** Власник міг після появи запиту перемкнути книжку в `UNAVAILABLE` — саме тоді прибрати висячий запит потрібно найбільше, і цей перехід не має права мовчки скасувати його рішення.
 - **Дружба перевіряється лише на створенні.** Після появи лоану переходи авторизуються за `ownerId`/`borrowerId`. Це прямий наслідок §5.2: «видалення з друзів не скасовує активні лоани» — фізична книжка все одно в когось, і `return` мусить лишитися можливим. Повторна перевірка зробила б блокування інструментом утримання чужої речі.
+
+### Запис наявної позики між друзями (Етап 10, крок 10e)
+
+Власник записує книжку, яку вже віддав зареєстрованому другові (D6), — без вигаданих `REQUESTED`/`APPROVED`. Усі рішення — у тій самій чистій `resolveTransition()`, яка тепер отримує `origin`; дії request-flow над записом і дії запису над request-flow відмовляють (`409 LOAN_INVALID_TRANSITION`).
+
+| Звідки                     | Дія             | Хто         | Куди                   | `Copy` після               | Побічні ефекти                                                                                                               |
+| -------------------------- | --------------- | ----------- | ---------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| — (`POST /loans/recorded`) | —               | власник     | `PENDING_CONFIRMATION` | `RESERVED`, удома          | `RECORD_PROPOSED`, `LOAN_RECORD_PROPOSED`; `requestedAt = NULL`; чужі `REQUESTED` не чіпаються                               |
+| `PENDING_CONFIRMATION`     | confirm_record  | позичальник | `HANDED_OVER`          | `LENT_OUT`, у позичальника | `handedAt` не перезаписується; `RECORD_CONFIRMED`; **лише тут** справжні конкуруючі `REQUESTED` → `REJECTED` зі сповіщеннями |
+| `PENDING_CONFIRMATION`     | decline_record  | позичальник | `DECLINED`             | `AVAILABLE`                | `RECORD_DECLINED`; чужі `REQUESTED` лишаються чинними                                                                        |
+| `PENDING_CONFIRMATION`     | withdraw_record | власник     | `CANCELLED`            | `AVAILABLE`                | `RECORD_WITHDRAWN`; чужі `REQUESTED` лишаються чинними                                                                       |
+| `PENDING_CONFIRMATION`     | amend_record    | власник     | `PENDING_CONFIRMATION` | не змінюється              | лише `handedAt`/`dueAt`; `RECORD_AMENDED` із попередніми/новими значеннями (Q12: після підтвердження — `409`)                |
+
+- **Ексклюзивність (M5).** `PENDING_CONFIRMATION` входить до `EXCLUSIVE_LOAN_STATUS` і до індексу `one_active_loan_per_copy`; примірник `RESERVED`, тож ніде не «доступний». Запис і подія, і сповіщення — в одній транзакції під `FOR UPDATE` на `Copy`.
+- **Q6 — без auto-expiry.** Непідтверджений запис ніхто не скасовує сам; нагадування власнику (10e-r) лише заплановане.
+- **Межі `origin`.** `/loans` віддає лише валідні позики: `RECORDED_EXISTING` зі статусом `REQUESTED`/`APPROVED`/`REJECTED` або без `handedAt`, а також `RECORDED_GUEST`, не проходять `asServedLoan` (`404`). `requestedAt` у контракті nullable; підпис визначає `origin`.
+- **Приватність.** `PENDING_CONFIRMATION`, `DECLINED` і відкликаний запис (`CANCELLED` з `origin ≠ REQUESTED`) бачать лише сторони; `expectedReturnAt` для непідтвердженого запису чужим не віддається.
+- **Аналітика.** `LOAN_RECORDED`, `LOAN_RECORD_CONFIRMED`, `LOAN_RECORD_DECLINED`, `LOAN_RECORD_WITHDRAWN` (`subjectUserId` — власник); у 13 кроків funnel не входять (Q9). Кроки core loop (`LOAN_HANDED_OVER` тощо) для записаних позик не пишуться.
+- Докладніше — [execution plan §6.2–§6.3, §6.16](docs/plan/stage-10-real-world-history.md) і [runbook](docs/runbooks/stage-10-migration-rollback.md).
 
 ### Конкурентність
 

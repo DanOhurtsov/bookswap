@@ -110,7 +110,7 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(row?.threshold).toBe('0.3')
   })
 
-  it('one_active_loan_per_copy — унікальний частковий індекс саме на двох статусах (§5.3)', async () => {
+  it('one_active_loan_per_copy — унікальний частковий індекс на трьох ексклюзивних статусах (§5.3, M5)', async () => {
     const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'one_active_loan_per_copy'
     `
@@ -120,6 +120,9 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[0]?.indexdef).toMatch(/"copyId"/)
     expect(rows[0]?.indexdef).toMatch(/APPROVED/)
     expect(rows[0]?.indexdef).toMatch(/HANDED_OVER/)
+    expect(rows[0]?.indexdef).toMatch(/PENDING_CONFIRMATION/)
+    // REQUESTED навмисно не входить: §5.2 дозволяє кільком людям одночасний запит.
+    expect(rows[0]?.indexdef).not.toMatch(/REQUESTED/)
   })
 
   /**

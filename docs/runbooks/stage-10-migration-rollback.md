@@ -1,4 +1,4 @@
-# Runbook — Етап 10, кроки 10a, 10c і 10d: розширення схеми, RESTRICT та однократний recover (розгортання й відкат лише вперед)
+# Runbook — Етап 10, кроки 10a, 10c, 10d і 10e: розширення схеми, RESTRICT, однократний recover та ексклюзивний запис (розгортання й відкат лише вперед)
 
 Стосується двох міграцій кроку 10a
 ([execution plan](../plan/stage-10-real-world-history.md), §6.13, M1–M2):
@@ -272,3 +272,53 @@ SELECT "loanId" FROM "LoanEvent" WHERE type = 'RECOVERED' GROUP BY "loanId" HAVI
 **Відкат: лише вперед.** Видалити індекс можна лише новою міграцією, і це **не рекомендовано**: `recover` знову
 міг би дати кілька подій на позику при гонці. Відкат коду 10d безпечний для даних (події не читаються старим
 кодом), але новий `LoanEvent`/`Copy` після `recover` залишаться: примірник уже `AVAILABLE`, а `Loan` — `LOST`.
+
+## Крок 10e: M5a `20260926110000_stage10_record_notification_types` і M5 `20260926110100_stage10_exclusive_pending`
+
+Дві міграції запису наявної позики між друзями ([§6.13 плану](../plan/stage-10-real-world-history.md), M5a/M5):
+
+- **M5a** — `ALTER TYPE "NotificationType" ADD VALUE` ×5: `LOAN_RECORD_PROPOSED`, `LOAN_RECORD_CONFIRMED`,
+  `LOAN_RECORD_DECLINED`, `LOAN_RECORD_WITHDRAWN`, `LOAN_RECORD_AMENDED`. Окрема міграція, бо нове значення enum не
+  можна використати в тій самій транзакції.
+- **M5** — `one_active_loan_per_copy` перестворено з предикатом `status IN ('APPROVED', 'HANDED_OVER',
+  'PENDING_CONFIRMATION')` (`DROP INDEX` + `CREATE UNIQUE INDEX`). Предикат лише **розширюється**: значення
+  `PENDING_CONFIRMATION` існує зі схеми 10a, але жоден наявний рядок його не має, тож індекс будується без порушень.
+
+**Жоден наявний `Copy`/`Loan`/`LoanEvent`/`Notification` не читається й не змінюється.** Індекс будується коротким
+блокуючим `CREATE` (для поточних обсягів достатньо; `CONCURRENTLY` — лише за потреби на великій таблиці, окремою
+міграцією).
+
+**Порядок розгортання.** Backup → `pnpm db:deploy` (M5a, потім M5) → деплой API і web 10e. Міграції безпечні для
+попереднього коду до появи рядків `PENDING_CONFIRMATION`: старий код їх не створює. Після появи будь-якого запису
+(`origin = RECORDED_EXISTING`) **відкочувати код на реліз до 10e небезпечно** (старий код не знає статусів запису, а `/loans`
+їх не показував би, тоді як примірник лишається `RESERVED`).
+
+**Автоматизований доказ.**
+
+- `apps/api/test/db/stage10-exclusive-pending-migration.db-spec.ts` — на scratch-базі з наповненими `Copy`/`Loan`/`Notification`
+  застосовує M5a і M5 та перевіряє: усі наявні рядки байт-в-байт ті самі (MIG1); нові значення `NotificationType` існують і
+  придатні для запису; індекс частковий, унікальний і включає `PENDING_CONFIRMATION` (MIG3); два записи на один примірник, а також
+  запис + `APPROVED`/`HANDED_OVER` порушують індекс (C1); `REQUESTED`, `DECLINED`, `CANCELLED` і термінальні статуси
+  співіснують із записом.
+- `apps/api/test/db/schema-objects.db-spec.ts` — вигляд індексу; `apps/api/src/common/enum-parity.spec.ts` — паритет
+  Prisma ↔ `packages/shared`; `prisma migrate diff … --exit-code` — «No difference detected» (MIG4).
+
+**Перевірка після розгортання.**
+
+```sql
+SELECT indexdef FROM pg_indexes WHERE indexname = 'one_active_loan_per_copy';
+-- WHERE ... status = ANY (ARRAY['APPROVED', 'HANDED_OVER', 'PENDING_CONFIRMATION'])
+SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+ WHERE t.typname = 'NotificationType' AND enumlabel LIKE 'LOAN_RECORD_%';   -- 5 рядків
+SELECT count(*) FROM "Loan" WHERE status IN ('PENDING_CONFIRMATION','DECLINED');  -- 0 до першого запису
+```
+
+Вручну: запис → підтвердження (`HANDED_OVER`, `LENT_OUT`), запис → відмова/відкликання (примірник знову `AVAILABLE`),
+звичайний потік «запит → погодити → передано → повернено».
+
+**Відкат: лише вперед.** Значення enum не видаляються. Індекс можна повернути до двох статусів НОВОЮ міграцією лише за
+`SELECT count(*) FROM "Loan" WHERE status = 'PENDING_CONFIRMATION'` = `0` (інакше змінений предикат порушив би дані або дозволив
+би дубль). Функцію запису вимикають деплоєм без ендпоінта `POST /loans/recorded` та UI, а наявні запити довиконують сторони.
+
+**Відомі межі 10e.** Непідтверджений запис не скасовується автоматично (Q6); нагадування власнику через 30 днів (10e-r)
+**лише заплановано** і в цій міграції відсутнє. Правка дат після підтвердження заборонена (Q12).

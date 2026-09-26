@@ -74,8 +74,53 @@ describe('UpdateLoanDto ↔ updateLoanRequestSchema', () => {
     expectAgreement(
       UpdateLoanDto,
       updateLoanRequestSchema,
-      LOAN_ACTIONS.map((action) => ({ name: action, payload: { action }, valid: true })),
+      // `amend_record` без дат — правило про пару полів (контролер і zod-refine); нижче окремо.
+      LOAN_ACTIONS.filter((action) => action !== 'amend_record').map((action) => ({
+        name: action,
+        payload: { action },
+        valid: true,
+      })),
     )
+  })
+
+  it('amend_record: дати передачі й строку — рядки-дати; зіпсована дата відхиляється', () => {
+    expectAgreement(UpdateLoanDto, updateLoanRequestSchema, [
+      {
+        name: 'нова дата передачі',
+        payload: { action: 'amend_record', handedAt: '2026-05-01' },
+        valid: true,
+      },
+      {
+        name: 'новий строк',
+        payload: { action: 'amend_record', dueAt: '2026-06-01' },
+        valid: true,
+      },
+      {
+        name: 'обидві дати',
+        payload: { action: 'amend_record', handedAt: '2026-05-01', dueAt: '2026-06-01' },
+        valid: true,
+      },
+      {
+        name: 'зіпсована дата',
+        payload: { action: 'amend_record', handedAt: 'вчора' },
+        valid: false,
+      },
+      {
+        name: 'dueAt: null — прибрати строк',
+        payload: { action: 'amend_record', dueAt: null },
+        valid: true,
+      },
+      {
+        name: 'зіпсований строк',
+        payload: { action: 'amend_record', dueAt: 'колись' },
+        valid: false,
+      },
+      {
+        name: 'порожній рядок замість строку',
+        payload: { action: 'amend_record', dueAt: '' },
+        valid: false,
+      },
+    ])
   })
 
   it('однаково відхиляє невідомі дії', () => {

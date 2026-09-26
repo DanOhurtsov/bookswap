@@ -19,8 +19,7 @@ export const LOAN_STATUS = [
   'HANDED_OVER',
   'RETURNED',
   'LOST',
-  // Stage 10 (docs/plan/stage-10-real-world-history.md, T3). Значення є в схемі з кроку 10a,
-  // але в даних зʼявляться лише з кроку 10e: до того їх ніхто не створює.
+  // Stage 10 (docs/plan/stage-10-real-world-history.md, T3): запис наявної позики власником (10e).
   'PENDING_CONFIRMATION',
   'DECLINED',
 ] as const
@@ -38,7 +37,12 @@ export type LoanStatus = z.infer<typeof loanStatusSchema>
  * примірником щось незавершене». Ним користується §6.5: кнопка «Попросити» не
  * може вирішувати за `Copy.status`, бо `REQUESTED` примірника не змінює.
  */
-export const OPEN_LOAN_STATUS = ['REQUESTED', 'APPROVED', 'HANDED_OVER'] as const
+export const OPEN_LOAN_STATUS = [
+  'REQUESTED',
+  'APPROVED',
+  'HANDED_OVER',
+  'PENDING_CONFIRMATION',
+] as const
 
 export const openLoanStatusSchema = z.enum(OPEN_LOAN_STATUS)
 
@@ -53,8 +57,9 @@ export type OpenLoanStatus = z.infer<typeof openLoanStatusSchema>
  * людям одночасно мати запит на той самий примірник.
  *
  * Це ж та множина, що блокує видалення примірника й зміну його статусу (§5.2).
+ * Stage 10 (M5, 10e): `PENDING_CONFIRMATION` — запис власника, що чекає відповіді, теж займає книжку.
  */
-export const EXCLUSIVE_LOAN_STATUS = ['APPROVED', 'HANDED_OVER'] as const
+export const EXCLUSIVE_LOAN_STATUS = ['APPROVED', 'HANDED_OVER', 'PENDING_CONFIRMATION'] as const
 
 export const exclusiveLoanStatusSchema = z.enum(EXCLUSIVE_LOAN_STATUS)
 
@@ -76,6 +81,11 @@ export const LOAN_ACTIONS = [
   'mark_lost',
   // Stage 10 (10d, T3): `LOST → LOST` + подія `RECOVERED`. Статус позики не змінюється.
   'recover',
+  // Stage 10 (10e, T3): запис наявної позики. Лише для `origin = RECORDED_EXISTING`.
+  'confirm_record',
+  'decline_record',
+  'withdraw_record',
+  'amend_record',
 ] as const
 
 export const loanActionSchema = z.enum(LOAN_ACTIONS)

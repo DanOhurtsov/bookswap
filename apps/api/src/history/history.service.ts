@@ -18,7 +18,7 @@ import {
   toHistoryEntry,
   toNamedEntry,
 } from './history.mapper'
-import type { FriendRelation, LoanStatus } from '@bookswap/shared'
+import type { FriendRelation, LoanOrigin, LoanStatus } from '@bookswap/shared'
 
 /**
  * Stage 10 (T5): позика, яку власник записав і яка ще не підтверджена (або відхилена), — це
@@ -217,12 +217,17 @@ export class HistoryService {
   }
 }
 
-/** Претензії (`PENDING_CONFIRMATION`/`DECLINED`) бачать лише власник і позичальник цієї позики. */
+/**
+ * Претензії бачать лише власник і позичальник цієї позики: `PENDING_CONFIRMATION`/`DECLINED`, а також відкликаний
+ * запис (`CANCELLED` з `origin ≠ REQUESTED`) — передача, що так і не була підтверджена, не факт для третіх осіб.
+ */
 function isVisibleToParty(
-  loan: { status: LoanStatus; ownerId: string; borrowerId: string | null },
+  loan: { status: LoanStatus; origin: LoanOrigin; ownerId: string; borrowerId: string | null },
   viewerId: string,
 ): boolean {
-  if (!CLAIM_STATUSES.includes(loan.status)) return true
+  const withdrawnRecord = loan.status === 'CANCELLED' && loan.origin !== 'REQUESTED'
+
+  if (!CLAIM_STATUSES.includes(loan.status) && !withdrawnRecord) return true
 
   return loan.ownerId === viewerId || loan.borrowerId === viewerId
 }

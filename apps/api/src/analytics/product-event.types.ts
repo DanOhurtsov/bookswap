@@ -24,6 +24,20 @@ export const PRODUCT_EVENT_TYPE = [
   'DISCOVERY_SEARCHED',
   'FRIEND_BOOK_FOUND',
   'WORK_HOLDERS_FOUND',
+  // Stage 10 (10e, §1.2, §6.14): запис наявної позики. Порожні `properties`, `subjectUserId` — власник.
+  // Не входять до 13 кроків funnel (Q9 не вирішено; окремий блок — крок 10k).
+  'LOAN_RECORDED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
+] as const
+
+/** Stage 10: події запису наявної позики — окремий блок метрик, не конверсійні кроки core loop. */
+export const RECORDED_LOAN_EVENT_TYPE = [
+  'LOAN_RECORDED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
 ] as const
 
 export const productEventTypeSchema = z.enum(PRODUCT_EVENT_TYPE)
@@ -56,6 +70,10 @@ export const PRODUCT_EVENT_PROPERTIES_SCHEMA = {
   DISCOVERY_SEARCHED: emptyPropertiesSchema,
   FRIEND_BOOK_FOUND: emptyPropertiesSchema,
   WORK_HOLDERS_FOUND: emptyPropertiesSchema,
+  LOAN_RECORDED: emptyPropertiesSchema,
+  LOAN_RECORD_CONFIRMED: emptyPropertiesSchema,
+  LOAN_RECORD_DECLINED: emptyPropertiesSchema,
+  LOAN_RECORD_WITHDRAWN: emptyPropertiesSchema,
 } as const satisfies Record<ProductEventType, z.ZodTypeAny>
 
 /**
@@ -93,6 +111,10 @@ export const productEventInputSchema = z.discriminatedUnion('type', [
   eventSchema('DISCOVERY_SEARCHED', PRODUCT_EVENT_PROPERTIES_SCHEMA.DISCOVERY_SEARCHED),
   eventSchema('FRIEND_BOOK_FOUND', PRODUCT_EVENT_PROPERTIES_SCHEMA.FRIEND_BOOK_FOUND),
   eventSchema('WORK_HOLDERS_FOUND', PRODUCT_EVENT_PROPERTIES_SCHEMA.WORK_HOLDERS_FOUND),
+  eventSchema('LOAN_RECORDED', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_RECORDED),
+  eventSchema('LOAN_RECORD_CONFIRMED', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_RECORD_CONFIRMED),
+  eventSchema('LOAN_RECORD_DECLINED', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_RECORD_DECLINED),
+  eventSchema('LOAN_RECORD_WITHDRAWN', PRODUCT_EVENT_PROPERTIES_SCHEMA.LOAN_RECORD_WITHDRAWN),
 ])
 
 export type ProductEventInput = z.infer<typeof productEventInputSchema>

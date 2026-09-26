@@ -232,6 +232,12 @@ export const API_ERROR_CODES = {
   LOAN_ALREADY_RECOVERED: 'LOAN_ALREADY_RECOVERED',
   /** Stage 10 (10d): `effectiveAt` у майбутньому відносно серверної дати (HTTP 400). */
   LOAN_RECOVERY_DATE_INVALID: 'LOAN_RECOVERY_DATE_INVALID',
+  /**
+   * Stage 10 (10e): дати запису наявної позики некоректні (HTTP 400): `handedAt` у майбутньому
+   * (за серверною датою UTC) або `dueAt` раніше за день передачі. Стосується `POST /loans/recorded`
+   * і `amend_record`.
+   */
+  LOAN_RECORD_DATE_INVALID: 'LOAN_RECORD_DATE_INVALID',
 
   // --- Зовнішні канали сповіщень (§7.2, §7.4) --------------------------------
   /**

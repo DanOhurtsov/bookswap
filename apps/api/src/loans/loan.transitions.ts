@@ -1,7 +1,9 @@
+import { isRecordAction } from '@bookswap/shared'
 import type {
   CopyStatus,
   LoanAction,
   LoanEventType,
+  LoanOrigin,
   LoanStatus,
   NotificationType,
 } from '@bookswap/shared'
@@ -88,14 +90,24 @@ export function resolveTransition(
   from: LoanStatus,
   action: LoanAction,
   actor: LoanActor,
+  origin: LoanOrigin,
 ): LoanTransitionResult {
+  // Stage 10 (10f): гостьові позики мають власні переходи в кроці 10f; тут їх немає.
+  if (origin === 'RECORDED_GUEST') return REFUSE('STATE')
+
+  // Stage 10 (10e, T3): записана власником позика має власну таблицю; request-flow дії над нею неможливі.
+  if (origin === 'RECORDED_EXISTING') return resolveRecorded(from, action, actor)
+
+  // І навпаки: дії запису над позикою request-flow неможливі.
+  if (isRecordAction(action)) return REFUSE('STATE')
+
   switch (from) {
     case 'REQUESTED':
       return fromRequested(action, actor)
     case 'APPROVED':
       return fromApproved(action, actor)
     case 'HANDED_OVER':
-      return fromHandedOver(action, actor)
+      return fromHandedOver(action, actor, origin)
     case 'LOST':
       return fromLost(action, actor)
     // Три термінальні стани §5.1. З них не веде жоден перехід — ні для кого.
@@ -103,10 +115,115 @@ export function resolveTransition(
     case 'CANCELLED':
     case 'RETURNED':
       return REFUSE('STATE')
-    // Stage 10 (T3): статуси існують у схемі з кроку 10a, але переходи з них додасть
-    // крок 10e. Доти жоден рядок так не позначений, а request-flow дії з них неможливі.
+    // Статуси запису наявної позики для позики request-flow недосяжні: такий рядок — зіпсовані дані.
     case 'PENDING_CONFIRMATION':
     case 'DECLINED':
+      return REFUSE('STATE')
+  }
+}
+
+/**
+ * Stage 10 (10e, T3, D6): переходи позики `origin = RECORDED_EXISTING`. Статуси `REQUESTED`, `APPROVED`,
+ * `REJECTED` для неї неможливі (синтетичний рядок не стає легітимним записом), тож усі дії з них — `STATE`.
+ * Після підтвердження (`HANDED_OVER`) `amend/withdraw/decline` неможливі (Q12), а `return`/`mark_lost`/`recover`
+ * працюють за чинними правилами.
+ */
+function resolveRecorded(
+  from: LoanStatus,
+  action: LoanAction,
+  actor: LoanActor,
+): LoanTransitionResult {
+  switch (from) {
+    case 'PENDING_CONFIRMATION':
+      return fromPendingConfirmation(action, actor)
+    case 'HANDED_OVER':
+      return fromHandedOver(action, actor, 'RECORDED_EXISTING')
+    case 'LOST':
+      return fromLost(action, actor)
+    case 'REQUESTED':
+    case 'APPROVED':
+    case 'REJECTED':
+    case 'CANCELLED':
+    case 'RETURNED':
+    case 'DECLINED':
+      return REFUSE('STATE')
+  }
+}
+
+/** Примірник під записом: `RESERVED` і вдома (його ж поставив `POST /loans/recorded`). */
+const RECORD_HELD: CopyPrecondition = { status: 'RESERVED', holder: 'OWNER' }
+
+function fromPendingConfirmation(action: LoanAction, actor: LoanActor): LoanTransitionResult {
+  switch (action) {
+    case 'confirm_record':
+      // Підтверджує отримання лише той, хто отримав (як `hand_over` у request-flow, §5.2).
+      if (actor !== 'BORROWER') return REFUSE('ROLE')
+
+      return {
+        to: 'HANDED_OVER',
+        requires: RECORD_HELD,
+        copyStatus: 'LENT_OUT',
+        holder: 'BORROWER',
+        // `handedAt` — фактична дата, яку вказав власник; підтвердження її НЕ перезаписує.
+        // `respondedAt` («власник відповів на запит») тут не має сенсу: запиту не було.
+        stamp: null,
+        notify: { to: 'OWNER', type: 'LOAN_RECORD_CONFIRMED' },
+        // Лише тут (Q6/T3): книжка справді пішла, тож справжні конкуруючі `REQUESTED` відхиляються.
+        rejectRivals: true,
+        event: 'RECORD_CONFIRMED',
+      }
+
+    case 'decline_record':
+      if (actor !== 'BORROWER') return REFUSE('ROLE')
+
+      return {
+        to: 'DECLINED',
+        requires: RECORD_HELD,
+        copyStatus: 'AVAILABLE',
+        holder: null,
+        stamp: null,
+        notify: { to: 'OWNER', type: 'LOAN_RECORD_DECLINED' },
+        // Чужі `REQUESTED` лишаються чинними: запис не відбувся.
+        rejectRivals: false,
+        event: 'RECORD_DECLINED',
+      }
+
+    case 'withdraw_record':
+      if (actor !== 'OWNER') return REFUSE('ROLE')
+
+      return {
+        to: 'CANCELLED',
+        requires: RECORD_HELD,
+        copyStatus: 'AVAILABLE',
+        holder: null,
+        stamp: null,
+        notify: { to: 'BORROWER', type: 'LOAN_RECORD_WITHDRAWN' },
+        rejectRivals: false,
+        event: 'RECORD_WITHDRAWN',
+      }
+
+    case 'amend_record':
+      if (actor !== 'OWNER') return REFUSE('ROLE')
+
+      // Статус і примірник не змінюються: правляться лише `handedAt`/`dueAt` (Q12, лише до відповіді).
+      return {
+        to: 'PENDING_CONFIRMATION',
+        requires: RECORD_HELD,
+        copyStatus: null,
+        holder: null,
+        stamp: null,
+        notify: { to: 'BORROWER', type: 'LOAN_RECORD_AMENDED' },
+        rejectRivals: false,
+        event: 'RECORD_AMENDED',
+      }
+
+    case 'approve':
+    case 'reject':
+    case 'cancel':
+    case 'hand_over':
+    case 'return':
+    case 'mark_lost':
+    case 'recover':
       return REFUSE('STATE')
   }
 }
@@ -175,6 +292,10 @@ function fromRequested(action: LoanAction, actor: LoanActor): LoanTransitionResu
     case 'return':
     case 'mark_lost':
     case 'recover':
+    case 'confirm_record':
+    case 'decline_record':
+    case 'withdraw_record':
+    case 'amend_record':
       return REFUSE('STATE')
   }
 }
@@ -220,11 +341,19 @@ function fromApproved(action: LoanAction, actor: LoanActor): LoanTransitionResul
     case 'return':
     case 'mark_lost':
     case 'recover':
+    case 'confirm_record':
+    case 'decline_record':
+    case 'withdraw_record':
+    case 'amend_record':
       return REFUSE('STATE')
   }
 }
 
-function fromHandedOver(action: LoanAction, actor: LoanActor): LoanTransitionResult {
+function fromHandedOver(
+  action: LoanAction,
+  actor: LoanActor,
+  origin: LoanOrigin,
+): LoanTransitionResult {
   switch (action) {
     case 'return':
       if (actor !== 'OWNER') return REFUSE('ROLE')
@@ -240,7 +369,8 @@ function fromHandedOver(action: LoanAction, actor: LoanActor): LoanTransitionRes
         stamp: 'returnedAt',
         notify: { to: 'BORROWER', type: 'LOAN_RETURNED' },
         rejectRivals: false,
-        event: null,
+        // Stage 10 (§6.8): записані власником позики мають audit trail і при поверненні; request-flow — ні.
+        event: origin === 'REQUESTED' ? null : 'LOAN_RETURNED',
       }
 
     case 'mark_lost':
@@ -269,6 +399,10 @@ function fromHandedOver(action: LoanAction, actor: LoanActor): LoanTransitionRes
     case 'cancel':
     case 'hand_over':
     case 'recover':
+    case 'confirm_record':
+    case 'decline_record':
+    case 'withdraw_record':
+    case 'amend_record':
       return REFUSE('STATE')
   }
 }
@@ -302,6 +436,10 @@ function fromLost(action: LoanAction, actor: LoanActor): LoanTransitionResult {
     case 'hand_over':
     case 'return':
     case 'mark_lost':
+    case 'confirm_record':
+    case 'decline_record':
+    case 'withdraw_record':
+    case 'amend_record':
       return REFUSE('STATE')
   }
 }

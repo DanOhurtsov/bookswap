@@ -27,6 +27,7 @@ import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import {
   CONDITION_LABELS,
   COPY_STATUS_LABELS,
+  LOAN_STATUS_LABELS,
   VISIBILITY_LABELS,
   formatDate,
 } from '@/app/lib/labels'
@@ -34,6 +35,7 @@ import { useBorrowedLibrary, useOwnLibrary, type LibraryView } from '@/app/lib/u
 import { useSession } from '@/app/lib/use-session'
 import { validate, type FieldErrors } from '@/app/lib/validation'
 import { invalidateActivation } from '@/features/library/activation/index.client'
+import { RecordExistingLoanForm } from './RecordExistingLoanForm'
 
 type LibraryScreenProps = {
   /**
@@ -481,6 +483,7 @@ function CopyRow({
   onArchive: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const [recording, setRecording] = useState(false)
   const [condition, setCondition] = useState<Condition>(copy.condition)
   const [visibility, setVisibility] = useState<Visibility>(copy.visibility)
   const [note, setNote] = useState(copy.note ?? '')
@@ -565,7 +568,8 @@ function CopyRow({
         {copy.activeLoan !== null && (
           <>
             <Link href={`/loans?loanId=${copy.activeLoan.id}&role=owner`}>
-              Позичання: {copy.activeLoan.counterpart.displayName}
+              Позичання: {copy.activeLoan.counterpart.displayName} ·{' '}
+              {LOAN_STATUS_LABELS[copy.activeLoan.status]}
             </Link>{' '}
             ·{' '}
           </>
@@ -578,7 +582,18 @@ function CopyRow({
         <Link href={`/copies/${copy.id}/history`}>Історія</Link>
       </span>
 
-      {open ? (
+      {recording ? (
+        <RecordExistingLoanForm
+          copyId={copy.id}
+          onRecorded={async () => {
+            setRecording(false)
+            await onSaved()
+          }}
+          onCancel={() => {
+            setRecording(false)
+          }}
+        />
+      ) : open ? (
         <div className="form">
           <SelectField
             id={`edit-condition-${copy.id}`}
@@ -671,6 +686,19 @@ function CopyRow({
               }
             >
               {copy.status === 'AVAILABLE' ? 'Тимчасово не даю' : 'Знову даю'}
+            </button>
+          )}
+
+          {canToggleStatus && copy.status === 'AVAILABLE' && (
+            <button
+              type="button"
+              className="button--ghost"
+              disabled={pending || busyKey !== undefined}
+              onClick={() => {
+                setRecording(true)
+              }}
+            >
+              Записати передану книжку
             </button>
           )}
 

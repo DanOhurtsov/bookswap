@@ -539,43 +539,48 @@ describe('Stage 10 (10d): recover втраченого примірника (e2e
     })
   })
 
-  describe('межа request-flow: recover не відкриває записані позики (10a → 10e/10f)', () => {
+  // 10e: валідна записана позика (після confirm_record) відновлюється — див. loans-recorded.e2e-spec.ts.
+  // Тут лишаються негативні межі: гостьова (10f) і синтетична (без фактичної передачі) — не легітимні.
+  describe('межа: recover не відкриває гостьові й синтетичні записані позики', () => {
     it.each([
-      ['RECORDED_EXISTING', 'REGISTERED'],
-      ['RECORDED_GUEST', 'GUEST'],
-    ] as const)('origin %s (%s): 404, нічого не змінено', async (origin, borrowerKind) => {
-      const owner = await registerAccount(app, 'rec-bd-o')
-      const borrower = await registerAccount(app, 'rec-bd-b')
+      ['RECORDED_EXISTING', 'REGISTERED', null],
+      ['RECORDED_GUEST', 'GUEST', new Date('2026-08-01T00:00:00Z')],
+    ] as const)(
+      'origin %s (%s): 404, нічого не змінено',
+      async (origin, borrowerKind, handedAt) => {
+        const owner = await registerAccount(app, 'rec-bd-o')
+        const borrower = await registerAccount(app, 'rec-bd-b')
 
-      await befriend(app, owner, borrower)
+        await befriend(app, owner, borrower)
 
-      const shelf = await createShelfCopy(app, owner)
-      const guest = borrowerKind === 'GUEST'
+        const shelf = await createShelfCopy(app, owner)
+        const guest = borrowerKind === 'GUEST'
 
-      await prisma.copy.update({
-        where: { id: shelf.copyId },
-        data: { status: 'UNAVAILABLE', currentHolderId: guest ? null : borrower.id },
-      })
+        await prisma.copy.update({
+          where: { id: shelf.copyId },
+          data: { status: 'UNAVAILABLE', currentHolderId: guest ? null : borrower.id },
+        })
 
-      const foreign = await prisma.loan.create({
-        data: {
-          copyId: shelf.copyId,
-          ownerId: owner.id,
-          borrowerId: guest ? null : borrower.id,
-          borrowerKind,
-          origin,
-          status: 'LOST',
-          handedAt: new Date('2026-08-01T00:00:00Z'),
-        },
-      })
-      const copyBefore = await copyRow(shelf.copyId)
+        const foreign = await prisma.loan.create({
+          data: {
+            copyId: shelf.copyId,
+            ownerId: owner.id,
+            borrowerId: guest ? null : borrower.id,
+            borrowerKind,
+            origin,
+            status: 'LOST',
+            handedAt,
+          },
+        })
+        const copyBefore = await copyRow(shelf.copyId)
 
-      await recover(owner, foreign.id).expect(404)
-      await recover(borrower, foreign.id).expect(404)
+        await recover(owner, foreign.id).expect(404)
+        await recover(borrower, foreign.id).expect(404)
 
-      expect(await copyRow(shelf.copyId)).toEqual(copyBefore)
-      expect(await events(foreign.id)).toEqual([])
-      expect((await loanRow(foreign.id)).status).toBe('LOST')
-    })
+        expect(await copyRow(shelf.copyId)).toEqual(copyBefore)
+        expect(await events(foreign.id)).toEqual([])
+        expect((await loanRow(foreign.id)).status).toBe('LOST')
+      },
+    )
   })
 })

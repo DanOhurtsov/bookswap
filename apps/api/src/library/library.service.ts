@@ -34,7 +34,8 @@ import type { CopyWhereInput } from '../generated/prisma/models'
 const LOAN_COPY_FKEY = 'Loan_copyId_fkey'
 
 /**
- * §5.2: видалення примірника заблоковане, поки лоан у цих статусах.
+ * §5.2: видалення примірника й архів заблоковані, поки лоан у цих статусах (Stage 10, M5: включно з
+ * `PENDING_CONFIRMATION` — записом власника, що чекає відповіді).
  *
  * Це не формальність: активний лоан — це домовленість, яку не можна загубити
  * видаленням. Від стирання історії захищає `Loan_copyId_fkey` (`RESTRICT` з M3,
@@ -46,16 +47,6 @@ const LOAN_COPY_FKEY = 'Loan_copyId_fkey'
  * дня забули б оновити.
  */
 const ACTIVE_LOAN_STATUSES: LoanStatus[] = [...EXCLUSIVE_LOAN_STATUS]
-
-/**
- * Stage 10 (10c): архів заборонено, поки лоан займає примірник. `PENDING_CONFIRMATION` (запис власника, що
- * чекає відповіді позичальника) вже блокує архів, хоча в `EXCLUSIVE_LOAN_STATUS` і в частковий індекс його додасть
- * лише крок 10e (M5) разом із самим створенням таких записів.
- */
-const ARCHIVE_BLOCKING_LOAN_STATUSES: LoanStatus[] = [
-  ...ACTIVE_LOAN_STATUSES,
-  'PENDING_CONFIRMATION',
-]
 
 /** Незавершені лоани — ті, що впливають на §6.5. Копія масиву: Prisma хоче змінюваний. */
 const OPEN_LOAN_STATUSES: LoanStatus[] = [...OPEN_LOAN_STATUS]
@@ -354,7 +345,7 @@ export class LibraryService {
       if (copy.archivedAt !== null) return
 
       const exclusive = await tx.loan.findFirst({
-        where: { copyId, status: { in: ARCHIVE_BLOCKING_LOAN_STATUSES } },
+        where: { copyId, status: { in: ACTIVE_LOAN_STATUSES } },
         select: { id: true },
       })
 

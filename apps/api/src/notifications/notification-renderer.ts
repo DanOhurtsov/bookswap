@@ -134,6 +134,18 @@ function headline(view: NotificationView): string {
       return `${who} хоче додати вас у друзі`
     case 'FRIEND_ACCEPTED':
       return `Запит у друзі прийнято: ${who}`
+    // Stage 10 (10e): формулювання безособові й не стверджують непідтверджений факт — це запис власника,
+    // а не погоджена передача, доки позичальник не відповів.
+    case 'LOAN_RECORD_PROPOSED':
+      return `Записано передачу ${what}: ${who} вказує, що книжка вже у вас`
+    case 'LOAN_RECORD_AMENDED':
+      return `Виправлено запис про передачу ${what}`
+    case 'LOAN_RECORD_CONFIRMED':
+      return `Отримання ${what} підтверджено`
+    case 'LOAN_RECORD_DECLINED':
+      return `Запис про передачу ${what} відхилено`
+    case 'LOAN_RECORD_WITHDRAWN':
+      return `Запис про передачу ${what} відкликано`
   }
 }
 
@@ -152,6 +164,15 @@ function callToAction(view: NotificationView): string {
       return 'Поверніть книжку або домовтеся про новий термін.'
     case 'FRIEND_REQUESTED':
       return 'Прийміть або відхиліть запит у друзі.'
+    case 'LOAN_RECORD_PROPOSED':
+      return 'Підтвердьте, що отримали книжку, або відхиліть запис. Доки ви не відповіли, книжка недоступна іншим.'
+    case 'LOAN_RECORD_AMENDED':
+      return 'Перегляньте нові дати й підтвердьте отримання або відхиліть запис.'
+    case 'LOAN_RECORD_DECLINED':
+      return 'Книжка знову вільна.'
+    case 'LOAN_RECORD_CONFIRMED':
+      return 'Книжка тепер у позичальника.'
+    case 'LOAN_RECORD_WITHDRAWN':
     case 'LOAN_REJECTED':
     case 'LOAN_CANCELLED':
     case 'LOAN_RETURNED':

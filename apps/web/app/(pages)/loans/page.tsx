@@ -14,6 +14,7 @@ import {
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LostLoanRecovery } from '@/components/LostLoanRecovery'
+import { RecordedLoanActions } from '@/components/RecordedLoanActions'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
@@ -90,17 +91,9 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-/**
- * Stage 10: `PENDING_CONFIRMATION` і `DECLINED` є в схемі, але ще недосяжні (їх створює крок
- * 10e), тож у фільтрі їх немає — інакше він пропонував би порожній вибір.
- */
-const FILTERABLE_LOAN_STATUS = LOAN_STATUS.filter(
-  (value) => value !== 'PENDING_CONFIRMATION' && value !== 'DECLINED',
-)
-
 const ROLE_LABELS: Readonly<Record<LoanRole, string>> = {
   owner: 'Мої книжки',
-  borrower: 'Я прошу',
+  borrower: 'Я позичаю',
 }
 
 /**
@@ -196,7 +189,7 @@ function LoanListView({ user }: { user: Me }) {
     router.replace(`/loans?${next.toString()}`)
   }
 
-  const status = FILTERABLE_LOAN_STATUS.find((value) => value === statusFilter)
+  const status = LOAN_STATUS.find((value) => value === statusFilter)
   const { state, reload } = useLoans({ role, status })
   const actions = useLoanActions(reload)
 
@@ -235,7 +228,7 @@ function LoanListView({ user }: { user: Me }) {
           }}
         >
           <option value="">будь-який</option>
-          {FILTERABLE_LOAN_STATUS.map((value) => (
+          {LOAN_STATUS.map((value) => (
             <option key={value} value={value}>
               {LOAN_STATUS_LABELS[value]}
             </option>
@@ -251,8 +244,8 @@ function LoanListView({ user }: { user: Me }) {
       {state.status === 'ready' && state.data.loans.length === 0 && (
         <p className="empty">
           {role === 'owner'
-            ? 'Вашими книжками поки ніхто не цікавився.'
-            : 'Ви поки нічого не просили. Загляньте в бібліотеку друга.'}
+            ? 'Вашими книжками поки ніхто не цікавився. Якщо ви вже віддали книжку другові, запишіть це в бібліотеці.'
+            : 'Ви поки нічого не позичали й не просили. Загляньте в бібліотеку друга.'}
         </p>
       )}
 
@@ -400,10 +393,22 @@ function LoanCard({
 
       <span className="book__meta">
         {LOAN_STATUS_LABELS[loan.status]} · {CONDITION_LABELS[loan.copy.condition]} ·{' '}
-        {isOwner ? 'просить' : 'у'} {counterpart.displayName}
+        {counterpartLine(loan, isOwner)} {counterpart.displayName}
         {loan.dueAt !== null && ` · до ${formatDate(loan.dueAt)}`}
         {loan.isOverdue && ' · прострочено'}
       </span>
+
+      {/* Джерело підпису — `origin`, а не `requestedAt`: записаний власником запис запиту не мав. */}
+      {loan.origin === 'RECORDED_EXISTING' ? (
+        <span className="book__meta">
+          Записано власником {formatDate(loan.createdAt)}
+          {loan.handedAt !== null && ` · передано ${formatDate(loan.handedAt)}`}
+        </span>
+      ) : (
+        loan.requestedAt !== null && (
+          <span className="book__meta">Попросили {formatDate(loan.requestedAt)}</span>
+        )
+      )}
 
       {loan.message !== null && <span className="book__meta">Прохання: {loan.message}</span>}
       {loan.responseNote !== null && (
@@ -423,6 +428,13 @@ function LoanCard({
       </span>
     </li>
   )
+}
+
+/** Підпис контрагента: записана власником позика не є «проханням» — origin визначає підпис. */
+function counterpartLine(loan: Loan, isOwner: boolean): string {
+  if (loan.origin === 'RECORDED_EXISTING') return isOwner ? 'у друга:' : 'власник:'
+
+  return isOwner ? 'просить' : 'у'
 }
 
 /**
@@ -523,6 +535,28 @@ function LoanActions({
         />
       )
 
+    // Stage 10 (10e, D6): запис власника, що чекає відповіді. Правка дат — лише до підтвердження (Q12).
+    case 'PENDING_CONFIRMATION':
+      return (
+        <RecordedLoanActions
+          loan={loan}
+          isOwner={isOwner}
+          busy={busy}
+          busyKey={busyKey}
+          onAct={onAct}
+          onConfirm={onConfirm}
+        />
+      )
+
+    case 'DECLINED':
+      return (
+        <span className="book__meta">
+          {isOwner
+            ? `${loan.borrower.displayName} відхилив(-ла) запис. Книжка знову вільна: можна записати заново.`
+            : 'Ви відхилили цей запис.'}
+        </span>
+      )
+
     // Термінальні стани §5.1: з них не веде жоден перехід — ні для кого.
     case 'REJECTED':
     case 'CANCELLED':
@@ -540,6 +574,10 @@ const DANGER_DESCRIPTIONS: Readonly<Record<LoanAction, string>> = {
   mark_lost:
     'Примірник позначиться як недоступний і залишиться за позичальником. Якщо книжка знайдеться, власник зможе це відмітити.',
   recover: '',
+  confirm_record: '',
+  decline_record: '',
+  withdraw_record: '',
+  amend_record: '',
 }
 
 /**

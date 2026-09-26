@@ -522,9 +522,9 @@ enum LoanStatus {
   HANDED_OVER
   RETURNED
   LOST
-  /// Stage 10 (T3): власник записав наявну позику, чекає відповіді позичальника. Ще не використовується.
+  /// Stage 10 (T3): власник записав наявну позику, чекає відповіді позичальника (10e).
   PENDING_CONFIRMATION
-  /// Stage 10 (T3): позичальник відмовився від запису власника. Ще не використовується.
+  /// Stage 10 (T3): позичальник відмовився від запису власника (10e).
   DECLINED
 }
 
@@ -761,6 +761,12 @@ enum NotificationType {
   LOAN_OVERDUE
   FRIEND_REQUESTED
   FRIEND_ACCEPTED
+  /// Stage 10 (10e): життєвий цикл запису наявної позики між друзями.
+  LOAN_RECORD_PROPOSED
+  LOAN_RECORD_CONFIRMED
+  LOAN_RECORD_DECLINED
+  LOAN_RECORD_WITHDRAWN
+  LOAN_RECORD_AMENDED
 }
 
 enum Channel {

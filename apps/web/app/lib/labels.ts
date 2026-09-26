@@ -54,7 +54,7 @@ export const LOAN_STATUS_LABELS: Readonly<Record<LoanStatus, string>> = {
   HANDED_OVER: 'На руках',
   RETURNED: 'Повернено',
   LOST: 'Втрачено',
-  // Stage 10: статуси з'являться в даних лише з кроку 10e; підписи потрібні типу `Record`.
+  // Stage 10 (10e): запис власника, що чекає відповіді позичальника.
   PENDING_CONFIRMATION: 'Очікує підтвердження',
   DECLINED: 'Відхилено позичальником',
 }
@@ -68,6 +68,10 @@ export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {
   return: 'Книжку повернуто',
   mark_lost: 'Позначити втраченою',
   recover: 'Знайшлася',
+  confirm_record: 'Підтверджую: отримав книжку',
+  decline_record: 'Відхилити запис',
+  withdraw_record: 'Відкликати запис',
+  amend_record: 'Зберегти нові дати',
 }
 
 export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>> = {
@@ -81,6 +85,11 @@ export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>
   LOAN_OVERDUE: 'Термін минув',
   FRIEND_REQUESTED: 'Новий запит у друзі',
   FRIEND_ACCEPTED: 'Запит у друзі прийнято',
+  LOAN_RECORD_PROPOSED: 'Вам записали передачу книжки',
+  LOAN_RECORD_AMENDED: 'Запис про передачу виправлено',
+  LOAN_RECORD_CONFIRMED: 'Отримання підтверджено',
+  LOAN_RECORD_DECLINED: 'Запис про передачу відхилено',
+  LOAN_RECORD_WITHDRAWN: 'Запис про передачу відкликано',
 }
 
 /**

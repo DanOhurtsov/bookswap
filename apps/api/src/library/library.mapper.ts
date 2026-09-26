@@ -77,6 +77,8 @@ export type CopyRow = Pick<
 const OPEN_RANK: Readonly<Record<OpenLoanStatus, number>> = {
   REQUESTED: 1,
   APPROVED: 2,
+  // Stage 10 (10e): запис власника, що чекає відповіді, — ще не передача, але вже не запит.
+  PENDING_CONFIRMATION: 2,
   HANDED_OVER: 3,
 }
 
@@ -164,6 +166,10 @@ export function expectedReturnOf(
 
   for (const loan of copy.loans) {
     if (asExclusiveStatus(loan.status) === undefined) continue
+
+    // Stage 10 (10e): непідтверджений запис — претензія власника, а не факт. Його дату бачать лише сторони
+    // (через `/loans`), а не всі, хто дивиться на полицю.
+    if (loan.status === 'PENDING_CONFIRMATION') return null
 
     return toIsoDate(loan.dueAt)
   }
