@@ -27,6 +27,8 @@ import {
   type StoredLoanRow,
   type RequestFlowLoan,
 } from './loan.mapper'
+import { LoanEventService } from './loan-event.service'
+import { isWritableLoanEventType } from './loan-event.types'
 import {
   resolveTransition,
   type LoanActor,
@@ -42,6 +44,12 @@ import type { CopyModel, LoanWhereInput } from '../generated/prisma/models'
  */
 export const ONE_ACTIVE_LOAN_PER_COPY = 'one_active_loan_per_copy'
 
+/**
+ * Stage 10 (M4): частковий унікальний індекс `LoanEvent (loanId) WHERE type = 'RECOVERED'` — не більше
+ * однієї події знахідки на позику. Заведений у міграції руками, тож і тут рядком.
+ */
+export const ONE_RECOVERY_PER_LOAN = 'one_recovery_per_loan'
+
 /** Каталожний контекст лоану — рівно те, що читає `loan.mapper`. */
 const WITH_CONTEXT = {
   copy: {
@@ -56,6 +64,12 @@ const WITH_CONTEXT = {
   },
   owner: { select: PUBLIC_USER_FIELDS },
   borrower: { select: PUBLIC_USER_FIELDS },
+  // Stage 10 (T4): лише факт знахідки, і лише для сторін позики (цей сервіс віддає тільки їх).
+  events: {
+    where: { type: 'RECOVERED' },
+    select: { occurredAt: true, effectiveAt: true },
+    take: 1,
+  },
 } as const
 
 /**
@@ -125,6 +139,7 @@ export class LoanService {
     private readonly access: AccessService,
     private readonly analytics: AnalyticsService,
     private readonly notifications: NotificationsService,
+    private readonly loanEvents: LoanEventService,
   ) {}
 
   /** §8: `GET /loans?role=owner|borrower&status=…`. Лише свої, з обох боків. */
@@ -323,6 +338,9 @@ export class LoanService {
         )
       }
 
+      // M4: конкурентний повтор `recover`, що дійшов до INSERT повз перевірку під локом.
+      if (isUniqueViolationOn(error, ONE_RECOVERY_PER_LOAN)) throw alreadyRecovered()
+
       throw error
     }
 
@@ -413,27 +431,37 @@ export class LoanService {
 
       if ('kind' in outcome) throw refusal(outcome.reason, request.action)
 
+      const now = new Date()
+
+      // 5a. Stage 10 (T3): `recover` має власні передумови — вони ж не дають перезаписати стан
+      //     примірника, зайнятого іншою позикою.
+      const effectiveAt =
+        outcome.event === 'RECOVERED'
+          ? await this.assertRecoverable(tx, loan, copy, request, now)
+          : undefined
+
       // 6. Передумови на примірник — під локом, тобто на актуальному стані.
       this.assertCopyReady(outcome, loan, copy)
-
-      const now = new Date()
 
       // 7. Умова на статус у самому UPDATE, а не перевіркою перед ним. Під локом
       //    `Copy` це надлишково, але робить неможливим тихий no-op, якщо колись
       //    хтось прибере блокування.
-      const updated = await tx.loan.updateMany({
-        where: { id: loan.id, status: loan.status },
-        data: {
-          status: outcome.to,
-          responseNote: request.note ?? undefined,
-          // §8: термін ставить власник на апруві; контролер уже відхилив `dueAt`
-          // при будь-якій іншій дії.
-          dueAt: request.dueAt === undefined ? undefined : toDueDate(request.dueAt),
-          ...(outcome.stamp === null ? {} : { [outcome.stamp]: now }),
-        },
-      })
+      //    `recover` (`LOST → LOST`) рядок `Loan` не чіпає взагалі: минулі факти лишаються як були.
+      if (outcome.to !== loan.status) {
+        const updated = await tx.loan.updateMany({
+          where: { id: loan.id, status: loan.status },
+          data: {
+            status: outcome.to,
+            responseNote: request.note ?? undefined,
+            // §8: термін ставить власник на апруві; контролер уже відхилив `dueAt`
+            // при будь-якій іншій дії.
+            dueAt: request.dueAt === undefined ? undefined : toDueDate(request.dueAt),
+            ...(outcome.stamp === null ? {} : { [outcome.stamp]: now }),
+          },
+        })
 
-      assertSingleRow(updated.count)
+        assertSingleRow(updated.count)
+      }
 
       // 8. Побічні зміни примірника.
       if (outcome.copyStatus !== null || outcome.holder !== null) {
@@ -442,6 +470,8 @@ export class LoanService {
           data: {
             status: outcome.copyStatus ?? undefined,
             currentHolderId: outcome.holder === null ? undefined : holderIdOf(outcome.holder, loan),
+            // Книжка вдома ⇒ у руках власника, а не контакту (CHECK `copy_*_home`, T1-b).
+            heldByContactId: outcome.holder === 'OWNER' ? null : undefined,
           },
         })
 
@@ -468,6 +498,20 @@ export class LoanService {
           },
           tx,
         )
+      }
+
+      // 9a. Stage 10 (T4): подія — у ТІЙ САМІЙ транзакції. Збій запису відкочує і зміну примірника.
+      if (outcome.event !== null) {
+        if (!isWritableLoanEventType(outcome.event)) {
+          throw new Error(`Для події ${outcome.event} немає strict-схеми payload`)
+        }
+
+        await this.loanEvents.record(tx, {
+          loanId: loan.id,
+          type: outcome.event,
+          actorId,
+          effectiveAt,
+        })
       }
 
       const after = requireRequestFlow(
@@ -545,6 +589,67 @@ export class LoanService {
     return rejected.map((rival) => rival.id)
   }
 
+  /**
+   * Stage 10 (10d, §6.6): передумови `recover` понад таблицю переходів. Викликається під локом `Copy`.
+   * Порядок значущий: «уже відновлено» точніше за «стан примірника змінився» (після успішного
+   * `recover` примірник уже `AVAILABLE`), а архів — окрема дія користувача (`restore`).
+   *
+   * Повертає `effectiveAt`: вказана дата (початок доби UTC) або момент запиту.
+   */
+  private async assertRecoverable(
+    tx: TransactionClient,
+    loan: Pick<LoanRow, 'id'> & { copyId: string },
+    copy: Pick<CopyModel, 'archivedAt'>,
+    request: UpdateLoanRequest,
+    now: Date,
+  ): Promise<Date> {
+    if (request.effectiveAt !== undefined && request.effectiveAt > now.toISOString().slice(0, 10)) {
+      throw new ApiException(
+        API_ERROR_CODES.LOAN_RECOVERY_DATE_INVALID,
+        'Дата знахідки не може бути в майбутньому',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    const done = await tx.loanEvent.findFirst({
+      where: { loanId: loan.id, type: 'RECOVERED' },
+      select: { id: true },
+    })
+
+    if (done !== null) throw alreadyRecovered()
+
+    if (copy.archivedAt !== null) {
+      throw new ApiException(
+        API_ERROR_CODES.COPY_ARCHIVED,
+        'Примірник в архіві: спершу відновіть його з архіву',
+        HttpStatus.CONFLICT,
+      )
+    }
+
+    // Стан примірника може зайняти інша позика (дані, змінені повз стейт-машину): тоді recover
+    // перезаписав би її стан. Ексклюзивна позика на цьому примірнику — відмова.
+    const occupied = await tx.loan.findFirst({
+      where: {
+        copyId: loan.copyId,
+        id: { not: loan.id },
+        status: { in: [...EXCLUSIVE_LOAN_STATUS] },
+      },
+      select: { id: true },
+    })
+
+    if (occupied !== null) {
+      throw new ApiException(
+        API_ERROR_CODES.LOAN_COPY_STATE_MISMATCH,
+        'Примірник зайнятий іншою позикою — відновлення неможливе',
+        HttpStatus.CONFLICT,
+      )
+    }
+
+    return request.effectiveAt === undefined
+      ? now
+      : new Date(`${request.effectiveAt}T00:00:00.000Z`)
+  }
+
   /** `SELECT … FOR UPDATE` на рядку `Copy` — §5.2 і §11 вимагають саме його. */
   private async lockCopy(tx: TransactionClient, copyId: string): Promise<void> {
     await tx.$queryRaw`SELECT "id" FROM "Copy" WHERE "id" = ${copyId} FOR UPDATE`
@@ -590,6 +695,7 @@ export class LoanService {
 type TransactionClient = Pick<
   PrismaService,
   | 'loan'
+  | 'loanEvent'
   | 'copy'
   | 'notification'
   | 'notificationDelivery'
@@ -663,6 +769,14 @@ function refusal(reason: LoanRefusal, action: LoanAction): ApiException {
   return new ApiException(
     API_ERROR_CODES.LOAN_INVALID_TRANSITION,
     'Дія неможлива в поточному стані позичання',
+    HttpStatus.CONFLICT,
+  )
+}
+
+function alreadyRecovered(): ApiException {
+  return new ApiException(
+    API_ERROR_CODES.LOAN_ALREADY_RECOVERED,
+    'Знахідку вже зафіксовано для цього позичання',
     HttpStatus.CONFLICT,
   )
 }

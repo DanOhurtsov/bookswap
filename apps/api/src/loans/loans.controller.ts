@@ -66,6 +66,24 @@ export class LoansController {
       )
     }
 
+    // Stage 10 (10d): `effectiveAt` — лише з `recover`, і `recover` не приймає `note` (він не
+    // переписує `responseNote` чи інші минулі факти). Той самий клас правил про пару полів.
+    if (dto.effectiveAt !== undefined && dto.action !== 'recover') {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Дату знахідки можна вказати лише разом із дією recover',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
+    if (dto.action === 'recover' && dto.note !== undefined) {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Примітка не поєднується з дією recover',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
+
     return this.loans.apply(user.id, loanId, dto)
   }
 }

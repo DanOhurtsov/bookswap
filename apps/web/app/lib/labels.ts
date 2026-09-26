@@ -67,6 +67,7 @@ export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {
   hand_over: 'Я отримав книжку',
   return: 'Книжку повернуто',
   mark_lost: 'Позначити втраченою',
+  recover: 'Знайшлася',
 }
 
 export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>> = {

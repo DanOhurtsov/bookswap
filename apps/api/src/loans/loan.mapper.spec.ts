@@ -27,6 +27,7 @@ function loanRow(overrides: Partial<LoanRow> = {}): LoanRow {
       id: 'copy-1',
       status: 'LENT_OUT',
       condition: 'GOOD',
+      archivedAt: null,
       edition: {
         id: 'edition-1',
         workId: 'work-1',
@@ -57,6 +58,7 @@ function loanRow(overrides: Partial<LoanRow> = {}): LoanRow {
         },
       },
     },
+    events: [],
     ...overrides,
   }
 }
@@ -138,6 +140,54 @@ describe('toLoan', () => {
   it('прострочення рахує сервер, а не клієнт', () => {
     expect(toLoan(loanRow({ dueAt: toDueDate('2026-06-01') }), NOW).isOverdue).toBe(true)
     expect(toLoan(loanRow({ dueAt: toDueDate('2026-06-30') }), NOW).isOverdue).toBe(false)
+  })
+
+  it('факт знахідки: effectiveAt із події, recordedAt — момент запису; без події — null', () => {
+    expect(toLoan(loanRow({ status: 'LOST' }), NOW).recovery).toBeNull()
+
+    const recovered = toLoan(
+      loanRow({
+        status: 'LOST',
+        events: [
+          {
+            occurredAt: new Date('2026-06-14T09:00:00.000Z'),
+            effectiveAt: new Date('2026-06-10T00:00:00.000Z'),
+          },
+        ],
+      }),
+      NOW,
+    )
+
+    expect(recovered.status).toBe('LOST')
+    expect(recovered.recovery).toEqual({
+      effectiveAt: '2026-06-10T00:00:00.000Z',
+      recordedAt: '2026-06-14T09:00:00.000Z',
+    })
+  })
+
+  it('без окремої фактичної дати effectiveAt дорівнює моменту запису', () => {
+    const loan = toLoan(
+      loanRow({
+        status: 'LOST',
+        events: [{ occurredAt: new Date('2026-06-14T09:00:00.000Z'), effectiveAt: null }],
+      }),
+      NOW,
+    )
+
+    expect(loan.recovery?.effectiveAt).toBe('2026-06-14T09:00:00.000Z')
+  })
+
+  it('архівність примірника віддається прапорцем без дати', () => {
+    expect(toLoan(loanRow(), NOW).copy.isArchived).toBe(false)
+
+    const archived = loanRow()
+
+    archived.copy.archivedAt = new Date('2026-06-05T00:00:00.000Z')
+
+    const loan = toLoan(archived, NOW)
+
+    expect(loan.copy.isArchived).toBe(true)
+    expect(loan.copy).not.toHaveProperty('archivedAt')
   })
 
   it('несе каталожний контекст: без нього список лоанів — це список id', () => {

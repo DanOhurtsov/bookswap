@@ -419,6 +419,7 @@ export {
   loanCopySchema,
   loanListResponseSchema,
   loanQueryRequestSchema,
+  loanRecoverySchema,
   loanResponseSchema,
   loanSchema,
   updateLoanRequestSchema,
@@ -427,6 +428,7 @@ export {
   type LoanCopy,
   type LoanListResponse,
   type LoanQueryRequest,
+  type LoanRecovery,
   type LoanResponse,
   type UpdateLoanRequest,
 } from './contracts/loan'

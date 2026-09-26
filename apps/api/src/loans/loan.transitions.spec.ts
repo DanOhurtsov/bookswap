@@ -27,6 +27,8 @@ const ALLOWED: Row[] = [
   { from: 'APPROVED', action: 'hand_over', actor: BORROWER },
   { from: 'HANDED_OVER', action: 'return', actor: OWNER },
   { from: 'HANDED_OVER', action: 'mark_lost', actor: OWNER },
+  // Stage 10 (10d): `LOST → LOST` + подія; єдиний вихід зі «термінального» LOST.
+  { from: 'LOST', action: 'recover', actor: OWNER },
 ]
 
 function isAllowed(row: Row): boolean {
@@ -54,8 +56,8 @@ describe('resolveTransition: вичерпна матриця', () => {
     ),
   )
 
-  it('перебирає всі 9 × 6 × 2 комбінацій — жодна не лишається невизначеною', () => {
-    expect(combinations).toHaveLength(108)
+  it('перебирає всі 9 × 7 × 2 комбінацій — жодна не лишається невизначеною', () => {
+    expect(combinations).toHaveLength(126)
   })
 
   it.each(combinations)('$from --$action--> для $actor', ({ from, action, actor }: Row) => {
@@ -74,7 +76,6 @@ describe('термінальні статуси §5.1', () => {
     'REJECTED',
     'CANCELLED',
     'RETURNED',
-    'LOST',
     'PENDING_CONFIRMATION',
     'DECLINED',
   ]
@@ -87,6 +88,63 @@ describe('термінальні статуси §5.1', () => {
           reason: 'STATE',
         })
       }
+    }
+  })
+})
+
+describe('LOST (Stage 10, 10d): лише recover, лише власник', () => {
+  it('усі дії request-flow з LOST — STATE', () => {
+    for (const action of LOAN_ACTIONS.filter((value) => value !== 'recover')) {
+      for (const actor of [OWNER, BORROWER]) {
+        expect(resolveTransition('LOST', action, actor)).toEqual({
+          kind: 'refused',
+          reason: 'STATE',
+        })
+      }
+    }
+  })
+
+  it('recover позичальника — ROLE, не STATE', () => {
+    expect(resolveTransition('LOST', 'recover', BORROWER)).toEqual({
+      kind: 'refused',
+      reason: 'ROLE',
+    })
+  })
+
+  it('recover не змінює статус і не ставить жодної позначки часу', () => {
+    const outcome = transition('LOST', 'recover', OWNER)
+
+    expect(outcome.to).toBe('LOST')
+    expect(outcome.stamp).toBeNull()
+    expect(outcome.notify).toBeNull()
+    expect(outcome.rejectRivals).toBe(false)
+    expect(outcome.event).toBe('RECOVERED')
+  })
+
+  it('recover повертає книжку власнику: AVAILABLE, тримач — власник; вимагає UNAVAILABLE у позичальника', () => {
+    const outcome = transition('LOST', 'recover', OWNER)
+
+    expect(outcome.copyStatus).toBe('AVAILABLE')
+    expect(outcome.holder).toBe('OWNER')
+    expect(outcome.requires).toEqual({ status: 'UNAVAILABLE', holder: 'BORROWER' })
+  })
+
+  it('recover з інших статусів неможливий ні для кого', () => {
+    for (const from of LOAN_STATUS.filter((value) => value !== 'LOST')) {
+      for (const actor of [OWNER, BORROWER]) {
+        expect(resolveTransition(from, 'recover', actor)).toEqual({
+          kind: 'refused',
+          reason: 'STATE',
+        })
+      }
+    }
+  })
+
+  it('LOAN_LOST пишеться лише при mark_lost; решта переходів подій не пишуть', () => {
+    expect(transition('HANDED_OVER', 'mark_lost', OWNER).event).toBe('LOAN_LOST')
+
+    for (const row of ALLOWED.filter((r) => r.action !== 'mark_lost' && r.action !== 'recover')) {
+      expect(transition(row.from, row.action, row.actor).event).toBeNull()
     }
   })
 })

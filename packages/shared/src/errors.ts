@@ -70,6 +70,11 @@ export const API_ERROR_CODES = {
    */
   COPY_HAS_LOAN_HISTORY: 'COPY_HAS_LOAN_HISTORY',
   /**
+   * Stage 10 (10d): дія неможлива, бо примірник в архіві (HTTP 409). Спершу `restore`
+   * (`POST /me/library/:copyId/restore`), потім повторити дію (наприклад `recover`).
+   */
+  COPY_ARCHIVED: 'COPY_ARCHIVED',
+  /**
    * Власник не може перемкнути `status` просто зараз: книжка не вдома або має
    * активний лоан (HTTP 409). Стосується **лише** поля `status` — решта полів
    * примірника редагується завжди.
@@ -219,6 +224,14 @@ export const API_ERROR_CODES = {
    * стати доменною помилкою, а не 500.
    */
   LOAN_ALREADY_APPROVED: 'LOAN_ALREADY_APPROVED',
+  /**
+   * Stage 10 (10d): для цієї `LOST`-позики знахідку вже зафіксовано (HTTP 409). Ефект `recover`
+   * однократний: повтор не дає другої події й не змінює стан примірника. Це не «повторна 200».
+   * Підкріплено частковим унікальним індексом `one_recovery_per_loan`.
+   */
+  LOAN_ALREADY_RECOVERED: 'LOAN_ALREADY_RECOVERED',
+  /** Stage 10 (10d): `effectiveAt` у майбутньому відносно серверної дати (HTTP 400). */
+  LOAN_RECOVERY_DATE_INVALID: 'LOAN_RECOVERY_DATE_INVALID',
 
   // --- Зовнішні канали сповіщень (§7.2, §7.4) --------------------------------
   /**

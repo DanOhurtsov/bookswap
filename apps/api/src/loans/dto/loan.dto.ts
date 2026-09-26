@@ -34,9 +34,9 @@ export class CreateLoanDto {
 }
 
 /**
- * §8: `PATCH /loans/:id { action, note?, dueAt? }`.
+ * §8: `PATCH /loans/:id { action, note?, dueAt?, effectiveAt? }`.
  *
- * Один ендпоінт із полем `action` замість шести маршрутів — так усі переходи
+ * Один ендпоінт із полем `action` замість окремих маршрутів — так усі переходи
  * проходять крізь одну точку, де живе валідація стейт-машини.
  *
  * Правило «`dueAt` лише разом із `approve`» тут не виражається: `class-validator`
@@ -46,7 +46,8 @@ export class CreateLoanDto {
  */
 export class UpdateLoanDto {
   @IsIn(LOAN_ACTIONS, {
-    message: 'Невідома дія: очікується approve, reject, cancel, hand_over, return або mark_lost',
+    message:
+      'Невідома дія: очікується approve, reject, cancel, hand_over, return, mark_lost або recover',
   })
   action!: LoanAction
 
@@ -59,6 +60,11 @@ export class UpdateLoanDto {
   @IsOptional()
   @IsIsoDate()
   dueAt?: string
+
+  /** Stage 10 (10d): фактична дата знахідки; лише з `recover`, не в майбутньому (перевіряє сервіс). */
+  @IsOptional()
+  @IsIsoDate()
+  effectiveAt?: string
 }
 
 /** §8: `GET /loans?role=owner|borrower&status=…`. Обидва фільтри незалежні. */

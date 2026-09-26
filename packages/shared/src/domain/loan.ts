@@ -61,7 +61,7 @@ export const exclusiveLoanStatusSchema = z.enum(EXCLUSIVE_LOAN_STATUS)
 export type ExclusiveLoanStatus = z.infer<typeof exclusiveLoanStatusSchema>
 
 /**
- * §8: `PATCH /loans/:id { action }` — один ендпоінт замість шести.
+ * §8: `PATCH /loans/:id { action }` — один ендпоінт замість переходів §5.1 (і `recover` Етапу 10).
  *
  * Прецедент і мотивація ті самі, що у `FRIEND_REQUEST_ACTIONS`: усі переходи
  * проходять крізь одну точку, де живе валідація стейт-машини. Назви — з §8
@@ -74,6 +74,8 @@ export const LOAN_ACTIONS = [
   'hand_over',
   'return',
   'mark_lost',
+  // Stage 10 (10d, T3): `LOST → LOST` + подія `RECOVERED`. Статус позики не змінюється.
+  'recover',
 ] as const
 
 export const loanActionSchema = z.enum(LOAN_ACTIONS)

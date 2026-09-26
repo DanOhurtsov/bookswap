@@ -19,7 +19,7 @@ import type { CopyModel, LoanModel } from '../generated/prisma/models'
  * людини — це історія, і в неї свій мапер із власними двома проєкціями.
  */
 
-export type LoanCopyRow = Pick<CopyModel, 'id' | 'status' | 'condition'> & {
+export type LoanCopyRow = Pick<CopyModel, 'id' | 'status' | 'condition' | 'archivedAt'> & {
   edition: EditionRow & { work: WorkRow & { authors: WorkAuthorRow[] } }
 }
 
@@ -31,6 +31,8 @@ export type LoanRow = Pick<
   copy: LoanCopyRow
   owner: PublicUserRow
   borrower: PublicUserRow
+  /** Лише події `RECOVERED` (≤ 1, M4): решта audit trail цим контрактом не віддається. */
+  events: { occurredAt: Date; effectiveAt: Date | null }[]
 }
 
 /**
@@ -107,6 +109,8 @@ export function toDueDate(day: string | null | undefined): Date | null {
 }
 
 export function toLoan(loan: LoanRow, now: Date = new Date()): Loan {
+  const recovery = loan.events[0]
+
   return {
     id: loan.id,
     status: loan.status,
@@ -124,9 +128,17 @@ export function toLoan(loan: LoanRow, now: Date = new Date()): Loan {
       id: loan.copy.id,
       status: loan.copy.status,
       condition: loan.copy.condition,
+      isArchived: loan.copy.archivedAt !== null,
     },
     edition: toEdition(loan.copy.edition, loan.copy.edition.work),
     work: toWork(loan.copy.edition.work),
     authors: toWorkAuthors(loan.copy.edition.work.authors),
+    recovery:
+      recovery === undefined
+        ? null
+        : {
+            effectiveAt: (recovery.effectiveAt ?? recovery.occurredAt).toISOString(),
+            recordedAt: recovery.occurredAt.toISOString(),
+          },
   }
 }

@@ -3,6 +3,7 @@ import { AccessModule } from '../access/access.module'
 import { AnalyticsModule } from '../analytics/analytics.module'
 import { AuthModule } from '../auth/auth.module'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { LoanEventService } from './loan-event.service'
 import { LoanService } from './loan.service'
 import { LoansController } from './loans.controller'
 
@@ -16,7 +17,7 @@ import { LoansController } from './loans.controller'
 @Module({
   imports: [AuthModule, AccessModule, AnalyticsModule, NotificationsModule],
   controllers: [LoansController],
-  providers: [LoanService],
+  providers: [LoanService, LoanEventService],
   exports: [LoanService],
 })
 export class LoansModule {}

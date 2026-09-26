@@ -1,6 +1,6 @@
 # Етап 10 — реальний світ і довіра до історії: execution plan
 
-**Статус:** план; **кроки 10a, 10b і 10c реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10d–10j не
+**Статус:** план; **кроки 10a, 10b, 10c і 10d реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10e–10j не
 розпочато. Q0, Q8, Q10, Q11 і Q13 затверджено Product Owner ([§0.2](#02-рішення-product-owner-отримані-для-кроку-10a)).
 Решта Q і всі T-пропозиції, окрім T1-a, лишаються **незатвердженими**.
 **Джерело:** [Product Roadmap v2, Етап 10](./roadmap-v2.md#етап-10--реальний-світ-і-довіра-до-історії).
@@ -243,7 +243,7 @@ LoanEvent (append-only, T4)
   id, loanId → Loan (RESTRICT), type enum, actorId → User? (SET NULL),
   occurredAt (server now), effectiveAt NULL (фактична дата, напр. дата знахідки),
   payload jsonb  -- strict zod-схема на тип; ЖОДНИХ alias/email/id контакту/вільного тексту
-  UNIQUE (loanId) WHERE type = 'RECOVERED'   -- ідемпотентність recover на рівні БД
+  UNIQUE (loanId) WHERE type = 'RECOVERED'   -- однократність recover на рівні БД (§6.6)
 ```
 
 **T1-a (ЗАТВЕРДЖЕНО PO, Q10) — nullable `currentHolderId` + `heldByContactId`.** Мінус: переписати три
@@ -277,7 +277,7 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 | `PENDING_CONFIRMATION` (`amend_record`, статус не змінюється) | власник | лише `handedAt`/`dueAt`, лише до відповіді | `RECORD_AMENDED` із попередніми значеннями в `payload`; сповіщення |
 | `— → HANDED_OVER` (`POST /loans/guest`) | власник | `Copy` `AVAILABLE`, вдома; контакт належить власнику; D2-guard (T9) | `Loan(borrowerKind=GUEST, origin=RECORDED_GUEST)`; `Copy` `LENT_OUT`, `heldByContactId`; `GUEST_LOAN_RECORDED`; контакт `retainUntil=NULL` |
 | `HANDED_OVER → RETURNED` / `LOST` (гостьова) | власник (актор `BORROWER` відсутній) | як для звичайної | як звичайна + `LoanEvent` (час закриття потрібен D3); `retainUntil` перераховується |
-| `LOST → LOST` + подія (`recover`) | власник | `Copy` `UNAVAILABLE`, не архівний; подія `RECOVERED` для цієї позики ще не існує | `Copy` → `AVAILABLE`, тримач = власник, `heldByContactId=NULL`; `LoanEvent RECOVERED (effectiveAt=дата знахідки ≤ сьогодні)`; `Loan.status` **лишається** `LOST` |
+| `LOST → LOST` + подія (`recover`) ✅ 10d | власник | `Copy` `UNAVAILABLE` у позичальника, не архівний; немає іншої ексклюзивної позики на `Copy`; подія `RECOVERED` для цієї позики ще не існує | `Copy` → `AVAILABLE`, тримач = власник, `heldByContactId=NULL`; `LoanEvent RECOVERED (effectiveAt=дата знахідки ≤ сьогодні за серверною датою UTC, без дати — момент запиту)`; `Loan.status` **лишається** `LOST`; рядок `Loan` (`handedAt`, `returnedAt`, `responseNote` тощо) **не оновлюється взагалі** |
 
 Ексклюзивність: `PENDING_CONFIRMATION` додається до `EXCLUSIVE_LOAN_STATUS` і до предиката
 `one_active_loan_per_copy` (G6) — так запис не конкурує ні з апрувом, ні з іншим записом, і
@@ -346,7 +346,22 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 
 `Loan.status` лишається `LOST`; «знайшли» — окрема подія `RECOVERED` з `effectiveAt`. Ніяких змін
 `handedAt/returnedAt`. Часткове унікальне обмеження гарантує, що подія одна на позику (конкурентні
-`recover` → другий отримує 409). `recover` для архівного примірника відмовляє (`COPY_ARCHIVED`):
+`recover` → другий отримує 409).
+
+**Однократність, а не ідемпотентність (уточнення 10d).** Слово «ідемпотентно» у попередній редакції
+(§6.1 коментар до UNIQUE, рядок 10d у §8, REC2) означало лише «повтор не створює другого ефекту». Реалізовано
+саме це: **другий і будь-який наступний `recover` тієї самої позики — `409 LOAN_ALREADY_RECOVERED`**, а не повторна
+`200`. Перший виклик дає рівно одну подію й одну зміну стану; наступні нічого не змінюють (жодної події, жодної
+зміни `Copy`, навіть якщо примірник уже позичили далі). Гонка двох `recover` розв’язується локом `Copy`
+(`FOR UPDATE`): переможений бачить подію й отримує той самий код; якщо ж він дійшов до `INSERT` повз перевірку,
+`one_recovery_per_loan` (M4) дає `23505`, який мапиться в той самий `409`, а транзакція (разом зі зміною `Copy`)
+відкочується — не `500`. Інші коди `recover`: не власник → `403 FORBIDDEN` (позичальник) / `404` (стороння людина);
+позика не `LOST` → `409 LOAN_INVALID_TRANSITION`; архівний примірник → `409 COPY_ARCHIVED`; `Copy` не в очікуваному
+стані чи зайнятий іншою ексклюзивною позикою → `409 LOAN_COPY_STATE_MISMATCH`; дата в майбутньому (за серверною
+датою UTC) → `400 LOAN_RECOVERY_DATE_INVALID`; невалідне тіло (`effectiveAt` не `YYYY-MM-DD`, `note` разом із `recover`,
+зайві поля) → `400 VALIDATION_ERROR`. `recover` лишається в межах request-flow: `origin ≠ REQUESTED` або
+`borrowerKind ≠ REGISTERED` дає `404` (фільтри 10a збережено; записані й гостьові позики отримають `recover` у
+10e/10f разом із власними шляхами). `recover` для архівного примірника відмовляє (`COPY_ARCHIVED`):
 спершу `restore`. Для **наявних** `LOST`-позик (до міграції) дія доступна одразу: `LoanEvent` для них
 створюється лише в момент `recover`; минулого «списано» ніхто не вигадує.
 
@@ -369,6 +384,17 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 `UPDATE/DELETE` — опція; вона ускладнює тестові cleanup-и й Етап 13, тому **не обов’язкова** (R7).
 Події пишуться для позик з `origin ≠ REQUESTED` та для `RECOVERED`; звичайні request-flow позики
 лишають чинні таймстемпи й **не отримують заднім числом вигаданих подій**.
+
+**Уточнення 10d.** Єдиний виняток для request-flow — `LOAN_LOST`: **новий** успішний `mark_lost` пише її в тій самій
+транзакції (час втрати, якого досі не було в жодній колонці — G7). Це подія *нового* переходу, а не заднє число:
+позики, втрачені до 10d, `LOAN_LOST` не мають і не отримують; минулу дату втрати ніхто не вигадує, `recover` для них
+працює так само. `return`, `approve`, `reject`, `cancel`, `hand_over` подій у request-flow не пишуть. Реалізація:
+`LoanEventService.record(tx, …)` — єдиний запис (`create`); `update`/`upsert`/`delete` для `LoanEvent` у `src` немає
+(перевіряє `loan-event.append-only.spec.ts`), DB-тригера немає (R7). Strict-схеми payload описано лише для типів,
+які пише 10d (`LOAN_LOST`, `RECOVERED` — обидві `z.strictObject({})`: жодного alias, email, contactId, вільного
+тексту; фактична дата — колонка `effectiveAt`). Схеми решти типів додасть крок, що їх почне писати. У відповідях API
+подію бачать лише сторони позики (`Loan.recovery` у `/loans`); `copies/:id/history`, `works/:id/history`, друзі та
+сторонні її не отримують.
 
 Типи: `RECORD_PROPOSED`, `RECORD_AMENDED`, `RECORD_CONFIRMED`, `RECORD_DECLINED`, `RECORD_WITHDRAWN`,
 `GUEST_LOAN_RECORDED`, `LOAN_RETURNED`, `LOAN_LOST`, `RECOVERED`, `LINK_*` (10i). Кожен `payload` — strict-zod
@@ -459,7 +485,7 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 | M1 ✅ 10a | `stage10_enums` | `ADD VALUE` до `LoanStatus` (`NotificationType` — у 10e); нові enum-и `LoanOrigin`, `BorrowerKind`, `LoanEventType` | окремо від решти: нове значення enum не можна використати в тій самій транзакції |
 | M2 ✅ 10a | `stage10_expand` | нові таблиці `ExternalBorrower`, `LoanEvent`; колонки `Loan.borrowerKind/origin/createdAt/borrowerContactId`, `Copy.archivedAt/heldByContactId`; `DROP NOT NULL` на `Loan.borrowerId`, `Loan.requestedAt`, `Copy.currentHolderId`; `createdAt` backfill = `requestedAt`; нові CHECK-и додаються **до** зняття старих | усі наявні рядки: `borrowerKind=REGISTERED`, `origin=REQUESTED`, `archivedAt=NULL`; жоден рядок не видаляється; дефолт `requestedAt = now()` зберігається |
 | M3 ✅ 10c | `20260926090200_stage10_delete_restrict` (**разом із кроком 10c**) | `Loan_copyId_fkey`: `CASCADE → RESTRICT` | змінює лише **майбутню** поведінку; тест G4 інвертується |
-| M4 | `stage10_recovered_unique` (крок 10d) | `UNIQUE (loanId) WHERE type='RECOVERED'` | нова таблиця порожня |
+| M4 ✅ 10d | `20260926100000_stage10_recovered_unique` | `CREATE UNIQUE INDEX one_recovery_per_loan ON "LoanEvent" ("loanId") WHERE "type" = 'RECOVERED'` (поза `schema.prisma`, як `one_active_loan_per_copy`) | лише додає індекс; `LoanEvent` до 10d ніхто не писав, тож таблиця порожня; жодного `Copy`/`Loan` не читає й не змінює, подій не створює. Runbook: [stage-10-migration-rollback.md](../runbooks/stage-10-migration-rollback.md) |
 | M5 | `stage10_exclusive_pending` (крок 10e) | перестворення `one_active_loan_per_copy` із `PENDING_CONFIRMATION`; для наявних даних предикат лише розширюється (нових значень у даних ще немає) | індекс будується на наявних даних — перевірити час; для поточних обсягів достатньо звичайного `CREATE`, `CONCURRENTLY` за потреби |
 | M6 | `stage10_link` (крок 10i, якщо Q7 = так) | `ExternalBorrowerLink` | нова таблиця |
 
@@ -555,7 +581,7 @@ private beta), доки рішення не ухвалене й не реалі�
 | **10a** ✅ | **Expand-схема, без зміни поведінки.** M1+M2 (`NotificationType` — у 10e); Prisma-схема; shared-enum-и; nullable-safe читачі (`history.mapper`, `library.mapper`, `notification-digest` виключає `borrowerKind=GUEST`, `library.service` view «не вдома»); переписані CHECK; runbook `stage-10-migration-rollback.md` | 10.0 | Наявні тести зелені; db-spec на наповненій БД (§9 MIG-*); `migrate diff` чистий; жодної нової функціональності |
 | **10b** ✅ | **«Хто читав»**: фільтр `workHistory`; `HistoryEntryLine` без «Попросили» для non-request; оновлений контракт | 10.0 (Q8, Q13) | Тести H-* ; `GET /copies/:id/history` без змін |
 | **10c** ✅ | **Archive + safe delete** + M3; `COPY_HAS_LOAN_HISTORY`; фільтр архівних у всіх вибірках G5; UI «Архів»; інверсія `referential-actions.db-spec.ts:61` | 10a | Тести A-*, DEL-*; жоден `Loan` не зникає при видаленні/архіві |
-| **10d** | **`LoanEvent` + `recover`** + M4; час `LOAN_LOST` для нових позик; UI «Знайшлася» | 10a, 10c (архів у передумовах) | Тести REC-*; повторне `recover` ідемпотентне |
+| **10d** ✅ | **`LoanEvent` + `recover`** + M4; час `LOAN_LOST` для нових позик; UI «Знайшлася» | 10a, 10c (архів у передумовах) | Тести REC-*; повторне `recover` **однократне** (перший 200, наступні 409 `LOAN_ALREADY_RECOVERED`; див. §6.6) |
 | **10e** | **Existing loan (D6)**: `POST /loans/recorded`, `confirm/decline/withdraw/amend`; M5; `PENDING_CONFIRMATION` в `EXCLUSIVE_LOAN_STATUS`; сповіщення; UI обох сторін; події аналітики | 10a, 10d | Тести E-*, C-*; примірник ніколи не «доступний» до відповіді; наявні `REQUESTED` відхиляються лише після `confirm_record` |
 | **10f** | **Контакти + гостьова позика за D2-guard** (запобіжник T9 реалізується **першою частиною кроку**, до будь-якого гостьового ендпоінта): `ExternalBorrower`, `POST /loans/guest`, return/lost, видимість D4; лише синтетичні дані | 10a, 10d, 10e | Тести GL-*, P-*; при вимкненому прапорі жоден запис PII неможливий |
 | **10g** | **Invite для гостя**: інтеграція з Етапом 9; email не зберігається (T6); рішення Q5 щодо `recipientEmailHash` | 10f | Тести I-*; email відсутній у БД/логах/API |
@@ -652,16 +678,16 @@ private beta), доки рішення не ухвалене й не реалі�
 | A1 | Archive при `APPROVED/HANDED_OVER/PENDING_CONFIRMATION` → 409 `COPY_HAS_ACTIVE_LOAN`; при `LOST` — дозволено | E |
 | A2 | Archive: `Loan`/`LoanEvent` не змінено; примірник зник із бібліотеки, discovery, holders, «у мене вже є», activation-лічильника; CSV-дедуп не читає `Copy` (лише в межах файла), тож архівного фільтра не потребує; історія доступна за старими правилами | E |
 | A3 | Відкриті `REQUESTED` при архіві → `REJECTED` зі сповіщенням | E |
-| A4 | `restore` (Q11 затверджено): archive → restore повертає примірник у звичайні вибірки (E, 10c). Recover на архівному → `COPY_ARCHIVED` — перевірка в 10d, коли з'явиться `recover` | E |
+| A4 | `restore` (Q11 затверджено): archive → restore повертає примірник у звичайні вибірки (E, 10c). Recover на архівному → `COPY_ARCHIVED`, після `restore` → `recover` працює (E, 10d: `loans-recovery.e2e-spec.ts`) | E |
 | DEL1 | Delete примірника **без** жодного `Loan` — 204 | E |
 | DEL2 | Delete з будь-яким `Loan` (навіть `REJECTED`/`CANCELLED`/`RETURNED`) → 409 `COPY_HAS_LOAN_HISTORY`, `Loan` цілий | E |
 | DEL3 | Гонка: delete ∥ `POST /loans` → без 500; FK `RESTRICT` мапиться в домен-код | E |
 | DEL4 | DB-рівень: `DELETE FROM "Copy"` з `Loan` падає (`referential-actions.db-spec` інвертований) | DB |
 | REC1 | `recover`: `Copy` → `AVAILABLE`/вдома; `Loan.status` лишається `LOST`; `handedAt` незмінний; є `RECOVERED` з `effectiveAt` | E |
-| REC2 | Подвійне/конкурентне `recover` → одна подія, другий 409 (UNIQUE) | E |
+| REC2 | Послідовне й конкурентне `recover` → одна подія й одна зміна стану, другий `409 LOAN_ALREADY_RECOVERED` (не повторна 200); DB `UNIQUE` перевірено окремо (`stage10-recovered-unique-migration.db-spec.ts`) і через `INSERT`-гонку (409 замість 500, стан `Copy` відкочено) | E, DB |
 | REC3 | Recover: не власник → 404/403; не `LOST` → 409; дата в майбутньому → 400 | E |
 | REC4 | Після recover примірник знову доступний, новий запит проходить; старий `LOST` у історії | E |
-| REC5 | Наявні (до міграції) `LOST`-позики відновлювані | DB |
+| REC5 | Наявні (до міграції) `LOST`-позики відновлювані: M4 на наповненій БД не змінює `Copy`/`Loan` і не створює подій (DB); позика без `LOAN_LOST` відновлюється без вигаданої дати (E) | DB, E |
 | H1 | `workHistory` віддає лише `HANDED_OVER/RETURNED/LOST` із `handedAt != null` (Q8: `LOST` з і без `handedAt`); **не** віддає `REQUESTED/APPROVED/REJECTED/CANCELLED/PENDING_CONFIRMATION/DECLINED` | E |
 | H2 | `copies/:id/history` і `me/history` **зберігають** `REJECTED/CANCELLED` | E |
 | H3 | Матриця ролей для work history: власник / друг + `showHolderNames` on/off / інший (403) / blocked | E |
@@ -749,6 +775,10 @@ private beta), доки рішення не ухвалене й не реалі�
   через «відмова → новий запис»; правка підтвердженої позики потребує окремого рішення.
 - **Q13.** ~~Gate зі специфікацією~~ — **вирішено** для розбіжностей §5: roadmap і цей план мають
   пріоритет над spec (§0.2); spec не змінюється. Нові розбіжності поза §5 потребують нового рішення.
+- **Q15 (10d, відкрите).** Чи має `effectiveAt` знахідки бути не раніше за `handedAt` позики? План вимагає лише «не в
+  майбутньому»; нижньої межі не додано (це було б нове правило, не затверджене PO). Також дата порівнюється з
+  серверною датою **UTC**: користувач східніше UTC вночі може не змогти вказати «сьогодні» за місцевим календарем
+  (у UI `max` = дата UTC).
 - **Q14.** Внести «D2 відкрито» до release gate Beta в roadmap (правило roadmap §6.4); підтвердити, що
   реальні ПД заборонені в усіх середовищах до зняття D2.
 

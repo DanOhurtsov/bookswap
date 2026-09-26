@@ -1,4 +1,4 @@
-# Runbook — Етап 10, кроки 10a і 10c: розширення схеми та RESTRICT (розгортання й відкат лише вперед)
+# Runbook — Етап 10, кроки 10a, 10c і 10d: розширення схеми, RESTRICT та однократний recover (розгортання й відкат лише вперед)
 
 Стосується двох міграцій кроку 10a
 ([execution plan](../plan/stage-10-real-world-history.md), §6.13, M1–M2):
@@ -175,7 +175,7 @@ Backup, зроблений після появи рядків Етапу 10, м�
   міграцією не відновлюються — лише з backup. Зміну `Loan → Copy` на `RESTRICT` виконано в кроці 10c
   (M3, див. розділ нижче).
 - Прив’язка контакту до акаунта (D5), retention (D3), audit-події й індекс `one_active_loan_per_copy`
-  з `PENDING_CONFIRMATION` — у наступних міграціях (M4–M6), не в 10a.
+  з `PENDING_CONFIRMATION` — у наступних міграціях (M5–M6), не в 10a.
 
 ## Крок 10c: M3 `20260926090200_stage10_delete_restrict` — `Loan_copyId_fkey` `CASCADE → RESTRICT`
 
@@ -215,3 +215,60 @@ FK та усвідомленням, що каскад знову стирає і
 **Дані архіву.** Поле `Copy.archivedAt` з'явилося в M2; 10c лише починає його заповнювати. Архівний примірник
 відновлюється дією «Відновити» (`POST /me/library/:copyId/restore`); окремого audit-запису про
 archive/restore немає (рішення Product Owner щодо Q11).
+
+## Крок 10d: M4 `20260926100000_stage10_recovered_unique` — однократний `recover`
+
+Одна міграція, один оператор:
+
+```sql
+CREATE UNIQUE INDEX "one_recovery_per_loan" ON "LoanEvent" ("loanId") WHERE "type" = 'RECOVERED';
+```
+
+Частковий індекс: не більше однієї події `RECOVERED` на позику; події інших типів (`LOAN_LOST`, майбутні `RECORD_*`)
+він не обмежує. Це однократність ефекту, а не «повторна успішна відповідь»: другий `recover` тієї самої позики — це
+`409 LOAN_ALREADY_RECOVERED` (перевірка під `FOR UPDATE` на `Copy`; індекс — остання лінія оборони для гонки, яку та
+перевірка не бачить). Індекс поза `schema.prisma` (Prisma не виражає часткових індексів), як
+`one_active_loan_per_copy`; `prisma migrate diff` його не вимагає.
+
+**Що міграція НЕ робить.** Не читає й не змінює жодного `Copy`/`Loan`; не створює жодної події (`LoanEvent` до 10d
+ніхто не писав — таблиця порожня); не переписує старі позики. Старі `LOST`-позики лишаються без `LOAN_LOST` і
+відновлюються (`recover`) одразу: подія `RECOVERED` для них створюється лише в момент дії, а дату втрати ніхто не
+вигадує.
+
+**Порядок розгортання.** backup → `pnpm db:deploy` (M4 застосовується миттєво: таблиця порожня, `CREATE INDEX` без
+`CONCURRENTLY` безпечний) → деплой API і web 10d. Код 10d **потребує** M4: без індексу однократність тримається лише
+перевіркою під локом. Старий код (до 10d) з M4 сумісний: він `LoanEvent` не пише.
+
+**Rollout-нюанси.**
+
+- Після деплою новий успішний `mark_lost` пише `LOAN_LOST` (нічого не змінює для читачів: `LoanEvent` не віддається
+  ніде, крім `Loan.recovery` для сторін позики).
+- `LoanEvent → Loan` — `RESTRICT`: позику з подіями не видалити; це очікувано (історія не стирається).
+- Змінилися контракти `/loans`: у `Loan` з'явилися `recovery` і `copy.isArchived`; у `PATCH /loans/:id` — дія
+  `recover` та поле `effectiveAt`. Веб 10d і API 10d розгортаються разом: старий web із новим API продовжує працювати
+  (нові поля ігноруються zod-схемою клієнта), але новий web зі старим API впав би на парсингу `Loan` (немає `recovery`).
+
+**Автоматизований доказ.**
+
+- `apps/api/test/db/stage10-recovered-unique-migration.db-spec.ts` — на scratch-базі з наповненими `Copy`/`Loan` (у т. ч.
+  дві `LOST`-позики без подій): M4 не змінює жодного рядка, не створює подій (REC5); індекс унікальний і частковий;
+  друга `RECOVERED` тієї самої позики → `23505` на `one_recovery_per_loan` (REC2, окремо від API); `LOAN_LOST` і
+  `RECOVERED` інших позик індекс не зачіпає.
+- `apps/api/test/loans-recovery.e2e-spec.ts` — REC1–REC5, A4, приватність, межа request-flow, гонка й `INSERT`-порушення
+  індексу (409 замість 500, `Copy` відкочено).
+- `apps/api/test/loans-recovery-rollback.e2e-spec.ts` — збій запису `LoanEvent` відкочує зміну `Copy` (і `mark_lost`).
+- `prisma migrate diff … --exit-code` — схема й міграції еквівалентні (MIG4).
+
+**Перевірка після розгортання.**
+
+```sql
+SELECT indexdef FROM pg_indexes WHERE indexname = 'one_recovery_per_loan';   -- UNIQUE … WHERE ("type" = 'RECOVERED')
+SELECT count(*) FROM "LoanEvent";                                            -- 0 одразу після M4 (до першого mark_lost/recover)
+-- Кількості Copy/Loan збігаються зі знімком «до».
+-- Інваріант: не більше однієї RECOVERED на позику:
+SELECT "loanId" FROM "LoanEvent" WHERE type = 'RECOVERED' GROUP BY "loanId" HAVING count(*) > 1;   -- 0 рядків
+```
+
+**Відкат: лише вперед.** Видалити індекс можна лише новою міграцією, і це **не рекомендовано**: `recover` знову
+міг би дати кілька подій на позику при гонці. Відкат коду 10d безпечний для даних (події не читаються старим
+кодом), але новий `LoanEvent`/`Copy` після `recover` залишаться: примірник уже `AVAILABLE`, а `Loan` — `LOST`.

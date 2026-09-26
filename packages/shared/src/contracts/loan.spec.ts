@@ -26,6 +26,7 @@ const rawLoan = {
     id: 'copy-1',
     status: 'LENT_OUT',
     condition: 'GOOD',
+    isArchived: false,
     // Приватне власника, якого в схемі бути не повинно:
     note: 'ПРИВАТНА НОТАТКА',
     visibility: 'PRIVATE',
@@ -56,6 +57,7 @@ const rawLoan = {
     revision: 1,
   },
   authors: [{ id: 'a-1', name: 'Ґреґорі Робертс', nameLatin: null, role: 'AUTHOR', position: 0 }],
+  recovery: null,
 }
 
 describe('loanSchema', () => {
@@ -90,6 +92,21 @@ describe('loanSchema', () => {
 
   it.each([...LOAN_STATUS])('приймає статус %s', (status) => {
     expect(loanSchema.parse({ ...rawLoan, status }).status).toBe(status)
+  })
+
+  it('факт знахідки — окреме поле; статус LOST лишається', () => {
+    const recovery = { effectiveAt: '2026-09-20T00:00:00.000Z', recordedAt: '2026-09-26T09:00:00Z' }
+    const loan = loanSchema.parse({ ...rawLoan, status: 'LOST', recovery })
+
+    expect(loan.status).toBe('LOST')
+    expect(loan.recovery).toEqual(recovery)
+    expect(
+      loanSchema.safeParse({ ...rawLoan, recovery: { effectiveAt: '2026-09-20' } }).success,
+    ).toBe(false)
+    expect(
+      loanSchema.safeParse({ ...rawLoan, recovery: { ...recovery, actorId: 'u-1' } }).success,
+    ).toBe(true)
+    expect(loanSchema.parse({ ...rawLoan, recovery }).recovery).not.toHaveProperty('actorId')
   })
 })
 
@@ -129,6 +146,29 @@ describe('updateLoanRequestSchema', () => {
     }
   })
 
+  it('дата знахідки дозволена лише разом із recover, і без note (CT1)', () => {
+    expect(
+      updateLoanRequestSchema.parse({ action: 'recover', effectiveAt: '2026-09-20' }).effectiveAt,
+    ).toBe('2026-09-20')
+    expect(updateLoanRequestSchema.safeParse({ action: 'recover' }).success).toBe(true)
+
+    for (const action of LOAN_ACTIONS.filter((value) => value !== 'recover')) {
+      expect(updateLoanRequestSchema.safeParse({ action, effectiveAt: '2026-09-20' }).success).toBe(
+        false,
+      )
+    }
+
+    for (const effectiveAt of ['2026-09-20T10:00:00Z', '2026-02-30', 'вчора']) {
+      expect(updateLoanRequestSchema.safeParse({ action: 'recover', effectiveAt }).success).toBe(
+        false,
+      )
+    }
+
+    expect(updateLoanRequestSchema.safeParse({ action: 'recover', note: 'знайшли' }).success).toBe(
+      false,
+    )
+  })
+
   it('термін повернення дозволений лише разом із approve', () => {
     expect(
       updateLoanRequestSchema.safeParse({ action: 'approve', dueAt: '2026-06-12' }).success,
@@ -139,8 +179,8 @@ describe('updateLoanRequestSchema', () => {
     }
   })
 
-  it('без терміну будь-яка дія проходить', () => {
-    for (const action of LOAN_ACTIONS) {
+  it('без терміну будь-яка дія, крім recover, приймає примітку', () => {
+    for (const action of LOAN_ACTIONS.filter((value) => value !== 'recover')) {
       expect(updateLoanRequestSchema.safeParse({ action, note: 'бо так' }).success).toBe(true)
     }
   })

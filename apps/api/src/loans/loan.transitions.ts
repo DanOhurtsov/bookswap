@@ -1,4 +1,10 @@
-import type { CopyStatus, LoanAction, LoanStatus, NotificationType } from '@bookswap/shared'
+import type {
+  CopyStatus,
+  LoanAction,
+  LoanEventType,
+  LoanStatus,
+  NotificationType,
+} from '@bookswap/shared'
 
 /**
  * Стейт-машина позичання — таблиця §5.1 буквально. Чиста: ні Prisma, ні Nest, ні
@@ -54,6 +60,11 @@ export interface LoanTransition {
   notify: LoanNotification | null
   /** §5.1: усі інші `REQUESTED` на цей примірник → `REJECTED`. */
   rejectRivals: boolean
+  /**
+   * Stage 10 (T4): подія audit trail, яку перехід записує в тій самій транзакції. `null` — перехід
+   * подій не пише (request-flow позики не отримують заднім числом вигаданих подій, §6.8).
+   */
+  event: LoanEventType | null
 }
 
 export type LoanRefusal =
@@ -85,11 +96,12 @@ export function resolveTransition(
       return fromApproved(action, actor)
     case 'HANDED_OVER':
       return fromHandedOver(action, actor)
-    // Чотири термінальні стани §5.1. З них не веде жоден перехід — ні для кого.
+    case 'LOST':
+      return fromLost(action, actor)
+    // Три термінальні стани §5.1. З них не веде жоден перехід — ні для кого.
     case 'REJECTED':
     case 'CANCELLED':
     case 'RETURNED':
-    case 'LOST':
       return REFUSE('STATE')
     // Stage 10 (T3): статуси існують у схемі з кроку 10a, але переходи з них додасть
     // крок 10e. Доти жоден рядок так не позначений, а request-flow дії з них неможливі.
@@ -116,6 +128,7 @@ function fromRequested(action: LoanAction, actor: LoanActor): LoanTransitionResu
         stamp: 'respondedAt',
         notify: { to: 'BORROWER', type: 'LOAN_APPROVED' },
         rejectRivals: true,
+        event: null,
       }
 
     case 'reject':
@@ -135,6 +148,7 @@ function fromRequested(action: LoanAction, actor: LoanActor): LoanTransitionResu
         stamp: 'respondedAt',
         notify: { to: 'BORROWER', type: 'LOAN_REJECTED' },
         rejectRivals: false,
+        event: null,
       }
 
     case 'cancel':
@@ -154,11 +168,13 @@ function fromRequested(action: LoanAction, actor: LoanActor): LoanTransitionResu
         // передумав» — повідомлення, яке нікому не допомагає.
         notify: null,
         rejectRivals: false,
+        event: null,
       }
 
     case 'hand_over':
     case 'return':
     case 'mark_lost':
+    case 'recover':
       return REFUSE('STATE')
   }
 }
@@ -179,6 +195,7 @@ function fromApproved(action: LoanAction, actor: LoanActor): LoanTransitionResul
         stamp: null,
         notify: { to: 'COUNTERPARTY', type: 'LOAN_CANCELLED' },
         rejectRivals: false,
+        event: null,
       }
 
     case 'hand_over':
@@ -195,12 +212,14 @@ function fromApproved(action: LoanAction, actor: LoanActor): LoanTransitionResul
         stamp: 'handedAt',
         notify: { to: 'OWNER', type: 'LOAN_HANDED_OVER' },
         rejectRivals: false,
+        event: null,
       }
 
     case 'approve':
     case 'reject':
     case 'return':
     case 'mark_lost':
+    case 'recover':
       return REFUSE('STATE')
   }
 }
@@ -221,6 +240,7 @@ function fromHandedOver(action: LoanAction, actor: LoanActor): LoanTransitionRes
         stamp: 'returnedAt',
         notify: { to: 'BORROWER', type: 'LOAN_RETURNED' },
         rejectRivals: false,
+        event: null,
       }
 
     case 'mark_lost':
@@ -239,12 +259,49 @@ function fromHandedOver(action: LoanAction, actor: LoanActor): LoanTransitionRes
         // §5.1 сповіщення для цього рядка не передбачає, і §7.5 його не перелічує.
         notify: null,
         rejectRivals: false,
+        // Stage 10 (T4, §6.8): для нових позик момент втрати живе в `LoanEvent`, бо колонки
+        // під нього немає. Старі `LOST`-позики цієї події не мають і не отримують.
+        event: 'LOAN_LOST',
       }
 
     case 'approve':
     case 'reject':
     case 'cancel':
     case 'hand_over':
+    case 'recover':
+      return REFUSE('STATE')
+  }
+}
+
+/**
+ * Stage 10 (T3, §6.6): `LOST → LOST` + подія `RECOVERED`. `Loan.status` НЕ змінюється, `stamp` немає:
+ * минулі факти позики (`handedAt`, `returnedAt`, `responseNote`) не переписуються. Змінюється лише
+ * примірник — він знову вдома й доступний. Однократність (одна подія на позику) перевіряє сервіс і
+ * тримає частковий унікальний індекс; тут лише «хто» і «який стан примірника».
+ */
+function fromLost(action: LoanAction, actor: LoanActor): LoanTransitionResult {
+  switch (action) {
+    case 'recover':
+      if (actor !== 'OWNER') return REFUSE('ROLE')
+
+      return {
+        to: 'LOST',
+        // `mark_lost` лишає тримачем позичальника (§5.1): відновлюється рівно цей стан.
+        requires: { status: 'UNAVAILABLE', holder: 'BORROWER' },
+        copyStatus: 'AVAILABLE',
+        holder: 'OWNER',
+        stamp: null,
+        notify: null,
+        rejectRivals: false,
+        event: 'RECOVERED',
+      }
+
+    case 'approve':
+    case 'reject':
+    case 'cancel':
+    case 'hand_over':
+    case 'return':
+    case 'mark_lost':
       return REFUSE('STATE')
   }
 }

@@ -13,6 +13,7 @@ import {
 } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
@@ -510,11 +511,22 @@ function LoanActions({
         </div>
       )
 
+    // Stage 10 (10d): статус лишається LOST; знахідка — окремий факт, а не перехід статусу.
+    case 'LOST':
+      return (
+        <LostLoanRecovery
+          loan={loan}
+          isOwner={isOwner}
+          busy={busy}
+          submitting={busyKey === `recover:${loan.id}`}
+          onRecover={(body) => void onAct(loan, 'recover', body)}
+        />
+      )
+
     // Термінальні стани §5.1: з них не веде жоден перехід — ні для кого.
     case 'REJECTED':
     case 'CANCELLED':
     case 'RETURNED':
-    case 'LOST':
       return null
   }
 }
@@ -526,7 +538,8 @@ const DANGER_DESCRIPTIONS: Readonly<Record<LoanAction, string>> = {
   hand_over: '',
   return: '',
   mark_lost:
-    'Примірник позначиться як недоступний і залишиться за позичальником. Скасувати це не можна.',
+    'Примірник позначиться як недоступний і залишиться за позичальником. Якщо книжка знайдеться, власник зможе це відмітити.',
+  recover: '',
 }
 
 /**

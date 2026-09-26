@@ -50,9 +50,25 @@ export const loanCopySchema = z.object({
   id: z.string(),
   status: copyStatusSchema,
   condition: conditionSchema,
+  /** Stage 10 (10d): архівний примірник не можна відновити з `LOST` — спершу `restore`. */
+  isArchived: z.boolean(),
 })
 
 export type LoanCopy = z.infer<typeof loanCopySchema>
+
+/**
+ * Stage 10 (10d, T4): факт знахідки втраченої книжки. Приватна подія `LoanEvent` — її бачать лише
+ * сторони позики (цей API віддає тільки їх); друзям і стороннім вона не віддається ніде.
+ * `Loan.status` при цьому лишається `LOST`: це історичний факт, а не поточний стан примірника.
+ */
+export const loanRecoverySchema = z.object({
+  /** Фактична дата знахідки (за замовчуванням — момент запису). */
+  effectiveAt: z.iso.datetime(),
+  /** Коли знахідку записано в системі. */
+  recordedAt: z.iso.datetime(),
+})
+
+export type LoanRecovery = z.infer<typeof loanRecoverySchema>
 
 export const loanSchema = z.object({
   id: z.string(),
@@ -77,6 +93,8 @@ export const loanSchema = z.object({
   edition: editionSchema,
   work: workSchema,
   authors: z.array(workAuthorSchema),
+  /** `null`, доки знахідку не зафіксовано (і завжди для не-`LOST` позик). */
+  recovery: loanRecoverySchema.nullable(),
 })
 
 export type Loan = z.infer<typeof loanSchema>
@@ -97,21 +115,34 @@ export const createLoanRequestSchema = z.object({
 export type CreateLoanRequest = z.infer<typeof createLoanRequestSchema>
 
 /**
- * §8: `PATCH /loans/:id { action, note?, dueAt? }`.
+ * §8: `PATCH /loans/:id { action, note?, dueAt?, effectiveAt? }`.
  *
  * `dueAt` приймається **лише** разом із `action: 'approve'` — термін повернення
  * встановлює власник, погоджуючи запит. Правило про пару полів `class-validator`
  * не виражає, тож його перевіряє контролер (як і «хоч одне поле» в `PATCH /me`).
+ *
+ * `effectiveAt` (Stage 10, 10d) — фактична дата знахідки, лише з `action: 'recover'`. `note` з
+ * `recover` не поєднується: `recover` не переписує жодного минулого факту позики, зокрема
+ * `responseNote`. Що дата не в майбутньому, перевіряє сервер за своїм годинником.
  */
 export const updateLoanRequestSchema = z
   .object({
     action: loanActionSchema,
     note: noteSchema.optional(),
     dueAt: dueAtSchema.optional(),
+    effectiveAt: dueAtSchema.optional(),
   })
   .refine(
     (value) => value.dueAt === undefined || value.action === 'approve',
     'Термін повернення встановлюється лише під час підтвердження запиту',
+  )
+  .refine(
+    (value) => value.effectiveAt === undefined || value.action === 'recover',
+    'Дату знахідки можна вказати лише разом із дією recover',
+  )
+  .refine(
+    (value) => value.note === undefined || value.action !== 'recover',
+    'Примітка не поєднується з дією recover',
   )
 
 export type UpdateLoanRequest = z.infer<typeof updateLoanRequestSchema>
