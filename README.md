@@ -204,6 +204,18 @@ Prisma 7 більше не підвантажує `.env` сама, тож `apps/
 - **`NODE_ENV=production` вимагає `EMAIL_PROVIDER=resend`.** `DevEmailSender` нічого не надсилає й друкує тіло листа з одноразовим токеном у лог.
 - **Змінні Telegram — усі три або жодної.** Токен без імені бота не дає зібрати deep link; токен без секрету лишає `POST /webhooks/telegram` — єдиний маршрут без сесії — відкритим для будь-кого, хто знає адресу.
 
+#### Запобіжник гостьових позик (Етап 10, крок 10f.1)
+
+| Змінна                       | Навіщо                                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `GUEST_LOANS_ENABLED`        | `false` за замовчуванням. Допустимі значення — рівно `true` або `false`; будь-що інше зупиняє старт. |
+| `GUEST_LOANS_SYNTHETIC_ONLY` | `false` за замовчуванням. Обов'язково `true`, якщо `GUEST_LOANS_ENABLED=true` поза production.       |
+
+- **`NODE_ENV=production` + `GUEST_LOANS_ENABLED=true` — API не стартує** (константа `GUEST_LOANS_PRODUCTION_ALLOWED = false` у `env.validation.ts`; змінюється лише кодом за письмовим рішенням PO).
+- Поза production увімкнення без `GUEST_LOANS_SYNTHETIC_ONLY=true` теж зупиняє старт.
+- Майбутні гостьові маршрути захищає `GuestLoansEnabledGuard`: при вимкненій функції — `403 FEATURE_DISABLED` ще до сесії, сервісів і БД. Самих маршрутів у цьому кроці немає.
+- **Реальні персональні дані гостя заборонені в усіх середовищах.** `GUEST_LOANS_SYNTHETIC_ONLY=true` — організаційне підтвердження, а не перевірка: код не відрізняє реальну людину від синтетичної. Запобіжник **не знімає D2** (відкритий release blocker). Деталі — [runbook](docs/runbooks/guest-loans-safeguard.md).
+
 ## Акаунт і сесії
 
 ### Ендпоінти
@@ -671,7 +683,7 @@ PATCH  /api/v1/loans/:id              { action: approve | reject | cancel |
 | `PENDING_CONFIRMATION`     | amend_record    | власник     | `PENDING_CONFIRMATION` | не змінюється              | лише `handedAt`/`dueAt`; `RECORD_AMENDED` із попередніми/новими значеннями (Q12: після підтвердження — `409`)                |
 
 - **Ексклюзивність (M5).** `PENDING_CONFIRMATION` входить до `EXCLUSIVE_LOAN_STATUS` і до індексу `one_active_loan_per_copy`; примірник `RESERVED`, тож ніде не «доступний». Запис і подія, і сповіщення — в одній транзакції під `FOR UPDATE` на `Copy`.
-- **Q6 — без auto-expiry.** Непідтверджений запис ніхто не скасовує сам; нагадування власнику (10e-r) лише заплановане.
+- **Q6 — без auto-expiry.** Непідтверджений запис ніхто не скасовує сам; нагадування власнику (10e-r) відкладено рішенням PO (лише заготовка в плані).
 - **Межі `origin`.** `/loans` віддає лише валідні позики: `RECORDED_EXISTING` зі статусом `REQUESTED`/`APPROVED`/`REJECTED` або без `handedAt`, а також `RECORDED_GUEST`, не проходять `asServedLoan` (`404`). `requestedAt` у контракті nullable; підпис визначає `origin`.
 - **Приватність.** `PENDING_CONFIRMATION`, `DECLINED` і відкликаний запис (`CANCELLED` з `origin ≠ REQUESTED`) бачать лише сторони; `expectedReturnAt` для непідтвердженого запису чужим не віддається.
 - **Аналітика.** `LOAN_RECORDED`, `LOAN_RECORD_CONFIRMED`, `LOAN_RECORD_DECLINED`, `LOAN_RECORD_WITHDRAWN` (`subjectUserId` — власник); у 13 кроків funnel не входять (Q9). Кроки core loop (`LOAN_HANDED_OVER` тощо) для записаних позик не пишуться.

@@ -25,6 +25,22 @@ const telegramWebhookSecret = z
   .regex(/^[A-Za-z0-9_-]+$/, 'Telegram приймає лише A-Z, a-z, 0-9, _ і -')
 
 /**
+ * Strict boolean flag: only the literals `true` / `false`. `z.coerce.boolean()` is
+ * deliberately not used — it turns the string "false" into `true`.
+ */
+const strictBoolean = z
+  .enum(['true', 'false'], { message: 'очікується рівно true або false' })
+  .transform((value) => value === 'true')
+
+/**
+ * Stage 10 §7.3 (T9): guest loans stay off in production until D2 is lifted by a
+ * written PO decision. Changing this constant is that decision's code change —
+ * never an env value. The guard does not lift D2 and cannot tell real data from
+ * synthetic.
+ */
+export const GUEST_LOANS_PRODUCTION_ALLOWED = false
+
+/**
  * Валідація оточення на старті, fail-fast.
  *
  * `TEST_DATABASE_URL` тут свідомо немає: вона потрібна лише `pnpm test:db` і не є
@@ -127,8 +143,34 @@ export const envSchema = z
       .min(32, 'щонайменше 32 символи (openssl rand -hex 32)')
       .max(256)
       .optional(),
+
+    /**
+     * Stage 10 §7.3 (T9): D2 safeguard for guest loans. Off by default. Outside
+     * production, turning it on also requires `GUEST_LOANS_SYNTHETIC_ONLY=true` —
+     * an organisational confirmation, not a check: real personal data of a guest
+     * is forbidden in every environment until D2 is lifted.
+     */
+    GUEST_LOANS_ENABLED: strictBoolean.default(false),
+    GUEST_LOANS_SYNTHETIC_ONLY: strictBoolean.default(false),
   })
   .superRefine((env, ctx) => {
+    if (env.GUEST_LOANS_ENABLED) {
+      if (env.NODE_ENV === 'production' && !GUEST_LOANS_PRODUCTION_ALLOWED) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['GUEST_LOANS_ENABLED'],
+          message: 'гостьові позики заборонені в production, доки D2 не знято',
+        })
+      } else if (env.NODE_ENV !== 'production' && !env.GUEST_LOANS_SYNTHETIC_ONLY) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['GUEST_LOANS_SYNTHETIC_ONLY'],
+          message:
+            'GUEST_LOANS_ENABLED=true вимагає GUEST_LOANS_SYNTHETIC_ONLY=true (лише тестові дані)',
+        })
+      }
+    }
+
     /**
      * `DevEmailSender` у проді заборонений, і причина не в тому, що він
      * «несправжній»: він нічого не надсилає (підтвердження пошти мовчки не

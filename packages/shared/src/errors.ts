@@ -25,6 +25,8 @@ export const API_ERROR_CODES = {
   TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
   /** Непередбачена помилка сервера (HTTP 5xx). Деталі назовні не віддаються. */
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** Функція вимкнена конфігурацією сервера (HTTP 403). Не залежить від прав користувача. */
+  FEATURE_DISABLED: 'FEATURE_DISABLED',
 
   // --- Акаунт і сесії (§6.1) -------------------------------------------------
   /** Реєстрація на вже зайнятий email (HTTP 409). */
