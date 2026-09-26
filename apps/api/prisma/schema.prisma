@@ -427,7 +427,7 @@ model Copy {
   currentHolderId String?
   /// Stage 10 (D1): контакт-гість, що тримає книгу. Взаємовиключне з `currentHolderId`.
   heldByContactId String?
-  /// Stage 10: «більше не у власності». Зараз завжди NULL (API з'явиться в 10c).
+  /// Stage 10: «більше не у власності» (архів, 10c). NULL = активний примірник.
   archivedAt      DateTime?
 
   status     CopyStatus @default(AVAILABLE)
@@ -500,7 +500,7 @@ model Loan {
   dueAt       DateTime?
   returnedAt  DateTime?
 
-  copy     Copy @relation(fields: [copyId], references: [id], onDelete: Cascade)
+  copy     Copy @relation(fields: [copyId], references: [id], onDelete: Restrict)
   owner    User @relation("LoanOwner", fields: [ownerId], references: [id])
   borrower User? @relation("LoanBorrower", fields: [borrowerId], references: [id], onDelete: Restrict)
   borrowerContact ExternalBorrower? @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id], onDelete: SetNull)

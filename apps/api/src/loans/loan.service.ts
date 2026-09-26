@@ -186,11 +186,13 @@ export class LoanService {
           currentHolderId: true,
           status: true,
           visibility: true,
+          archivedAt: true,
           owner: { select: { libraryVisibility: true } },
         },
       })
 
-      if (copy === null) throw notFound('Примірника не знайдено')
+      // Stage 10 (10c): архівний примірник для решти світу не існує.
+      if (copy === null || copy.archivedAt !== null) throw notFound('Примірника не знайдено')
 
       // §5.3.4 і §5.2: позичити в самого себе не можна. Перевірка перша, бо решта
       // питань («чи ми друзі», «чи видно») для власного примірника безглузді.

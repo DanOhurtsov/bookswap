@@ -54,6 +54,8 @@ export class NetworkInventory {
   async load(viewerId: string, filter: InventoryFilter): Promise<InventoryCopy[]> {
     const rows = await this.prisma.copy.findMany({
       where: {
+        // Stage 10 (10c): архівний примірник не бере участі в discovery/holders.
+        archivedAt: null,
         // `AVAILABLE` означає «вдома» гарантовано: `copy_available_is_home` у БД (§5.3.2).
         ...(filter.availability === 'AVAILABLE' ? { status: 'AVAILABLE' as const } : {}),
         edition: {

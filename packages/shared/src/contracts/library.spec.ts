@@ -109,6 +109,12 @@ describe('libraryQueryRequestSchema', () => {
   it('валідує мову як ISO 639-1', () => {
     expect(libraryQueryRequestSchema.safeParse({ lang: 'zz' }).success).toBe(false)
   })
+
+  it('archived приймає лише true/false (рядки запиту)', () => {
+    expect(libraryQueryRequestSchema.parse({ archived: 'true' }).archived).toBe('true')
+    expect(libraryQueryRequestSchema.parse({ archived: 'false' }).archived).toBe('false')
+    expect(libraryQueryRequestSchema.safeParse({ archived: 'yes' }).success).toBe(false)
+  })
 })
 
 describe('проєкції примірника', () => {

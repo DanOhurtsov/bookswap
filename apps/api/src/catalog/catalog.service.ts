@@ -122,7 +122,7 @@ export class CatalogService {
         editions: {
           include: {
             translation: true,
-            copies: { where: { ownerId: userId }, select: { id: true } },
+            copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
           },
         },
       },
@@ -392,7 +392,10 @@ export class CatalogService {
         include: {
           ...WITH_AUTHORS,
           editions: {
-            select: { id: true, copies: { where: { ownerId: userId }, select: { id: true } } },
+            select: {
+              id: true,
+              copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
+            },
           },
         },
       })
@@ -534,7 +537,10 @@ export class CatalogService {
         where: { id: translationId },
         include: {
           editions: {
-            select: { id: true, copies: { where: { ownerId: userId }, select: { id: true } } },
+            select: {
+              id: true,
+              copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
+            },
           },
         },
       })
@@ -614,7 +620,7 @@ export class CatalogService {
           where: { id: editionId },
           include: {
             work: { select: { id: true, origLang: true } },
-            copies: { where: { ownerId: userId }, select: { id: true } },
+            copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
             translation: true,
           },
         })

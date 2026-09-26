@@ -31,8 +31,9 @@ describe('ActivationService.progressOf', () => {
     // `visibility` or `currentHolderId` clause would fail here. A lent-out,
     // hidden or «temporarily not lending» copy is still a book on the shelf,
     // and narrowing would un-complete the checklist the moment somebody
-    // borrowed the tenth book.
-    expect(count).toHaveBeenCalledWith({ where: { ownerId: 'user-marta' } })
+    // borrowed the tenth book. The one deliberate exception is an archived copy
+    // (Stage 10, 10c): the owner no longer has that book.
+    expect(count).toHaveBeenCalledWith({ where: { ownerId: 'user-marta', archivedAt: null } })
   })
 
   it.each([0, 1, 9])('at %i copies keeps asking for books', async (ownedCopyCount) => {

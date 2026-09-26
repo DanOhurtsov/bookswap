@@ -82,8 +82,8 @@ describe('ProductEvent (§2, §11)', () => {
   })
 
   /**
-   * §1: обґрунтування всієї моделі — Copy й каскадно Loan можуть бути незворотно
-   * видалені (`LibraryService.removeCopy`), а BOOK_ADDED мусить пережити це
+   * §1: обґрунтування всієї моделі — Copy без історії позичань може бути незворотно
+   * видалений (`LibraryService.removeCopy`), а BOOK_ADDED мусить пережити це
    * структурно, без FK на Copy взагалі.
    */
   it('видалення Copy не видаляє й не чіпає ProductEvent (немає FK на Copy)', async () => {

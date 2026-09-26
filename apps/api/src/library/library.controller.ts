@@ -80,6 +80,24 @@ export class LibraryController {
     await this.library.removeCopy(user.id, copyId)
   }
 
+  @Post('me/library/:copyId/archive')
+  @HttpCode(HttpStatus.OK)
+  archiveCopy(
+    @CurrentUser() user: UserModel,
+    @Param('copyId') copyId: string,
+  ): Promise<CopyResponse> {
+    return this.library.archiveCopy(user.id, copyId)
+  }
+
+  @Post('me/library/:copyId/restore')
+  @HttpCode(HttpStatus.OK)
+  restoreCopy(
+    @CurrentUser() user: UserModel,
+    @Param('copyId') copyId: string,
+  ): Promise<CopyResponse> {
+    return this.library.restoreCopy(user.id, copyId)
+  }
+
   /** §6.5 і матриця §9 — усе рішення про видимість ухвалює сервіс. */
   @Get('users/:id/library')
   listOf(

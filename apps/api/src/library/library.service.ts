@@ -17,6 +17,8 @@ import { AnalyticsService } from '../analytics/analytics.service'
 import { NetworkActivationService } from '../analytics/network-activation.service'
 import { TextNormalizer } from '../catalog/text-normalizer'
 import { ApiException } from '../common/api.exception'
+import { isForeignKeyViolationOn } from '../common/prisma-errors'
+import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS, toPublicUser } from '../users/user.mapper'
 import {
@@ -29,18 +31,31 @@ import {
 import type { LoanStatus } from '../generated/prisma/enums'
 import type { CopyWhereInput } from '../generated/prisma/models'
 
+const LOAN_COPY_FKEY = 'Loan_copyId_fkey'
+
 /**
  * §5.2: видалення примірника заблоковане, поки лоан у цих статусах.
  *
- * Це не формальність: `Copy → Loan` каскадний, тож видалення примірника з
- * активним лоаном не просто загубило б домовленість — воно стерло б **історію**
- * позичань, яка в цій моделі живе виключно в `Loan` (§4.6).
+ * Це не формальність: активний лоан — це домовленість, яку не можна загубити
+ * видаленням. Від стирання історії захищає `Loan_copyId_fkey` (`RESTRICT` з M3,
+ * Stage 10) і перевірка «жодного `Loan`» в `removeCopy`; історія позичань живе
+ * виключно в `Loan` (§4.6).
  *
  * Список зі `shared`, а не локальний: це рівно та множина, яку тримає частковий
  * унікальний індекс `one_active_loan_per_copy` (§5.3.1), і другу її копію одного
  * дня забули б оновити.
  */
 const ACTIVE_LOAN_STATUSES: LoanStatus[] = [...EXCLUSIVE_LOAN_STATUS]
+
+/**
+ * Stage 10 (10c): архів заборонено, поки лоан займає примірник. `PENDING_CONFIRMATION` (запис власника, що
+ * чекає відповіді позичальника) вже блокує архів, хоча в `EXCLUSIVE_LOAN_STATUS` і в частковий індекс його додасть
+ * лише крок 10e (M5) разом із самим створенням таких записів.
+ */
+const ARCHIVE_BLOCKING_LOAN_STATUSES: LoanStatus[] = [
+  ...ACTIVE_LOAN_STATUSES,
+  'PENDING_CONFIRMATION',
+]
 
 /** Незавершені лоани — ті, що впливають на §6.5. Копія масиву: Prisma хоче змінюваний. */
 const OPEN_LOAN_STATUSES: LoanStatus[] = [...OPEN_LOAN_STATUS]
@@ -96,12 +111,15 @@ export class LibraryService {
     private readonly network: NetworkActivationService,
     private readonly access: AccessService,
     private readonly normalizer: TextNormalizer,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** §8: `GET /me/library?status=&lang=&q=`. */
   async listOwn(userId: string, filters: LibraryQueryRequest): Promise<LibraryResponse> {
     const copies = await this.findCopies({
       ownerId: userId,
+      // Stage 10 (10c): архів — окремий перегляд; у звичайній бібліотеці його немає.
+      archivedAt: filters.archived === 'true' ? { not: null } : null,
       AND: await this.filterConditions(filters),
     })
 
@@ -112,6 +130,7 @@ export class LibraryService {
   async listOut(userId: string): Promise<LibraryResponse> {
     const copies = await this.findCopies({
       ownerId: userId,
+      archivedAt: null,
       // `not` у Prisma виключає NULL; тримач-гість (Stage 10) має `currentHolderId = NULL` і теж «не вдома».
       OR: [{ currentHolderId: null }, { currentHolderId: { not: userId } }],
     })
@@ -124,6 +143,7 @@ export class LibraryService {
     const copies = await this.findCopies({
       currentHolderId: userId,
       ownerId: { not: userId },
+      archivedAt: null,
     })
 
     return { groups: groupByEdition(copies, (copy) => toBorrowedCopy(copy, userId)) }
@@ -161,7 +181,7 @@ export class LibraryService {
     }
 
     const showHolderNames = holderNamesVisibleTo(role, owner.showHolderNames)
-    const copies = await this.findCopies({ ownerId })
+    const copies = await this.findCopies({ ownerId, archivedAt: null })
     const visible = copies.filter((copy) =>
       copyVisibleTo(role, owner.libraryVisibility, copy.visibility),
     )
@@ -299,30 +319,136 @@ export class LibraryService {
     return { copy: toOwnCopy(copy) }
   }
 
-  /** §5.2: «Видалення примірника заблоковане, поки є лоан у APPROVED або HANDED_OVER». */
+  /**
+   * Stage 10 (10c, §6.5): видалення дозволене, лише коли в примірника немає жодного `Loan` — будь-якого
+   * статусу, бо історія живе лише в `Loan`. Перевірка й `DELETE` — в одній транзакції під `FOR UPDATE`
+   * на `Copy`; той самий лок бере `LoanService.request`, тож гонка з новою позикою серіалізується.
+   * `RESTRICT` на `Loan_copyId_fkey` — друга лінія захисту: якщо хтось колись створить `Loan`, минаючи
+   * лок, отримає той самий доменний код, а не 500.
+   */
   async removeCopy(userId: string, copyId: string): Promise<void> {
-    const existing = await this.prisma.copy.findUnique({
-      where: { id: copyId },
-      select: { id: true, ownerId: true },
-    })
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.lockOwnCopy(tx, userId, copyId)
 
-    if (existing === null || existing.ownerId !== userId) throw notFound('Примірника не знайдено')
+        if ((await tx.loan.count({ where: { copyId } })) > 0) throw hasLoanHistory()
 
-    const { count } = await this.prisma.copy.deleteMany({
-      where: {
-        id: copyId,
-        ownerId: userId,
-        loans: { none: { status: { in: ACTIVE_LOAN_STATUSES } } },
-      },
-    })
+        await tx.copy.delete({ where: { id: copyId } })
+      })
+    } catch (error) {
+      if (isForeignKeyViolationOn(error, LOAN_COPY_FKEY)) throw hasLoanHistory()
 
-    if (count === 0) {
-      throw new ApiException(
-        API_ERROR_CODES.COPY_HAS_ACTIVE_LOAN,
-        'Примірник не можна видалити: він зараз у позичанні',
-        HttpStatus.CONFLICT,
-      )
+      throw error
     }
+  }
+
+  /**
+   * Stage 10 (10c, §6.5): «більше не у власності». `Loan` і решта історії не змінюються. Заборонено при
+   * `PENDING_CONFIRMATION`/`APPROVED`/`HANDED_OVER`; `LOST` дозволено. Відкриті `REQUESTED` у тій самій
+   * транзакції стають `REJECTED` зі сповіщенням. Повторний виклик на вже архівному примірнику — no-op.
+   */
+  async archiveCopy(userId: string, copyId: string): Promise<CopyResponse> {
+    await this.prisma.$transaction(async (tx) => {
+      const copy = await this.lockOwnCopy(tx, userId, copyId)
+
+      if (copy.archivedAt !== null) return
+
+      const exclusive = await tx.loan.findFirst({
+        where: { copyId, status: { in: ARCHIVE_BLOCKING_LOAN_STATUSES } },
+        select: { id: true },
+      })
+
+      if (exclusive !== null) {
+        throw new ApiException(
+          API_ERROR_CODES.COPY_HAS_ACTIVE_LOAN,
+          'Примірник не можна архівувати: він зараз у позичанні',
+          HttpStatus.CONFLICT,
+        )
+      }
+
+      const now = new Date()
+      // Лише справжні request-flow позики: записані власником (`origin ≠ REQUESTED`) не чіпаються.
+      const requestFlow = {
+        status: 'REQUESTED',
+        origin: 'REQUESTED',
+        borrowerKind: 'REGISTERED',
+      } as const
+      const requests = await tx.loan.findMany({
+        where: { copyId, ...requestFlow },
+        select: { id: true, borrowerId: true },
+      })
+
+      if (requests.length > 0) {
+        const { count } = await tx.loan.updateMany({
+          where: { id: { in: requests.map((request) => request.id) }, ...requestFlow },
+          data: { status: 'REJECTED', respondedAt: now },
+        })
+
+        // Під локом `Copy` набір не може змінитися: розбіжність — зламане припущення про блокування.
+        if (count !== requests.length) {
+          throw new Error(`Запити на ${copyId} змінилися під блокуванням архівування`)
+        }
+
+        for (const request of requests) {
+          // `REQUESTED` існує лише в request-flow: позичальник зареєстрований.
+          if (request.borrowerId === null) {
+            throw new Error(`Лоан ${request.id}: REQUESTED без зареєстрованого позичальника`)
+          }
+
+          await this.notifications.create(
+            {
+              userId: request.borrowerId,
+              type: 'LOAN_REJECTED',
+              payload: { loanId: request.id, copyId, actorId: userId },
+            },
+            tx,
+          )
+        }
+      }
+
+      await tx.copy.update({ where: { id: copyId }, data: { archivedAt: now } })
+    })
+
+    this.notifications.dispatchSoon()
+
+    return this.ownCopy(copyId)
+  }
+
+  /** Stage 10 (10c): повертає примірник до активних вибірок; факти позик не змінюються. Ідемпотентно. */
+  async restoreCopy(userId: string, copyId: string): Promise<CopyResponse> {
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockOwnCopy(tx, userId, copyId)
+      await tx.copy.update({ where: { id: copyId }, data: { archivedAt: null } })
+    })
+
+    return this.ownCopy(copyId)
+  }
+
+  /**
+   * Лок береться лише на власному примірнику: чужий id не ставить нікого в чергу за чужим рядком і
+   * відповідає 404, як решта `/me/library`.
+   */
+  private async lockOwnCopy(
+    tx: Pick<PrismaService, '$queryRaw'>,
+    userId: string,
+    copyId: string,
+  ): Promise<{ archivedAt: Date | null }> {
+    const [copy] = await tx.$queryRaw<{ archivedAt: Date | null }[]>`
+      SELECT "archivedAt" FROM "Copy" WHERE "id" = ${copyId} AND "ownerId" = ${userId} FOR UPDATE
+    `
+
+    if (copy === undefined) throw notFound('Примірника не знайдено')
+
+    return copy
+  }
+
+  private async ownCopy(copyId: string): Promise<CopyResponse> {
+    const copy = await this.prisma.copy.findUniqueOrThrow({
+      where: { id: copyId },
+      include: WITH_CATALOG,
+    })
+
+    return { copy: toOwnCopy(copy) }
   }
 
   private async findCopies(where: CopyWhereInput): Promise<CopyRow[]> {
@@ -377,4 +503,12 @@ function toDate(value: string | null | undefined): Date | null {
 
 function notFound(message: string): ApiException {
   return new ApiException(API_ERROR_CODES.NOT_FOUND, message, HttpStatus.NOT_FOUND)
+}
+
+function hasLoanHistory(): ApiException {
+  return new ApiException(
+    API_ERROR_CODES.COPY_HAS_LOAN_HISTORY,
+    'Примірник не можна видалити: у нього є історія позичань. Заархівуйте його',
+    HttpStatus.CONFLICT,
+  )
 }

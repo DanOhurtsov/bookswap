@@ -1,4 +1,8 @@
-import { isDeadlockOrSerializationFailure } from '../../src/common/prisma-errors'
+import { createGraph } from './fixtures'
+import {
+  isDeadlockOrSerializationFailure,
+  isForeignKeyViolationOn,
+} from '../../src/common/prisma-errors'
 import { createTestPrismaClient, truncateAll } from './test-database'
 import type { PrismaClient } from '../../src/generated/prisma/client'
 
@@ -78,4 +82,24 @@ describe('розпізнавання retryable PostgreSQL помилок', () =>
     expect(fulfilled).toHaveLength(1)
     expect(isDeadlockOrSerializationFailure(rejected[0]?.reason)).toBe(true)
   }, 20_000)
+
+  it('реальне порушення Loan_copyId_fkey розпізнається, чужий зовнішній ключ — ні', async () => {
+    const graph = await createGraph(setup)
+
+    await setup.loan.create({
+      data: {
+        copyId: graph.copyId,
+        ownerId: graph.ownerId,
+        borrowerId: graph.borrowerId,
+        status: 'RETURNED',
+      },
+    })
+
+    const error: unknown = await setup.copy
+      .delete({ where: { id: graph.copyId } })
+      .catch((e: unknown) => e)
+
+    expect(isForeignKeyViolationOn(error, 'Loan_copyId_fkey')).toBe(true)
+    expect(isForeignKeyViolationOn(error, 'Loan_borrowerId_fkey')).toBe(false)
+  })
 })

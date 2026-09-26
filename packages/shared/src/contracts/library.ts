@@ -242,6 +242,8 @@ export type BorrowedLibraryGroup = z.infer<typeof borrowedLibraryGroupSchema>
  */
 export const libraryQueryRequestSchema = z.object({
   status: copyStatusSchema.optional(),
+  /** Stage 10 (10c): `true` — лише архів власника; без параметра чи `false` — активні примірники. */
+  archived: z.enum(['true', 'false']).optional(),
   lang: languageCodeSchema.optional(),
   q: z.string().trim().min(LIBRARY_LIMITS.queryMin).max(LIBRARY_LIMITS.queryMax).optional(),
 })

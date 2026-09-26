@@ -101,6 +101,7 @@ const VIEW_LABELS: Readonly<Record<LibraryView, string>> = {
   own: 'Усі мої',
   out: 'Мої не вдома',
   borrowed: 'Чужі в мене',
+  archive: 'Архів',
 }
 
 function LibraryBody({ checklist }: LibraryScreenProps) {
@@ -111,7 +112,7 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
       {checklist}
 
       <nav className="actions" aria-label="Вигляд бібліотеки">
-        {(['own', 'out', 'borrowed'] as const).map((value) => (
+        {(['own', 'out', 'borrowed', 'archive'] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -164,7 +165,7 @@ function BorrowedView() {
   )
 }
 
-function OwnView({ view }: { view: 'own' | 'out' }) {
+function OwnView({ view }: { view: 'own' | 'out' | 'archive' }) {
   const [filters, setFilters] = useState<LibraryQueryRequest>({})
   const [statusFilter, setStatusFilter] = useState('')
   const [langFilter, setLangFilter] = useState('')
@@ -219,6 +220,16 @@ function OwnView({ view }: { view: 'own' | 'out' }) {
       // DELETE resolved: a failed delete throws before this line, and nothing
       // is invalidated for a change that never happened. The legacy `reload()`
       // in `run` still follows — the two readers share no cache (R12).
+      await invalidateActivation(queryClient)
+    })
+
+  const setArchived = (copyId: string, archive: boolean): Promise<void> =>
+    run(`${archive ? 'archive' : 'restore'}:${copyId}`, async () => {
+      await apiRequest(`/me/library/${copyId}/${archive ? 'archive' : 'restore'}`, {
+        method: 'POST',
+        schema: copyResponseSchema,
+      })
+      // Архівний примірник не рахується в чеклісті активації — і навпаки після відновлення.
       await invalidateActivation(queryClient)
     })
 
@@ -288,6 +299,9 @@ function OwnView({ view }: { view: 'own' | 'out' }) {
               onSaved={reload}
               onFailure={setFailure}
               onDelete={setPendingDelete}
+              onArchive={(copy) => void setArchived(copy.id, true)}
+              onRestore={(copy) => void setArchived(copy.id, false)}
+              archived={view === 'archive'}
             />
           ))}
         </ul>
@@ -296,7 +310,7 @@ function OwnView({ view }: { view: 'own' | 'out' }) {
       <ConfirmDialog
         open={pendingDelete !== undefined}
         title="Видалити примірник?"
-        description="Запис зникне з вашої бібліотеки разом із нотаткою — і разом з усією історією позичань цього примірника: і завершеними, і тими, що чекають на відповідь. Відновити її не можна. Примірник із підтвердженим або переданим позичанням видалити неможливо — спершу скасуйте або завершіть позичання."
+        description="Запис зникне з вашої бібліотеки разом із нотаткою. Видалити можна лише примірник, який ніколи не мав позичань (навіть відхилених чи скасованих): історія позичань не стирається. Якщо книжки вже немає у вас — скористайтеся «Архівувати»."
         confirmLabel="Видалити"
         pending={busyKey !== undefined}
         onConfirm={() => {
@@ -312,6 +326,7 @@ function OwnView({ view }: { view: 'own' | 'out' }) {
 
 function emptyMessage(view: LibraryView): string {
   if (view === 'out') return 'Усі ваші книжки вдома.'
+  if (view === 'archive') return 'Архів порожній.'
   if (view === 'borrowed') return 'Чужих книжок у вас зараз немає.'
 
   return 'Полиця порожня. Знайдіть книжку в каталозі — і додайте примірник.'
@@ -370,30 +385,82 @@ function OwnGroupCard({
   onSaved,
   onFailure,
   onDelete,
+  onArchive,
+  onRestore,
+  archived,
 }: {
   group: LibraryGroup
   busyKey: string | undefined
   onSaved: () => Promise<void>
   onFailure: (error: unknown) => void
   onDelete: (copy: OwnCopy) => void
+  onArchive: (copy: OwnCopy) => void
+  onRestore: (copy: OwnCopy) => void
+  archived: boolean
 }) {
   return (
     <li className="book">
       <GroupHeader group={group} />
       <ul className="copies">
-        {group.copies.map((copy) => (
-          <CopyRow
-            key={copy.id}
-            copy={copy}
-            busyKey={busyKey}
-            onSaved={onSaved}
-            onFailure={onFailure}
-            onDelete={() => {
-              onDelete(copy)
-            }}
-          />
-        ))}
+        {group.copies.map((copy) =>
+          archived ? (
+            <ArchivedCopyRow
+              key={copy.id}
+              copy={copy}
+              busyKey={busyKey}
+              onRestore={() => {
+                onRestore(copy)
+              }}
+            />
+          ) : (
+            <CopyRow
+              key={copy.id}
+              copy={copy}
+              busyKey={busyKey}
+              onSaved={onSaved}
+              onFailure={onFailure}
+              onDelete={() => {
+                onDelete(copy)
+              }}
+              onArchive={() => {
+                onArchive(copy)
+              }}
+            />
+          ),
+        )}
       </ul>
+    </li>
+  )
+}
+
+function ArchivedCopyRow({
+  copy,
+  busyKey,
+  onRestore,
+}: {
+  copy: OwnCopy
+  busyKey: string | undefined
+  onRestore: () => void
+}) {
+  return (
+    <li className="copy">
+      <span className="book__meta">
+        {CONDITION_LABELS[copy.condition]} · {VISIBILITY_LABELS[copy.visibility]}
+      </span>
+      {copy.note !== null && <span className="book__meta">Нотатка: {copy.note}</span>}
+      <span className="book__meta">
+        <Link href={`/copies/${copy.id}/history`}>Історія</Link>
+      </span>
+      <div className="person__actions">
+        <button
+          type="button"
+          className="button--ghost"
+          disabled={busyKey !== undefined}
+          onClick={onRestore}
+        >
+          Відновити
+        </button>
+      </div>
     </li>
   )
 }
@@ -404,12 +471,14 @@ function CopyRow({
   onSaved,
   onFailure,
   onDelete,
+  onArchive,
 }: {
   copy: OwnCopy
   busyKey: string | undefined
   onSaved: () => Promise<void>
   onFailure: (error: unknown) => void
   onDelete: () => void
+  onArchive: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [condition, setCondition] = useState<Condition>(copy.condition)
@@ -604,6 +673,15 @@ function CopyRow({
               {copy.status === 'AVAILABLE' ? 'Тимчасово не даю' : 'Знову даю'}
             </button>
           )}
+
+          <button
+            type="button"
+            className="button--ghost"
+            disabled={pending || busyKey !== undefined}
+            onClick={onArchive}
+          >
+            Архівувати
+          </button>
 
           <button
             type="button"

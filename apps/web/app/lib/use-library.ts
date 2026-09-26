@@ -19,11 +19,12 @@ import { useApiResource, type Resource } from './use-resource'
  * Один хук на обидва випадки або повертав би union, який довелося б звужувати
  * приведенням типу, або вдавав би, що дві різні відповіді — одна.
  */
-export type LibraryView = 'own' | 'out' | 'borrowed'
+export type LibraryView = 'own' | 'out' | 'borrowed' | 'archive'
 
 const OWN_PATHS = {
   own: '/me/library',
   out: '/me/library/out',
+  archive: '/me/library?archived=true',
 } as const
 
 /** Фільтри §8 у рядок запиту. Порожні значення не додаються — це «без фільтра». */
@@ -39,9 +40,9 @@ function toQuery(filters: LibraryQueryRequest): string {
   return query === '' ? '' : `?${query}`
 }
 
-/** §8: `GET /me/library` і `GET /me/library/out`. Фільтри — лише в першої. */
+/** §8: `GET /me/library`, `/me/library/out` і (Stage 10) `?archived=true`. Фільтри — лише в першої. */
 export function useOwnLibrary(
-  view: 'own' | 'out',
+  view: 'own' | 'out' | 'archive',
   filters: LibraryQueryRequest,
 ): Resource<LibraryResponse> {
   // Фільтри — обʼєкт, тож ключем стає рядок запиту, а не він сам: новий літерал

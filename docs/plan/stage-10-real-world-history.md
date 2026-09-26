@@ -1,7 +1,7 @@
 # Етап 10 — реальний світ і довіра до історії: execution plan
 
-**Статус:** план; **кроки 10a і 10b реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10c–10j не
-розпочато. Q0, Q8, Q10 і Q13 затверджено Product Owner ([§0.2](#02-рішення-product-owner-отримані-для-кроку-10a)).
+**Статус:** план; **кроки 10a, 10b і 10c реалізовано** (див. [§8](#8-послідовність-реалізаційних-кроків)), кроки 10d–10j не
+розпочато. Q0, Q8, Q10, Q11 і Q13 затверджено Product Owner ([§0.2](#02-рішення-product-owner-отримані-для-кроку-10a)).
 Решта Q і всі T-пропозиції, окрім T1-a, лишаються **незатвердженими**.
 **Джерело:** [Product Roadmap v2, Етап 10](./roadmap-v2.md#етап-10--реальний-світ-і-довіра-до-історії).
 **Гілка реалізації:** `codex/stage-10-real-world-history` (Q0, затверджено PO).
@@ -47,7 +47,7 @@
   над** `docs/specification.md`. Сам `docs/specification.md` не змінюється (і не змінювався). Рішення
   стосується лише переліку §5; будь-яка нова розбіжність зі spec потребує окремого рішення PO.
 
-**Не затверджено повідомленнями §0.2–§0.3 (лишається відкритим):** Q1–Q7, Q9, Q11, Q12, Q14 та решта T-пропозицій;
+**Не затверджено повідомленнями §0.2–§0.4 (лишається відкритим):** Q1–Q7, Q9, Q12, Q14 та решта T-пропозицій;
 **D2 — відкритий release blocker**, реальні персональні дані гостя заборонені в будь-якому середовищі.
 Android Chrome QA Етапу 8 — **NOT RUN**; Етап 8 і beta gate не закриті.
 
@@ -55,6 +55,12 @@ Android Chrome QA Етапу 8 — **NOT RUN**; Етап 8 і beta gate не з�
 
 - **Q8 — затверджено.** `LOST` входить у «Хто читав» **лише за наявності `handedAt`**: фактична передача
   відбулася. `LOST` без `handedAt` — не читання. Це уточнює §2 п. 6, §6.7 і H1.
+
+### 0.4 Рішення Product Owner, отримані для кроку 10c
+
+- **Q11 — затверджено.** Власник **може відновити** примірник з архіву (`restore`). Окремого audit-запису про
+  archive/restore (`CopyEvent` чи інший) **не створюється**: факт архівування видно з `Copy.archivedAt`, а
+  історія позичань лишається в `Loan`. Це уточнює §6.5 і A4.
 
 ## 1. Product outcome, метрики, «Не робити»
 
@@ -172,7 +178,7 @@ Android Chrome QA Етапу 8 — **NOT RUN**; Етап 8 і beta gate не з�
 | G2 | **`Copy.currentHolderId` обов’язковий** (FK на `User`) | `schema.prisma:423,435`; `library.mapper.ts:205-206` (`isHome`), `:228,256`; `library.service.ts:111-125` (`currentHolderId: { not: userId }` — у Prisma `not` **виключає** `NULL`) | Книжка «в гостя»: тримач ≠ `User`; view «не вдома» не має її губити |
 | G3 | **CHECK-обмеження на `Copy` виражені через `currentHolderId = ownerId`** | міграція `20260816194509_loan_state_machine` (`copy_available_is_home`, `copy_away_is_lent_or_unavailable`, `copy_lent_out_is_away`); є `NULL`-пастка (коментар у міграції) | Переписати через `IS DISTINCT FROM` під nullable holder |
 | G4 | **Каскадне видалення `Loan` при видаленні `Copy`** | `schema.prisma:483` (`Loan.copy onDelete: Cascade`); `library.service.ts:301-325` (`removeCopy` — блокує лише `APPROVED`/`HANDED_OVER`, тож копія з `RETURNED`-історією **видаляється разом з історією**); закріплено тестом `apps/api/test/db/referential-actions.db-spec.ts:61` («видалення Copy зносить його лоани») | `RESTRICT`; delete лише без loan activity; archive замість delete; **інвертувати** цей тест |
-| G5 | **Немає archive** | у `Copy` немає поля; усі вибірки (`library.service.ts`, `catalog/search/network-inventory.service.ts:55`, `catalog/search/work-holders.service.ts`, `library/activation.service.ts:37`, `catalog/catalog.service.ts:125,395,537,617` («у мене вже є»), `library/import/*` дедуп, `analytics/network-activation.service.ts:67`) читають усі `Copy` | Фільтр «не архівний» скрізь, де рахується наявність |
+| G5 | **Немає archive** | у `Copy` немає поля; усі вибірки (`library.service.ts`, `catalog/search/network-inventory.service.ts:55`, `catalog/search/work-holders.service.ts`, `library/activation.service.ts:37`, `catalog/catalog.service.ts:125,395,537,617` («у мене вже є»), `analytics/network-activation.service.ts:67`) читають усі `Copy` | Фільтр «не архівний» скрізь, де рахується наявність. CSV-дедуплікація імпорту працює в межах файла й не читає наявні `Copy`, тож архівного DB-фільтра для неї немає (поведінка імпорту не змінюється) |
 | G6 | **Обмеження активної позики** — часткові індекс/константи лише для `APPROVED`,`HANDED_OVER` | `init` міграція `one_active_loan_per_copy` (`WHERE status IN ('APPROVED','HANDED_OVER')`); `packages/shared/src/domain/loan.ts` `EXCLUSIVE_LOAN_STATUS`; `enum-parity.spec.ts` | Новий очікувальний стан (T3) має бути ексклюзивним, інакше два записи/апруви на один примірник |
 | G7 | **`LOST` термінальний** | `loan.transitions.ts:88-93` (`LOST` → `REFUSE('STATE')`), `:221-237` (`mark_lost`: `holder: null`, `stamp: null` — навіть немає часу «списано»); spec §5.1 | Дія `recover`; час втрати для D3 — з події, бо колонки немає |
 | G8 | **«Хто читав» повертає всі позики** | `history.service.ts:148-154` — цикл по **всіх** `copy.loans` без фільтра статусу; `WorkHistoryResponse`; `apps/web/components/HistoryEntryLine.tsx` («Попросили <дата>» завжди) | Фільтр за фактичною передачею; `requestedAt` не вигадується для записаних позик |
@@ -326,8 +332,8 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 - `POST /me/library/:copyId/archive` → `archivedAt = now()`. Передумови: власник; немає ексклюзивної
   позики (`PENDING_CONFIRMATION`/`APPROVED`/`HANDED_OVER`). `LOST`-примірник архівується. Відкриті
   `REQUESTED` автоматично → `REJECTED` (з сповіщенням, як при апруві).
-- `POST /me/library/:copyId/restore` → `archivedAt = NULL` (виправлення помилки; Q11 — чи потрібне
-  відновлення з архіву).
+- `POST /me/library/:copyId/restore` → `archivedAt = NULL` (Q11 затверджено, §0.4: відновлення потрібне; окремого
+  audit archive/restore немає).
 - `DELETE /me/library/:copyId` — лише якщо `NOT EXISTS Loan` **будь-якого** статусу;
   інакше `409 COPY_HAS_LOAN_HISTORY` (нова причина, окремо від наявного `COPY_HAS_ACTIVE_LOAN`).
   Рішення приймається в транзакції під `FOR UPDATE` на `Copy`; FK `RESTRICT` — друга лінія
@@ -452,7 +458,7 @@ LOAN_RECORD_DECLINED, LOAN_RECORD_WITHDRAWN, LOAN_RECORD_AMENDED` — **пере
 |---|---|---|---|
 | M1 ✅ 10a | `stage10_enums` | `ADD VALUE` до `LoanStatus` (`NotificationType` — у 10e); нові enum-и `LoanOrigin`, `BorrowerKind`, `LoanEventType` | окремо від решти: нове значення enum не можна використати в тій самій транзакції |
 | M2 ✅ 10a | `stage10_expand` | нові таблиці `ExternalBorrower`, `LoanEvent`; колонки `Loan.borrowerKind/origin/createdAt/borrowerContactId`, `Copy.archivedAt/heldByContactId`; `DROP NOT NULL` на `Loan.borrowerId`, `Loan.requestedAt`, `Copy.currentHolderId`; `createdAt` backfill = `requestedAt`; нові CHECK-и додаються **до** зняття старих | усі наявні рядки: `borrowerKind=REGISTERED`, `origin=REQUESTED`, `archivedAt=NULL`; жоден рядок не видаляється; дефолт `requestedAt = now()` зберігається |
-| M3 | `stage10_delete_restrict` (**разом із кроком 10c**) | `Loan_copyId_fkey`: `CASCADE → RESTRICT` | змінює лише **майбутню** поведінку; тест G4 інвертується |
+| M3 ✅ 10c | `20260926090200_stage10_delete_restrict` (**разом із кроком 10c**) | `Loan_copyId_fkey`: `CASCADE → RESTRICT` | змінює лише **майбутню** поведінку; тест G4 інвертується |
 | M4 | `stage10_recovered_unique` (крок 10d) | `UNIQUE (loanId) WHERE type='RECOVERED'` | нова таблиця порожня |
 | M5 | `stage10_exclusive_pending` (крок 10e) | перестворення `one_active_loan_per_copy` із `PENDING_CONFIRMATION`; для наявних даних предикат лише розширюється (нових значень у даних ще немає) | індекс будується на наявних даних — перевірити час; для поточних обсягів достатньо звичайного `CREATE`, `CONCURRENTLY` за потреби |
 | M6 | `stage10_link` (крок 10i, якщо Q7 = так) | `ExternalBorrowerLink` | нова таблиця |
@@ -545,10 +551,10 @@ private beta), доки рішення не ухвалене й не реалі�
 
 | Крок | Зміст | Залежить від | Готово, коли |
 |---|---|---|---|
-| **10.0** ✅ (Q0, Q10, Q13) | Відповіді PO, що блокують **перший реалізаційний крок (10a)**: **Q0** (гілка), **Q13** (gate зі специфікацією: PO оновлює spec або явно вирішує пріоритет — виконавець spec не змінює), **Q10** (модель тримача книжки). Q14 (roadmap-gate D2) PO вносить до roadmap до будь-якого релізного рішення. Інші Q блокують лише свої кроки: Q8 → 10b; Q11 → 10c; Q6, Q12 → 10e; Q1–Q5 → 10g/10h; Q7 → 10i; Q9 → 10j | — | Письмові відповіді PO; жоден Q/T не вважається затвердженим без них |
+| **10.0** ✅ (Q0, Q10, Q13) | Відповіді PO, що блокують **перший реалізаційний крок (10a)**: **Q0** (гілка), **Q13** (gate зі специфікацією: PO оновлює spec або явно вирішує пріоритет — виконавець spec не змінює), **Q10** (модель тримача книжки). Q14 (roadmap-gate D2) PO вносить до roadmap до будь-якого релізного рішення. Інші Q блокують лише свої кроки: Q8 → 10b; Q11 → 10c (закрито, §0.4); Q6, Q12 → 10e; Q1–Q5 → 10g/10h; Q7 → 10i; Q9 → 10j | — | Письмові відповіді PO; жоден Q/T не вважається затвердженим без них |
 | **10a** ✅ | **Expand-схема, без зміни поведінки.** M1+M2 (`NotificationType` — у 10e); Prisma-схема; shared-enum-и; nullable-safe читачі (`history.mapper`, `library.mapper`, `notification-digest` виключає `borrowerKind=GUEST`, `library.service` view «не вдома»); переписані CHECK; runbook `stage-10-migration-rollback.md` | 10.0 | Наявні тести зелені; db-spec на наповненій БД (§9 MIG-*); `migrate diff` чистий; жодної нової функціональності |
 | **10b** ✅ | **«Хто читав»**: фільтр `workHistory`; `HistoryEntryLine` без «Попросили» для non-request; оновлений контракт | 10.0 (Q8, Q13) | Тести H-* ; `GET /copies/:id/history` без змін |
-| **10c** | **Archive + safe delete** + M3; `COPY_HAS_LOAN_HISTORY`; фільтр архівних у всіх вибірках G5; UI «Архів»; інверсія `referential-actions.db-spec.ts:61` | 10a | Тести A-*, DEL-*; жоден `Loan` не зникає при видаленні/архіві |
+| **10c** ✅ | **Archive + safe delete** + M3; `COPY_HAS_LOAN_HISTORY`; фільтр архівних у всіх вибірках G5; UI «Архів»; інверсія `referential-actions.db-spec.ts:61` | 10a | Тести A-*, DEL-*; жоден `Loan` не зникає при видаленні/архіві |
 | **10d** | **`LoanEvent` + `recover`** + M4; час `LOAN_LOST` для нових позик; UI «Знайшлася» | 10a, 10c (архів у передумовах) | Тести REC-*; повторне `recover` ідемпотентне |
 | **10e** | **Existing loan (D6)**: `POST /loans/recorded`, `confirm/decline/withdraw/amend`; M5; `PENDING_CONFIRMATION` в `EXCLUSIVE_LOAN_STATUS`; сповіщення; UI обох сторін; події аналітики | 10a, 10d | Тести E-*, C-*; примірник ніколи не «доступний» до відповіді; наявні `REQUESTED` відхиляються лише після `confirm_record` |
 | **10f** | **Контакти + гостьова позика за D2-guard** (запобіжник T9 реалізується **першою частиною кроку**, до будь-якого гостьового ендпоінта): `ExternalBorrower`, `POST /loans/guest`, return/lost, видимість D4; лише синтетичні дані | 10a, 10d, 10e | Тести GL-*, P-*; при вимкненому прапорі жоден запис PII неможливий |
@@ -644,9 +650,9 @@ private beta), доки рішення не ухвалене й не реалі�
 | ID | Сценарій | Рівень |
 |---|---|---|
 | A1 | Archive при `APPROVED/HANDED_OVER/PENDING_CONFIRMATION` → 409 `COPY_HAS_ACTIVE_LOAN`; при `LOST` — дозволено | E |
-| A2 | Archive: `Loan`/`LoanEvent` не змінено; примірник зник із бібліотеки, discovery, holders, «у мене вже є», activation-лічильника, CSV-дедупа; історія доступна за старими правилами | E |
+| A2 | Archive: `Loan`/`LoanEvent` не змінено; примірник зник із бібліотеки, discovery, holders, «у мене вже є», activation-лічильника; CSV-дедуп не читає `Copy` (лише в межах файла), тож архівного фільтра не потребує; історія доступна за старими правилами | E |
 | A3 | Відкриті `REQUESTED` при архіві → `REJECTED` зі сповіщенням | E |
-| A4 | `restore` (Q11); recover на архівному → `COPY_ARCHIVED` | E |
+| A4 | `restore` (Q11 затверджено): archive → restore повертає примірник у звичайні вибірки (E, 10c). Recover на архівному → `COPY_ARCHIVED` — перевірка в 10d, коли з'явиться `recover` | E |
 | DEL1 | Delete примірника **без** жодного `Loan` — 204 | E |
 | DEL2 | Delete з будь-яким `Loan` (навіть `REJECTED`/`CANCELLED`/`RETURNED`) → 409 `COPY_HAS_LOAN_HISTORY`, `Loan` цілий | E |
 | DEL3 | Гонка: delete ∥ `POST /loans` → без 500; FK `RESTRICT` мапиться в домен-код | E |
@@ -738,7 +744,7 @@ private beta), доки рішення не ухвалене й не реалі�
 - **Q9.** Чи рахувати записані існуючі позики в North Star/кроках funnel, чи лише окремим блоком
   (рекомендовано окремо)?
 - **Q10.** ~~Модель тримача книжки~~ — **затверджено T1-a** (§0.2).
-- **Q11.** Чи потрібне відновлення з архіву (`restore`)? Чи запис про зміну `archivedAt` має audit?
+- **Q11.** ~~Чи потрібне відновлення з архіву? Чи потрібен audit `archivedAt`?~~ — **затверджено PO** (§0.4): `restore` є, окремого audit archive/restore немає.
 - **Q12.** Що саме означає «виправлення» в D6 **після** підтвердження? У плані — лише до відповіді та
   через «відмова → новий запис»; правка підтвердженої позики потребує окремого рішення.
 - **Q13.** ~~Gate зі специфікацією~~ — **вирішено** для розбіжностей §5: roadmap і цей план мають

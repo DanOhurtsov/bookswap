@@ -3,6 +3,7 @@ import { AccessModule } from '../access/access.module'
 import { AnalyticsModule } from '../analytics/analytics.module'
 import { AuthModule } from '../auth/auth.module'
 import { CatalogModule } from '../catalog/catalog.module'
+import { NotificationsModule } from '../notifications/notifications.module'
 import { ActivationController } from './activation.controller'
 import { ActivationService } from './activation.service'
 import { LibraryController } from './library.controller'
@@ -14,7 +15,7 @@ import { LibraryService } from './library.service'
  * поводяться по-різному на тому самому слові.
  */
 @Module({
-  imports: [AuthModule, AccessModule, AnalyticsModule, CatalogModule],
+  imports: [AuthModule, AccessModule, AnalyticsModule, CatalogModule, NotificationsModule],
   controllers: [LibraryController, ActivationController],
   providers: [LibraryService, ActivationService],
 })
