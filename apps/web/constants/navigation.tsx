@@ -7,6 +7,9 @@ const NAVBAR_LINKS_AUTH = [
   // { href: '/notifications/settings', label: 'Налаштування сповіщень' },
 ]
 
+// Shown only while the server reports guestLoans on (T9).
+const NAVBAR_LINK_CONTACTS = { href: '/contacts', label: 'Контакти' }
+
 const NAVBAR_LINKS_GUEST = [
   { href: '/register', label: 'Створити акаунт' },
   { href: '/login', label: 'Увійти' },
@@ -19,4 +22,4 @@ const NAVBAR_PROFILE_LINKS = [
 ]
 
 // exports
-export { NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST, NAVBAR_PROFILE_LINKS }
+export { NAVBAR_LINK_CONTACTS, NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST, NAVBAR_PROFILE_LINKS }

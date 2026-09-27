@@ -43,7 +43,7 @@ function RegisterPageForm() {
     setPending(true)
 
     try {
-      const { user } = await apiRequest('/auth/register', {
+      const { user, features } = await apiRequest('/auth/register', {
         method: 'POST',
         body: result.data,
         schema: sessionResponseSchema,
@@ -52,7 +52,7 @@ function RegisterPageForm() {
       // Shared session (§8e-3 follow-up) — same reasoning as LoginPage:
       // every other mounted consumer (`NavBar` included) sees the new
       // identity through the same context, without a fetch of its own.
-      session.setUser(user)
+      session.setUser(user, features)
       router.push(safeReturnTo(returnTo))
     } catch (error) {
       // Зайнята адреса — це помилка конкретного поля, а не форми загалом.

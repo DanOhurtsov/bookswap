@@ -69,4 +69,16 @@ describe('NavContent', () => {
     expect(screen.getByTestId('profile-menu')).toHaveTextContent('Reader One')
     expect(screen.queryByRole('link', { name: 'Увійти' })).not.toBeInTheDocument()
   })
+  it.each([
+    ['guestLoans=true', { guestLoans: true }, true],
+    ['guestLoans=false', { guestLoans: false }, false],
+    ['features unknown', undefined, false],
+  ])('contacts link (%s) visible: %s', (_name, features, visible) => {
+    renderState({ status: 'authenticated', user, features })
+
+    const link = screen.queryByRole('link', { name: 'Контакти' })
+
+    if (visible) expect(link).toHaveAttribute('href', '/contacts')
+    else expect(link).not.toBeInTheDocument()
+  })
 })

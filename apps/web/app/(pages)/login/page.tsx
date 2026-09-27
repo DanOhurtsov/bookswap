@@ -43,7 +43,7 @@ function LoginPageForm() {
     setPending(true)
 
     try {
-      const { user } = await apiRequest('/auth/login', {
+      const { user, features } = await apiRequest('/auth/login', {
         method: 'POST',
         body: result.data,
         schema: sessionResponseSchema,
@@ -52,7 +52,7 @@ function LoginPageForm() {
       // The shared session (§8e-3 follow-up) — not just this page's own
       // state: `NavBar` and every other mounted consumer must see the new
       // identity too, without waiting for a fetch of their own.
-      session.setUser(user)
+      session.setUser(user, features)
       router.push(safeReturnTo(returnTo))
     } catch (error) {
       // INVALID_CREDENTIALS показується як помилка форми, а не поля: сервер

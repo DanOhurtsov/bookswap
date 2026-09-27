@@ -49,6 +49,14 @@ export class AuthController {
     return this.config.get<string>('NODE_ENV') === 'production'
   }
 
+  /** Та сама форма для register/login/session/confirm; прапор читає лише сервер. */
+  private sessionResponse(user: UserModel): SessionResponse {
+    return {
+      user: toMe(user),
+      features: { guestLoans: this.config.get<boolean>('GUEST_LOANS_ENABLED') === true },
+    }
+  }
+
   @Post('register')
   @Throttle(REGISTER_LIMIT)
   @HttpCode(HttpStatus.CREATED)
@@ -60,7 +68,7 @@ export class AuthController {
 
     setSessionCookie(response, sessionToken, this.isProduction)
 
-    return { user: toMe(user) }
+    return this.sessionResponse(user)
   }
 
   @Post('login')
@@ -74,7 +82,7 @@ export class AuthController {
 
     setSessionCookie(response, sessionToken, this.isProduction)
 
-    return { user: toMe(user) }
+    return this.sessionResponse(user)
   }
 
   /**
@@ -98,7 +106,7 @@ export class AuthController {
   @Get('session')
   @UseGuards(SessionGuard)
   session(@CurrentUser() user: UserModel): SessionResponse {
-    return { user: toMe(user) }
+    return this.sessionResponse(user)
   }
 
   @Post('email-verification')
@@ -115,7 +123,7 @@ export class AuthController {
   @Throttle(TOKEN_LIMIT)
   @HttpCode(HttpStatus.OK)
   async confirmEmail(@Body() dto: ConfirmEmailDto): Promise<SessionResponse> {
-    return { user: toMe(await this.auth.confirmEmail(dto.token)) }
+    return this.sessionResponse(await this.auth.confirmEmail(dto.token))
   }
 
   /**

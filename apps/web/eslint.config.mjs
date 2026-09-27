@@ -12,6 +12,7 @@ const KNOWN_FEATURES = [
   'features/library/activation',
   'features/library/own-library',
   'features/network',
+  'features/contacts',
 ]
 
 export default [

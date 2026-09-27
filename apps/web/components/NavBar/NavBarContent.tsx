@@ -1,7 +1,7 @@
 import Link from 'next/link'
-import type { Me } from '@bookswap/shared'
+import type { Me, SessionFeatures } from '@bookswap/shared'
 import { type SessionState } from '@/app/lib/use-session'
-import { NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST } from '@/constants/navigation'
+import { NAVBAR_LINK_CONTACTS, NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST } from '@/constants/navigation'
 import { NavBarAvatar } from '@/components/NavBar/NavBarAvatar'
 import { NavBarLogo } from '@/components/NavBar/NavBarLogo'
 import { NavBarNotifications } from '@/components/NavBar/NavBarNotifications'
@@ -18,7 +18,7 @@ const NavContent = ({ state }: { state: SessionState }) => {
       )
 
     case 'authenticated':
-      return <AuthNav user={state.user} />
+      return <AuthNav user={state.user} features={state.features} />
 
     case 'guest':
     case 'error':
@@ -27,12 +27,15 @@ const NavContent = ({ state }: { state: SessionState }) => {
 }
 
 // AuthNav
-const AuthNav = ({ user }: { user: Me }) => {
+const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) => {
+  const links =
+    features?.guestLoans === true ? [...NAVBAR_LINKS_AUTH, NAVBAR_LINK_CONTACTS] : NAVBAR_LINKS_AUTH
+
   return (
     <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
       <NavBarLogo />
       <nav className="flex items-center gap-4">
-        {NAVBAR_LINKS_AUTH.map((link) => (
+        {links.map((link) => (
           <Link key={link.href} href={link.href}>
             {link.label}
           </Link>

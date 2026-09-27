@@ -39,9 +39,21 @@ export const loginRequestSchema = z.object({
 
 export type LoginRequest = z.infer<typeof loginRequestSchema>
 
+/**
+ * Доступність функцій, яку сервер віддає разом із сесією. Прапор читає лише
+ * сервер (конфігурація), клієнтського env для нього немає (Stage 10 §7.3, T9).
+ */
+export const sessionFeaturesSchema = z.object({
+  /** Гостьові позики та їхні контакти. Увімкнено лише для синтетичних даних; D2 відкритий. */
+  guestLoans: z.boolean(),
+})
+
+export type SessionFeatures = z.infer<typeof sessionFeaturesSchema>
+
 /** Відповідь і на register, і на login, і на GET /auth/session — та сама форма. */
 export const sessionResponseSchema = z.object({
   user: meSchema,
+  features: sessionFeaturesSchema,
 })
 
 export type SessionResponse = z.infer<typeof sessionResponseSchema>

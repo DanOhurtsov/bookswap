@@ -104,6 +104,7 @@ export {
   passwordSchema,
   registerRequestSchema,
   requestPasswordResetRequestSchema,
+  sessionFeaturesSchema,
   sessionResponseSchema,
   tokenSchema,
   type AcceptedResponse,
@@ -112,6 +113,7 @@ export {
   type LoginRequest,
   type RegisterRequest,
   type RequestPasswordResetRequest,
+  type SessionFeatures,
   type SessionResponse,
 } from './contracts/auth'
 export {
@@ -554,3 +556,17 @@ export {
   type InvitationTokenRequest,
   type ResolveInvitationResponse,
 } from './contracts/invitation'
+export {
+  EXTERNAL_BORROWER_LIMITS,
+  createExternalBorrowerRequestSchema,
+  externalBorrowerAliasSchema,
+  externalBorrowerListResponseSchema,
+  externalBorrowerResponseSchema,
+  externalBorrowerSchema,
+  updateExternalBorrowerRequestSchema,
+  type CreateExternalBorrowerRequest,
+  type ExternalBorrower,
+  type ExternalBorrowerListResponse,
+  type ExternalBorrowerResponse,
+  type UpdateExternalBorrowerRequest,
+} from './contracts/external-borrower'
