@@ -1,12 +1,15 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
+  EXCLUSIVE_LOAN_STATUS,
   type ExternalBorrowerListResponse,
   type ExternalBorrowerResponse,
 } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
 import { toExternalBorrower } from './external-borrower.mapper'
+
+const EXCLUSIVE_STATUSES: readonly string[] = EXCLUSIVE_LOAN_STATUS
 
 /**
  * Stage 10, крок 10f.2: приватні контакти власника. Кожен запит прив'язаний до
@@ -48,6 +51,63 @@ export class ExternalBorrowersService {
     if (row === null) throw notFound()
 
     return { contact: toExternalBorrower(row) }
+  }
+
+  /**
+   * Stage 10 (10f.3, Q3d, §6.11.2 execution plan): дострокова чистка (T7). Глобальний порядок
+   * локів `ExternalBorrower → Copy → Loan` — `ExternalBorrower` першим і авторизує (чужий/відсутній
+   * контакт зупиняє транзакцію тут, до будь-якого запиту до `Copy`), потім явно й заздалегідь
+   * locаються рядки `Copy`, яких за секунду до цього торкнеться `ON DELETE SET NULL`
+   * (`schema.prisma:444`), потім усі позики контакту одразу (`ORDER BY "id"` — детермінований
+   * порядок для кількох рядків). Сам `DELETE` далі не бере жодного нового локу: каскад лише
+   * записує в уже заблоковані рядки.
+   */
+  async delete(ownerId: string, id: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const [lockedContact] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "ExternalBorrower" WHERE "id" = ${id} AND "ownerId" = ${ownerId} FOR UPDATE
+      `
+
+      if (lockedContact === undefined) throw notFound()
+
+      // Рядки, яких торкнеться `Copy.heldByContactId → SET NULL`. Порожній результат — нуль локів,
+      // не помилка: контакт міг ніколи не тримати книжку чи вже повернув усі.
+      await tx.$queryRaw`
+        SELECT "id" FROM "Copy" WHERE "heldByContactId" = ${id} ORDER BY "id" FOR UPDATE
+      `
+
+      const loans = await tx.$queryRaw<{ id: string; status: string }[]>`
+        SELECT "id", "status" FROM "Loan" WHERE "borrowerContactId" = ${id} ORDER BY "id" FOR UPDATE
+      `
+
+      if (loans.some((loan) => EXCLUSIVE_STATUSES.includes(loan.status))) {
+        throw new ApiException(
+          API_ERROR_CODES.EXTERNAL_BORROWER_HAS_ACTIVE_LOAN,
+          'У контакту є активна позика — спершу поверніть книжку або запишіть втрату',
+          HttpStatus.CONFLICT,
+        )
+      }
+
+      const lostLoanIds = loans.filter((loan) => loan.status === 'LOST').map((loan) => loan.id)
+
+      if (lostLoanIds.length > 0) {
+        const closures = await tx.loanEvent.findMany({
+          where: { loanId: { in: lostLoanIds }, type: { in: ['RECOVERED', 'LOSS_CLOSED'] } },
+          select: { loanId: true },
+        })
+        const closedLoanIds = new Set(closures.map((event) => event.loanId))
+
+        if (lostLoanIds.some((loanId) => !closedLoanIds.has(loanId))) {
+          throw new ApiException(
+            API_ERROR_CODES.EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS,
+            'У контакту є незакрита втрата — спершу «Знайшлася» або «Закрити втрату»',
+            HttpStatus.CONFLICT,
+          )
+        }
+      }
+
+      await tx.externalBorrower.delete({ where: { id } })
+    })
   }
 }
 

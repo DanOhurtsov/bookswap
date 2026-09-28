@@ -351,11 +351,22 @@ function LoanDialog({ actions }: { actions: LoanActions }) {
 }
 
 function LoanFooter() {
+  // Stage 10 (10f.3): маршрут існує лише за серверним features.guestLoans — той самий прапор, що
+  // ховає й саму сторінку `/loans/guest`.
+  const { state: session } = useSession()
+  const guestLoansEnabled =
+    session.status === 'authenticated' && session.features?.guestLoans === true
+
   return (
     <p className="form__aside">
-      <Link href="/library">Моя бібліотека</Link> · <Link href="/history">Історія</Link> ·{' '}
-      <Link href="/notifications">Сповіщення</Link> · <Link href="/friends">Друзі</Link> ·{' '}
-      <Link href="/">На головну</Link>
+      <Link href="/library">Моя бібліотека</Link> ·{' '}
+      {guestLoansEnabled && (
+        <>
+          <Link href="/loans/guest">Гостьові позики</Link> ·{' '}
+        </>
+      )}
+      <Link href="/history">Історія</Link> · <Link href="/notifications">Сповіщення</Link> ·{' '}
+      <Link href="/friends">Друзі</Link> · <Link href="/">На головну</Link>
     </p>
   )
 }

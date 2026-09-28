@@ -32,6 +32,7 @@ export {
 export {
   BORROWER_KIND,
   EXCLUSIVE_LOAN_STATUS,
+  GUEST_LOAN_ACTIONS,
   LOAN_ACTIONS,
   LOAN_EVENT_TYPE,
   LOAN_ORIGIN,
@@ -40,6 +41,7 @@ export {
   OPEN_LOAN_STATUS,
   borrowerKindSchema,
   exclusiveLoanStatusSchema,
+  guestLoanActionSchema,
   loanActionSchema,
   loanEventTypeSchema,
   loanOriginSchema,
@@ -48,6 +50,7 @@ export {
   openLoanStatusSchema,
   type BorrowerKind,
   type ExclusiveLoanStatus,
+  type GuestLoanAction,
   type LoanAction,
   type LoanEventType,
   type LoanOrigin,
@@ -570,3 +573,19 @@ export {
   type ExternalBorrowerResponse,
   type UpdateExternalBorrowerRequest,
 } from './contracts/external-borrower'
+export {
+  createGuestLoanRequestSchema,
+  guestLoanContactSchema,
+  guestLoanListResponseSchema,
+  guestLoanLossClosureSchema,
+  guestLoanResponseSchema,
+  guestLoanSchema,
+  updateGuestLoanRequestSchema,
+  type CreateGuestLoanRequest,
+  type GuestLoan,
+  type GuestLoanContact,
+  type GuestLoanListResponse,
+  type GuestLoanLossClosure,
+  type GuestLoanResponse,
+  type UpdateGuestLoanRequest,
+} from './contracts/guest-loan'

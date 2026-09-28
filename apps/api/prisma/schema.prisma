@@ -540,6 +540,8 @@ enum LoanOrigin {
 }
 
 /// Stage 10 (T4): типи подій `LoanEvent`. Значення `LINK_*` додасть крок 10i.
+/// `LOSS_CLOSED` (10f.3, T7b): власник закрив питання втрати гостьової позики без факту повернення
+/// чи знахідки — не взаємовиключне з `RECOVERED` (§6.11.1, Q3c).
 enum LoanEventType {
   RECORD_PROPOSED
   RECORD_AMENDED
@@ -550,6 +552,7 @@ enum LoanEventType {
   LOAN_RETURNED
   LOAN_LOST
   RECOVERED
+  LOSS_CLOSED
 }
 
 /// Stage 10 (D1): контакт-гість у межах бібліотеки одного власника. Не `User`, не спільний

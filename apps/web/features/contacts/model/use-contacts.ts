@@ -15,6 +15,7 @@ export function useContacts(): {
   state: ContactsState
   reload: () => void
   upsert: (contact: ExternalBorrower) => void
+  remove: (contactId: string) => void
 } {
   const [state, setState] = useState<ContactsState>({ status: 'loading' })
   const [nonce, setNonce] = useState(0)
@@ -55,5 +56,17 @@ export function useContacts(): {
     })
   }, [])
 
-  return { state, reload, upsert }
+  /** Item 3 (10f.3 web-рев'ю): успішний DELETE прибирає контакт зі списку одразу, без нового GET. */
+  const remove = useCallback((contactId: string) => {
+    setState((previous) => {
+      if (previous.status !== 'ready') return previous
+
+      return {
+        status: 'ready',
+        contacts: previous.contacts.filter((item) => item.id !== contactId),
+      }
+    })
+  }, [])
+
+  return { state, reload, upsert, remove }
 }

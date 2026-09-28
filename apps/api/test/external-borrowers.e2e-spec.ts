@@ -8,7 +8,14 @@ import {
   sessionResponseSchema,
 } from '@bookswap/shared'
 import { createTestApp, VALID_PASSWORD, sessionCookie, uniqueEmail } from './auth.helpers'
-import { befriend, registerAccount, url, type Account } from './loan.helpers'
+import {
+  befriend,
+  createShelfCopy,
+  registerAccount,
+  url,
+  type Account,
+  type Shelf,
+} from './loan.helpers'
 import { PrismaService } from '../src/prisma/prisma.service'
 import type { INestApplication } from '@nestjs/common'
 import type { App } from 'supertest/types'
@@ -296,6 +303,147 @@ describe('Stage 10 (10f.2): приватні контакти (e2e)', () => {
 
       expect(JSON.stringify(notifications)).not.toContain('Аліас-10f2')
       expect(JSON.stringify(events)).not.toContain('Аліас-10f2')
+    })
+  })
+
+  /**
+   * Stage 10 (10f.3, Q3d, §6.4/§6.11.2 execution plan): дострокова чистка `DELETE`. Розширена
+   * передумова — «немає активної позики (`EXCLUSIVE_LOAN_STATUS`) і немає незакритої `LOST`».
+   */
+  describe('видалення (DELETE, Q3d)', () => {
+    async function guestLoan(owner: Account, shelf: Shelf, contactId: string): Promise<string> {
+      const response = await request(http())
+        .post(url('/loans/guest'))
+        .set('Cookie', owner.cookie)
+        .send({ copyId: shelf.copyId, externalBorrowerId: contactId, handedAt: '2026-01-01' })
+        .expect(201)
+
+      return (response.body as { loan: { id: string } }).loan.id
+    }
+
+    const act = (owner: Account, loanId: string, action: string): request.Test =>
+      request(http())
+        .patch(url(`/loans/guest/${loanId}`))
+        .set('Cookie', owner.cookie)
+        .send({ action })
+
+    it('чужий і відсутній контакт — однаково 404, нічого не видалено', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-own')
+      const stranger = await registerAccount(app, 'r10f3-del-stranger')
+      const id = await createContact(owner, 'Контакт для DEL')
+
+      const foreign = await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', stranger.cookie)
+      const missing = await request(http())
+        .delete(url('/me/external-borrowers/does-not-exist'))
+        .set('Cookie', stranger.cookie)
+
+      expect(foreign.status).toBe(404)
+      expect(missing.status).toBe(404)
+      expect(errorCode(foreign.body)).toBe('NOT_FOUND')
+      expect(foreign.body).toEqual(missing.body)
+      expect(await prisma.externalBorrower.count({ where: { id } })).toBe(1)
+    })
+
+    it('без жодної позики — дозволено, 204', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-empty')
+      const id = await createContact(owner, 'Контакт без позик')
+
+      await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+        .expect(204)
+
+      expect(await prisma.externalBorrower.count({ where: { id } })).toBe(0)
+    })
+
+    it('активна гостьова позика (HANDED_OVER) → 409 EXTERNAL_BORROWER_HAS_ACTIVE_LOAN', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-active')
+      const shelf = await createShelfCopy(app, owner)
+      const id = await createContact(owner, 'Контакт з активною позикою')
+
+      await guestLoan(owner, shelf, id)
+
+      const response = await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+
+      expect(response.status).toBe(409)
+      expect(errorCode(response.body)).toBe('EXTERNAL_BORROWER_HAS_ACTIVE_LOAN')
+      expect(await prisma.externalBorrower.count({ where: { id } })).toBe(1)
+    })
+
+    it('незакрита LOST → 409 EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS; після recover — дозволено', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-lost')
+      const shelf = await createShelfCopy(app, owner)
+      const id = await createContact(owner, 'Контакт з незакритою втратою')
+      const loanId = await guestLoan(owner, shelf, id)
+
+      await act(owner, loanId, 'mark_lost').expect(200)
+
+      const blocked = await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+
+      expect(blocked.status).toBe(409)
+      expect(errorCode(blocked.body)).toBe('EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS')
+
+      await act(owner, loanId, 'recover').expect(200)
+
+      await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+        .expect(204)
+    })
+
+    it('незакрита LOST, закрита через close_loss — теж дозволяє DELETE', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-closed')
+      const shelf = await createShelfCopy(app, owner)
+      const id = await createContact(owner, 'Контакт, закритий через close_loss')
+      const loanId = await guestLoan(owner, shelf, id)
+
+      await act(owner, loanId, 'mark_lost').expect(200)
+      await act(owner, loanId, 'close_loss').expect(200)
+
+      await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+        .expect(204)
+    })
+
+    it('RETURNED (закрита звичайним поверненням) — дозволяє DELETE', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-returned')
+      const shelf = await createShelfCopy(app, owner)
+      const id = await createContact(owner, 'Контакт, книжку повернуто')
+      const loanId = await guestLoan(owner, shelf, id)
+
+      await act(owner, loanId, 'return').expect(200)
+
+      await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+        .expect(204)
+    })
+
+    it('після DELETE Loan/LoanEvent зберігаються без контакту; retainUntil не читається', async () => {
+      const owner = await registerAccount(app, 'r10f3-del-preserve')
+      const shelf = await createShelfCopy(app, owner)
+      const id = await createContact(owner, 'Контакт, факти зберігаються')
+      const loanId = await guestLoan(owner, shelf, id)
+
+      await act(owner, loanId, 'return').expect(200)
+      await request(http())
+        .delete(url(`/me/external-borrowers/${id}`))
+        .set('Cookie', owner.cookie)
+        .expect(204)
+
+      const loan = await prisma.loan.findUniqueOrThrow({ where: { id: loanId } })
+
+      expect(loan.borrowerContactId).toBeNull()
+      expect(loan.borrowerKind).toBe('GUEST')
+      expect(loan.status).toBe('RETURNED')
+      expect(await prisma.loanEvent.count({ where: { loanId } })).toBeGreaterThan(0)
     })
   })
 })

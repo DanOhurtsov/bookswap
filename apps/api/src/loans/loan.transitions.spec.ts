@@ -1,5 +1,17 @@
-import { LOAN_ACTIONS, LOAN_STATUS, type LoanAction, type LoanStatus } from '@bookswap/shared'
-import { resolveTransition, type LoanActor, type LoanTransition } from './loan.transitions'
+import {
+  GUEST_LOAN_ACTIONS,
+  LOAN_ACTIONS,
+  LOAN_STATUS,
+  type LoanAction,
+  type LoanStatus,
+} from '@bookswap/shared'
+import {
+  resolveGuestTransition,
+  resolveLoanTransition,
+  resolveTransition,
+  type LoanActor,
+  type LoanTransition,
+} from './loan.transitions'
 import type { LoanOrigin } from '@bookswap/shared'
 
 /**
@@ -531,6 +543,59 @@ describe('resolveTransition: RECORDED_EXISTING (Stage 10, 10e)', () => {
         expect('kind' in resolveTransition(from, action, OWNER, 'RECORDED_GUEST')).toBe(true)
       }
     }
+  })
+})
+
+/**
+ * Stage 10 (10f.3, рев'ю §7): `resolveLoanTransition` — єдина точка входу, крізь яку тепер
+ * зобов'язані пройти і `LoanService.runTransition`, і `GuestLoanService.applyTransition`. Тест
+ * доводить, що диспетчер справді викликає ту саму внутрішню таблицю й повертає той самий
+ * результат, що прямий виклик `resolveTransition`/`resolveGuestTransition` — тобто це не друга,
+ * розбіжна копія рішення, а тонка обгортка над спільним входом.
+ */
+describe('resolveLoanTransition (Stage 10, 10f.3): спільний диспетчер', () => {
+  it('kind=REGISTERED дає той самий результат, що прямий resolveTransition', () => {
+    for (const from of LOAN_STATUS) {
+      for (const action of LOAN_ACTIONS) {
+        for (const actor of [OWNER, BORROWER]) {
+          const direct = resolveTransition(from, action, actor, 'REQUESTED')
+          const dispatched = resolveLoanTransition({
+            kind: 'REGISTERED',
+            from,
+            action,
+            actor,
+            origin: 'REQUESTED',
+          })
+
+          expect(dispatched).toEqual({ kind: 'REGISTERED', result: direct })
+        }
+      }
+    }
+  })
+
+  it('kind=GUEST дає той самий результат, що прямий resolveGuestTransition', () => {
+    for (const from of ['HANDED_OVER', 'RETURNED', 'LOST'] as const) {
+      for (const action of GUEST_LOAN_ACTIONS) {
+        const direct = resolveGuestTransition(from, action)
+        const dispatched = resolveLoanTransition({ kind: 'GUEST', from, action })
+
+        expect(dispatched).toEqual({ kind: 'GUEST', result: direct })
+      }
+    }
+  })
+
+  it('гілки типізовані окремо: REGISTERED-запит ніколи не повертає kind=GUEST і навпаки', () => {
+    const registered = resolveLoanTransition({
+      kind: 'REGISTERED',
+      from: 'REQUESTED',
+      action: 'approve',
+      actor: OWNER,
+      origin: 'REQUESTED',
+    })
+    const guest = resolveLoanTransition({ kind: 'GUEST', from: 'HANDED_OVER', action: 'return' })
+
+    expect(registered.kind).toBe('REGISTERED')
+    expect(guest.kind).toBe('GUEST')
   })
 })
 

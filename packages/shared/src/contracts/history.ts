@@ -126,11 +126,14 @@ export type WorkHistoryResponse = z.infer<typeof workHistoryResponseSchema>
 /**
  * §8: `GET /me/history` — «що я брав і що в мене брали».
  *
- * Обидва списки завжди іменовані: viewer — сторона кожного з цих лоанів, а не
- * стороння людина, тож §6.6 сюди не застосовується.
+ * `borrowed` завжди іменований: viewer сам бере участь як зареєстрований позичальник, а гість
+ * ніколи не може бути «я». `lent` (Stage 10, 10f.3) може містити й анонімний гостьовий факт
+ * (`names: false`, без alias/contactId/loanId) — саме тому тут `historyEntrySchema` (union), а не
+ * `namedHistoryEntrySchema`: власник бачить, що комусь передавав книжку, але не хто саме — alias
+ * віддається лише через окремий owner-only `GET /loans/guest[/:id]` (D4, P1/P2).
  */
 export const myHistoryEntrySchema = z.object({
-  entry: namedHistoryEntrySchema,
+  entry: historyEntrySchema,
   copy: historyCopySchema,
 })
 

@@ -4,6 +4,7 @@ import type {
   Condition,
   CopyStatus,
   EditionFormat,
+  GuestLoanAction,
   LoanAction,
   LoanStatus,
   NotificationType,
@@ -72,6 +73,19 @@ export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {
   decline_record: 'Відхилити запис',
   withdraw_record: 'Відкликати запис',
   amend_record: 'Зберегти нові дати',
+}
+
+/**
+ * Stage 10 (10f.3): підписи кнопок для гостьової позики — окремий, вужчий словник дій
+ * (`GUEST_LOAN_ACTIONS`), бо гість не має акаунта: немає ні «погодити», ні «отримав».
+ * «Закрити втрату» — дієслово від першої особи власника, як і решта, і навмисно не звучить
+ * як «знайшлася» — це різні факти (§6.11.1 execution plan).
+ */
+export const GUEST_LOAN_ACTION_LABELS: Readonly<Record<GuestLoanAction, string>> = {
+  return: 'Повернуто',
+  mark_lost: 'Втрачено',
+  recover: 'Знайшлася',
+  close_loss: 'Закрити втрату',
 }
 
 export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>> = {

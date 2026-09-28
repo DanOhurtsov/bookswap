@@ -34,7 +34,7 @@ import {
 import { LoanEventService } from './loan-event.service'
 import { isWritableLoanEventType, type RecordDates } from './loan-event.types'
 import {
-  resolveTransition,
+  resolveLoanTransition,
   type LoanActor,
   type LoanHolder,
   type LoanRefusal,
@@ -634,9 +634,17 @@ export class LoanService {
       //    стектрейс у лозі, ніж 409, який виглядає як нормальний перебіг подій.
       assertStructure(loan, copy)
 
-      // 5. Рішення ухвалює чиста функція. §5.1 і тільки вона.
+      // 5. Рішення ухвалює чиста функція, крізь єдиний диспетчер `resolveLoanTransition`
+      //    (§7 рев'ю 10f.3) — той самий вхід, яким користується `GuestLoanService`.
       const actor: LoanActor = loan.ownerId === actorId ? 'OWNER' : 'BORROWER'
-      const outcome = resolveTransition(loan.status, request.action, actor, loan.origin)
+      const decision = resolveLoanTransition({
+        kind: 'REGISTERED',
+        from: loan.status,
+        action: request.action,
+        actor,
+        origin: loan.origin,
+      })
+      const outcome = decision.result
 
       if ('kind' in outcome) throw refusal(outcome.reason, request.action)
 
@@ -730,7 +738,10 @@ export class LoanService {
       // 9a. Stage 10 (T4): подія — у ТІЙ САМІЙ транзакції. Збій запису відкочує і зміну примірника.
       if (outcome.event !== null) {
         if (!isWritableLoanEventType(outcome.event)) {
-          throw new Error(`Для події ${outcome.event} немає strict-схеми payload`)
+          // Stage 10 (10f.3): усі значення `LoanEventType` тепер мають схему (звужує до `never` тут) —
+          // `String(...)`, а не пряма інтерполяція, лишає цей захист живим, якщо це колись перестане
+          // бути правдою (новий тип події без схеми).
+          throw new Error(`Для події ${String(outcome.event)} немає strict-схеми payload`)
         }
 
         await this.loanEvents.record(tx, {

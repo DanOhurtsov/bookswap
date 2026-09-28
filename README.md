@@ -213,7 +213,7 @@ Prisma 7 більше не підвантажує `.env` сама, тож `apps/
 
 - **`NODE_ENV=production` + `GUEST_LOANS_ENABLED=true` — API не стартує** (константа `GUEST_LOANS_PRODUCTION_ALLOWED = false` у `env.validation.ts`; змінюється лише кодом за письмовим рішенням PO).
 - Поза production увімкнення без `GUEST_LOANS_SYNTHETIC_ONLY=true` теж зупиняє старт.
-- Маршрути `POST/GET/PATCH /me/external-borrowers` (10f.2) захищає `GuestLoansEnabledGuard`: при вимкненій функції — `403 FEATURE_DISABLED` ще до сесії, сервісів і БД. Стан функції для UI віддає `features.guestLoans` у `GET /auth/session`. Контакт зберігає лише alias; `DELETE`, гостьові позики й retention ще не реалізовані, Q2 відкрите.
+- Маршрути `POST/GET/PATCH/DELETE /me/external-borrowers` (10f.2/10f.3) і `POST/GET /loans/guest`, `GET/PATCH /loans/guest/:id` (10f.3: `return`/`mark_lost`/`recover`/«Закрити втрату») захищає `GuestLoansEnabledGuard`: при вимкненій функції — `403 FEATURE_DISABLED` ще до сесії, сервісів і БД. Стан функції для UI віддає `features.guestLoans` у `GET /auth/session`. `DELETE` контакту відмовляє (409), доки лишається активна гостьова позика чи незакрита втрата. Retention (`retainUntil`, крок 10h) ще не реалізовано.
 - **Реальні персональні дані гостя заборонені в усіх середовищах.** `GUEST_LOANS_SYNTHETIC_ONLY=true` — організаційне підтвердження, а не перевірка: код не відрізняє реальну людину від синтетичної. Запобіжник **не знімає D2** (відкритий release blocker). Деталі — [runbook](docs/runbooks/guest-loans-safeguard.md).
 
 ## Акаунт і сесії

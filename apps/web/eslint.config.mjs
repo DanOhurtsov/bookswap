@@ -13,6 +13,7 @@ const KNOWN_FEATURES = [
   'features/library/own-library',
   'features/network',
   'features/contacts',
+  'features/guest-loans',
 ]
 
 export default [

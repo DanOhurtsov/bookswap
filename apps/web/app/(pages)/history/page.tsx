@@ -100,8 +100,14 @@ function HistoryScreen() {
 
       {state.status === 'ready' && (
         <ul className="books">
-          {state.data[view].map((item) => (
-            <HistoryCard key={item.entry.loanId} item={item} />
+          {state.data[view].map((item, index) => (
+            // Stage 10 (10f.3): гостьовий факт (`entry.names === false`) не має `loanId` —
+            // анонімний запис не несе жодного ідентифікатора, за яким можна було б корелювати
+            // два різні зрізи історії (те саме правило, що для чужої історії, §6.6).
+            <HistoryCard
+              key={item.entry.names ? item.entry.loanId : `guest-${String(index)}`}
+              item={item}
+            />
           ))}
         </ul>
       )}

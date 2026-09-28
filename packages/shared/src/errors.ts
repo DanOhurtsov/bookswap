@@ -240,6 +240,24 @@ export const API_ERROR_CODES = {
    * і `amend_record`.
    */
   LOAN_RECORD_DATE_INVALID: 'LOAN_RECORD_DATE_INVALID',
+  /**
+   * Stage 10 (10f.3, T7b): для цієї `LOST`-позики вже зафіксовано `RECOVERED` або `LOSS_CLOSED`
+   * (HTTP 409). Той самий принцип однократності, що й `LOAN_ALREADY_RECOVERED`: другий і будь-який
+   * наступний виклик `close_loss` — цей код без жодного додаткового ефекту, не нова подія.
+   */
+  LOAN_ALREADY_CLOSED: 'LOAN_ALREADY_CLOSED',
+
+  // --- Гостьові контакти (Stage 10, D1–D4, 10f.2–10f.3) -----------------------
+  /**
+   * Stage 10 (10f.3, Q3d): контакт не можна видалити — у нього є активна гостьова позика
+   * (`HANDED_OVER`, HTTP 409). Спершу `return` або `mark_lost`.
+   */
+  EXTERNAL_BORROWER_HAS_ACTIVE_LOAN: 'EXTERNAL_BORROWER_HAS_ACTIVE_LOAN',
+  /**
+   * Stage 10 (10f.3, Q3d): контакт не можна видалити — у нього є незакрита `LOST`-позика, без
+   * `RECOVERED` чи `LOSS_CLOSED` (HTTP 409). Спершу «Знайшлася» або «Закрити втрату».
+   */
+  EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS: 'EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS',
 
   // --- Зовнішні канали сповіщень (§7.2, §7.4) --------------------------------
   /**

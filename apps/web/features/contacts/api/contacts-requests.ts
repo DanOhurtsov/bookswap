@@ -22,3 +22,10 @@ export const renameContact = (id: string, body: UpdateExternalBorrowerRequest) =
     body,
     schema: externalBorrowerResponseSchema,
   })
+
+/**
+ * Stage 10 (10f.3, Q3d): дострокова чистка. Сервер відмовляє (409), доки є активна позика чи
+ * незакрита втрата контакту — фронт лише передає повідомлення сервера, а не вгадує причину сам.
+ */
+export const deleteContact = (id: string) =>
+  apiRequest(`/me/external-borrowers/${encodeURIComponent(id)}`, { method: 'DELETE' })

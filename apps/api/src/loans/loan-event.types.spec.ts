@@ -1,10 +1,12 @@
 import { LOAN_EVENT_PAYLOAD_SCHEMA, isWritableLoanEventType } from './loan-event.types'
 
 describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
-  it('описує лише типи, які реально пишуть 10d–10e', () => {
+  it('описує лише типи, які реально пишуть 10d–10f.3', () => {
     expect(Object.keys(LOAN_EVENT_PAYLOAD_SCHEMA).sort()).toEqual([
+      'GUEST_LOAN_RECORDED',
       'LOAN_LOST',
       'LOAN_RETURNED',
+      'LOSS_CLOSED',
       'RECORD_AMENDED',
       'RECORD_CONFIRMED',
       'RECORD_DECLINED',
@@ -14,8 +16,8 @@ describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
     ])
     expect(isWritableLoanEventType('RECOVERED')).toBe(true)
     expect(isWritableLoanEventType('RECORD_PROPOSED')).toBe(true)
-    // Гостьова подія — крок 10f: схеми ще немає.
-    expect(isWritableLoanEventType('GUEST_LOAN_RECORDED')).toBe(false)
+    expect(isWritableLoanEventType('GUEST_LOAN_RECORDED')).toBe(true)
+    expect(isWritableLoanEventType('LOSS_CLOSED')).toBe(true)
   })
 
   it('RECORD_PROPOSED/AMENDED: strict-схеми з датами; зайві поля й вільний текст відхиляються', () => {
@@ -47,6 +49,8 @@ describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
     'RECORD_CONFIRMED',
     'RECORD_DECLINED',
     'RECORD_WITHDRAWN',
+    'GUEST_LOAN_RECORDED',
+    'LOSS_CLOSED',
   ] as const)('%s: порожній payload проходить', (type) => {
     expect(LOAN_EVENT_PAYLOAD_SCHEMA[type].safeParse({}).success).toBe(true)
   })
@@ -58,6 +62,8 @@ describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
     'RECORD_CONFIRMED',
     'RECORD_DECLINED',
     'RECORD_WITHDRAWN',
+    'GUEST_LOAN_RECORDED',
+    'LOSS_CLOSED',
   ] as const)('%s: strict — жодного alias, email, contactId чи вільного тексту', (type) => {
     for (const extra of [
       { alias: 'Іра' },

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiRequestError } from '@/app/lib/api'
 import { ContactsScreen } from './ContactsScreen'
@@ -23,6 +23,16 @@ const contact = (id: string, alias: string) => ({
 
 let stored: ReturnType<typeof contact>[] = []
 
+/** jsdom has no `showModal`; the delete confirmation is a native `<dialog>`. */
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+    this.open = true
+  }
+  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
+    this.open = false
+  }
+})
+
 beforeEach(() => {
   jest.clearAllMocks()
   stored = []
@@ -42,6 +52,14 @@ beforeEach(() => {
         const id = decodeURIComponent(path.split('/').pop() ?? '')
 
         return Promise.resolve({ contact: contact(id, options.body?.alias ?? '') })
+      }
+
+      if (options?.method === 'DELETE') {
+        const id = decodeURIComponent(path.split('/').pop() ?? '')
+
+        stored = stored.filter((item) => item.id !== id)
+
+        return Promise.resolve(undefined)
       }
 
       return Promise.reject(new Error(`unexpected ${path}`))
@@ -226,6 +244,66 @@ describe('ContactsScreen', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent('Контакт не знайдено')
     })
+  })
+
+  it('delete: confirm dialog, then a 204 removes the contact from the list', async () => {
+    stored = [contact('c-1', 'Гість')]
+    render(<ContactsScreen />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Видалити' }))
+
+    const dialog = await screen.findByRole('alertdialog')
+
+    expect(dialog).toHaveTextContent('Видалити контакт?')
+    // Не видаляємо одразу по кліку на "Видалити" в рядку — лише після підтвердження в діалозі.
+    expect(screen.getByText('Гість')).toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Видалити' }))
+
+    await waitFor(() => {
+      expect(apiRequest).toHaveBeenCalledWith('/me/external-borrowers/c-1', { method: 'DELETE' })
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('Гість')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('Контактів поки немає.')).toBeInTheDocument()
+  })
+
+  it('delete: 409 active-loan/unresolved-loss keeps the contact and shows the server message', async () => {
+    stored = [contact('c-1', 'Гість')]
+    render(<ContactsScreen />)
+
+    apiRequest.mockImplementationOnce(() =>
+      Promise.reject(
+        new ApiRequestError(409, {
+          code: 'EXTERNAL_BORROWER_HAS_ACTIVE_LOAN',
+          message: 'У контакта є активна гостьова позика',
+        }),
+      ),
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Видалити' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Видалити' }))
+
+    expect(await screen.findByText('У контакта є активна гостьова позика')).toBeInTheDocument()
+    expect(screen.getByText('Гість')).toBeInTheDocument()
+  })
+
+  it('delete: cancel keeps the contact and sends no request', async () => {
+    stored = [contact('c-1', 'Гість')]
+    render(<ContactsScreen />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Видалити' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Скасувати' }))
+
+    expect(
+      apiRequest.mock.calls.filter(([, options]) => options?.method === 'DELETE'),
+    ).toHaveLength(0)
+    expect(screen.getByText('Гість')).toBeInTheDocument()
   })
 
   it('never calls the owner statement a consent', async () => {

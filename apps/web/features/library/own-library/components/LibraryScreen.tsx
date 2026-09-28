@@ -35,6 +35,7 @@ import { useBorrowedLibrary, useOwnLibrary, type LibraryView } from '@/app/lib/u
 import { useSession } from '@/app/lib/use-session'
 import { validate, type FieldErrors } from '@/app/lib/validation'
 import { invalidateActivation } from '@/features/library/activation/index.client'
+import { CreateGuestLoanForm } from '@/features/guest-loans/index.client'
 import { RecordExistingLoanForm } from './RecordExistingLoanForm'
 
 type LibraryScreenProps = {
@@ -87,7 +88,9 @@ export function LibraryScreen({ checklist }: LibraryScreenProps) {
     )
   }
 
-  return <LibraryBody checklist={checklist} />
+  return (
+    <LibraryBody checklist={checklist} guestLoansEnabled={session.features?.guestLoans === true} />
+  )
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -106,7 +109,10 @@ const VIEW_LABELS: Readonly<Record<LibraryView, string>> = {
   archive: 'Архів',
 }
 
-function LibraryBody({ checklist }: LibraryScreenProps) {
+function LibraryBody({
+  checklist,
+  guestLoansEnabled,
+}: LibraryScreenProps & { guestLoansEnabled: boolean }) {
   const [view, setView] = useState<LibraryView>('own')
 
   return (
@@ -132,11 +138,23 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
       {/* Два різні в'ю — два різні компоненти з власними хуками. «Чужі в мене»
           віддає інший тип примірника й не має жодної мутації, тож спільний стан
           із фільтрами й `busyKey` їм не потрібен. */}
-      {view === 'borrowed' ? <BorrowedView /> : <OwnView view={view} />}
+      {view === 'borrowed' ? (
+        <BorrowedView />
+      ) : (
+        <OwnView view={view} guestLoansEnabled={guestLoansEnabled} />
+      )}
 
       <p className="form__aside">
         <Link href="/catalog">Додати книжку</Link> ·{' '}
         <Link href="/library/imports">Імпорт із CSV</Link> · <Link href="/loans">Позичання</Link> ·{' '}
+        {/* Stage 10 (10f.3): гостьові маршрути існують лише за серверним features.guestLoans —
+            той самий прапор, що ховає й самі сторінки, тож посилання не веде в нікуди. */}
+        {guestLoansEnabled && (
+          <>
+            <Link href="/loans/guest">Гостьові позики</Link> ·{' '}
+            <Link href="/contacts">Контакти</Link> ·{' '}
+          </>
+        )}
         <Link href="/history">Історія</Link> · <Link href="/friends">Друзі</Link> ·{' '}
         <Link href="/">На головну</Link>
       </p>
@@ -167,7 +185,13 @@ function BorrowedView() {
   )
 }
 
-function OwnView({ view }: { view: 'own' | 'out' | 'archive' }) {
+function OwnView({
+  view,
+  guestLoansEnabled,
+}: {
+  view: 'own' | 'out' | 'archive'
+  guestLoansEnabled: boolean
+}) {
   const [filters, setFilters] = useState<LibraryQueryRequest>({})
   const [statusFilter, setStatusFilter] = useState('')
   const [langFilter, setLangFilter] = useState('')
@@ -304,6 +328,7 @@ function OwnView({ view }: { view: 'own' | 'out' | 'archive' }) {
               onArchive={(copy) => void setArchived(copy.id, true)}
               onRestore={(copy) => void setArchived(copy.id, false)}
               archived={view === 'archive'}
+              guestLoansEnabled={guestLoansEnabled}
             />
           ))}
         </ul>
@@ -390,6 +415,7 @@ function OwnGroupCard({
   onArchive,
   onRestore,
   archived,
+  guestLoansEnabled,
 }: {
   group: LibraryGroup
   busyKey: string | undefined
@@ -399,6 +425,7 @@ function OwnGroupCard({
   onArchive: (copy: OwnCopy) => void
   onRestore: (copy: OwnCopy) => void
   archived: boolean
+  guestLoansEnabled: boolean
 }) {
   return (
     <li className="book">
@@ -427,6 +454,7 @@ function OwnGroupCard({
               onArchive={() => {
                 onArchive(copy)
               }}
+              guestLoansEnabled={guestLoansEnabled}
             />
           ),
         )}
@@ -474,6 +502,7 @@ function CopyRow({
   onFailure,
   onDelete,
   onArchive,
+  guestLoansEnabled,
 }: {
   copy: OwnCopy
   busyKey: string | undefined
@@ -481,9 +510,11 @@ function CopyRow({
   onFailure: (error: unknown) => void
   onDelete: () => void
   onArchive: () => void
+  guestLoansEnabled: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [recordingGuest, setRecordingGuest] = useState(false)
   const [condition, setCondition] = useState<Condition>(copy.condition)
   const [visibility, setVisibility] = useState<Visibility>(copy.visibility)
   const [note, setNote] = useState(copy.note ?? '')
@@ -593,6 +624,17 @@ function CopyRow({
             setRecording(false)
           }}
         />
+      ) : recordingGuest ? (
+        <CreateGuestLoanForm
+          copyId={copy.id}
+          onCreated={async () => {
+            setRecordingGuest(false)
+            await onSaved()
+          }}
+          onCancel={() => {
+            setRecordingGuest(false)
+          }}
+        />
       ) : open ? (
         <div className="form">
           <SelectField
@@ -699,6 +741,21 @@ function CopyRow({
               }}
             >
               Записати передану книжку
+            </button>
+          )}
+
+          {/* Stage 10 (10f.3): лише за серверним features.guestLoans — тут і на маршрутах, куди
+              ця форма веде (D2 лишається відкритим release blocker, лише синтетичні дані). */}
+          {guestLoansEnabled && canToggleStatus && copy.status === 'AVAILABLE' && (
+            <button
+              type="button"
+              className="button--ghost"
+              disabled={pending || busyKey !== undefined}
+              onClick={() => {
+                setRecordingGuest(true)
+              }}
+            >
+              Позичити гостю
             </button>
           )}
 

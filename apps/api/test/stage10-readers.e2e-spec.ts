@@ -127,10 +127,17 @@ describe('Stage 10 (10a): читачі й гостьовий стан у БД (e
     }
   })
 
-  it('«Моя історія» не падає; гостьова позика в ній з’явиться разом з аліасом у 10f', async () => {
+  it('«Моя історія»: гостьова позика з’являється в lent анонімно (10f.3) — без alias/contactId', async () => {
     const mine = await get(owner, '/me/history').expect(200)
+    const body = mine.body as { borrowed: unknown[]; lent: { entry: { names: boolean } }[] }
 
-    expect(mine.body).toMatchObject({ borrowed: [], lent: [] })
+    // Stage 10 (10f.3): виправлено проти чорнового очікування 10a — alias віддається лише
+    // через окремий owner-only `GET /loans/guest[/:id]` (D4, P1/P2), а не тут. `/me/history`
+    // лишається спільною поверхнею й показує ту саму анонімну проєкцію, що бачить друг.
+    expect(body.borrowed).toEqual([])
+    expect(body.lent).toHaveLength(1)
+    expect(body.lent[0]?.entry.names).toBe(false)
+    expect(JSON.stringify(body)).not.toContain('синтетичний гість')
   })
 
   it('щоденна задача не падає на прострочені гостьові позики й нікому нічого не шле', async () => {

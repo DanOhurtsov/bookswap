@@ -14,6 +14,7 @@ import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
 import {
   byRequestedAt,
   hasRegisteredBorrower,
+  toAnonymousEntry,
   toHistoryCopy,
   toHistoryEntry,
   toNamedEntry,
@@ -187,8 +188,12 @@ export class HistoryService {
   /**
    * §8: `GET /me/history` — «що я брав і що в мене брали».
    *
-   * Обидва списки завжди з іменами: viewer — сторона кожного з цих лоанів, а не
-   * стороння людина, тож §6.6 сюди не застосовується.
+   * `borrowed` завжди з іменами: viewer тут сам зареєстрований позичальник, а гість ніколи не
+   * може бути «я». `lent` (Stage 10, 10f.3) може містити й анонімний гостьовий факт — той самий
+   * `toAnonymousEntry`, що вже ховає імена від друга/стороннього (D4, P1): жодного alias/contactId
+   * тут немає й не буде — власник отримує їх лише через окремий owner-only `GET /loans/guest[/:id]`
+   * (§6.9/§6.10 execution plan). Раніше `hasRegisteredBorrower`-фільтр застосовувався до **всього**
+   * набору, тож гостьові факти власника губилися ще до сортування — цю прогалину закрито тут.
    */
   async myHistory(userId: string): Promise<MyHistoryResponse> {
     const loans = await this.prisma.loan.findMany({
@@ -200,19 +205,17 @@ export class HistoryService {
     })
 
     const now = new Date()
-    // Гостьові позики (`borrower = null`) з'являться в «Моїй історії» власника разом з
-    // аліасом у кроці 10f; до того їх не існує, а іменована проєкція без імені неможлива.
-    const ordered = loans
-      .filter(hasRegisteredBorrower)
-      .sort((one, other) => byRequestedAt(other, one))
-    const project = (loan: (typeof ordered)[number]): MyHistoryResponse['borrowed'][number] => ({
-      entry: toNamedEntry(loan, now),
+    const sorted = [...loans].sort((one, other) => byRequestedAt(other, one))
+    const project = (loan: (typeof sorted)[number]): MyHistoryResponse['borrowed'][number] => ({
+      entry: hasRegisteredBorrower(loan) ? toNamedEntry(loan, now) : toAnonymousEntry(loan, now),
       copy: toHistoryCopy(loan.copy),
     })
 
     return {
-      borrowed: ordered.filter((loan) => loan.borrowerId === userId).map(project),
-      lent: ordered.filter((loan) => loan.ownerId === userId).map(project),
+      // `borrowerId === userId` структурно неможливе для гостьової позики (`borrowerId` завжди
+      // `NULL`), тож додаткового фільтра `hasRegisteredBorrower` тут не потрібно.
+      borrowed: sorted.filter((loan) => loan.borrowerId === userId).map(project),
+      lent: sorted.filter((loan) => loan.ownerId === userId).map(project),
     }
   }
 }

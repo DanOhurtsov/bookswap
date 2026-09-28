@@ -1,6 +1,7 @@
 import { isRecordAction } from '@bookswap/shared'
 import type {
   CopyStatus,
+  GuestLoanAction,
   LoanAction,
   LoanEventType,
   LoanOrigin,
@@ -441,5 +442,173 @@ function fromLost(action: LoanAction, actor: LoanActor): LoanTransitionResult {
     case 'withdraw_record':
     case 'amend_record':
       return REFUSE('STATE')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 10 (10f.3): гостьова позика — окрема, вужча таблиця переходів.
+// ---------------------------------------------------------------------------
+
+/**
+ * Гостьова позика ніколи не буває `REQUESTED`/`APPROVED`/`PENDING_CONFIRMATION`/`DECLINED`:
+ * `POST /loans/guest` створює її одразу `HANDED_OVER` (§6.2 execution plan, «— → HANDED_OVER»).
+ */
+export type GuestLoanStatus = Extract<LoanStatus, 'HANDED_OVER' | 'RETURNED' | 'LOST'>
+
+/**
+ * Навмисно окрема, менша структура від `LoanTransition`: у гостьової позики рівно один актор
+ * (власник — гість без акаунта нічого не підтверджує), тож немає ні `requires.holder`
+ * (порівняння з `Copy.heldByContactId` — структурний інваріант, не альтернатива стану, і його
+ * перевіряє виклик, а не ця чиста функція), ні `notify` (сповіщати нікого, крім самого власника,
+ * нема), ні `rejectRivals` (конкурентні `REQUESTED` відхиляються один раз, атомарно, у момент
+ * `POST /loans/guest` — а не в жодному з цих переходів).
+ */
+export interface GuestLoanTransition {
+  to: GuestLoanStatus
+  /** Стан `Copy`, який мусить бути правдою до переходу; `null` — `close_loss` `Copy` не перевіряє (T7b-4). */
+  requiresCopyStatus: CopyStatus | null
+  /** `null` — `Copy.status` не чіпається (`close_loss`). */
+  copyStatus: CopyStatus | null
+  /** `'OWNER'` — книжка повертається власнику; `null` — тримач не змінюється. Гостя як holder-output не буває: `heldByContactId` завжди йде в `NULL` разом із поверненням власнику, ніколи не «до іншого контакту». */
+  copyHolder: 'OWNER' | null
+  stamp: 'returnedAt' | null
+  event: Extract<LoanEventType, 'LOAN_RETURNED' | 'LOAN_LOST' | 'RECOVERED' | 'LOSS_CLOSED'>
+}
+
+export type GuestLoanTransitionResult = GuestLoanTransition | { kind: 'refused' }
+
+/**
+ * §6.2 execution plan (таблиця переходів гостьової позики) буквально, плюс T7b (`close_loss`).
+ *
+ * `close_loss` навмисно **не** змінює жодного поля `Copy`/`Loan.status` (§0.7.1: дія стосується
+ * лише питання «чи вважати втрату вирішеною для D3», не фізичного стану книжки) — саме тому
+ * `requiresCopyStatus`, `copyStatus` і `copyHolder` тут `null`.
+ */
+export function resolveGuestTransition(
+  from: GuestLoanStatus,
+  action: GuestLoanAction,
+): GuestLoanTransitionResult {
+  switch (from) {
+    case 'HANDED_OVER':
+      switch (action) {
+        case 'return':
+          return {
+            to: 'RETURNED',
+            requiresCopyStatus: 'LENT_OUT',
+            copyStatus: 'AVAILABLE',
+            copyHolder: 'OWNER',
+            stamp: 'returnedAt',
+            event: 'LOAN_RETURNED',
+          }
+        case 'mark_lost':
+          return {
+            to: 'LOST',
+            requiresCopyStatus: 'LENT_OUT',
+            copyStatus: 'UNAVAILABLE',
+            // §6.2: «currentHolderId лишається на позичальнику» — для гостя це `heldByContactId`,
+            // який теж не чіпається (той самий принцип, що для reєстрованого `mark_lost`).
+            copyHolder: null,
+            stamp: null,
+            event: 'LOAN_LOST',
+          }
+        case 'recover':
+        case 'close_loss':
+          return { kind: 'refused' }
+      }
+      break
+    case 'LOST':
+      switch (action) {
+        case 'recover':
+          return {
+            to: 'LOST',
+            requiresCopyStatus: 'UNAVAILABLE',
+            copyStatus: 'AVAILABLE',
+            copyHolder: 'OWNER',
+            stamp: null,
+            event: 'RECOVERED',
+          }
+        case 'close_loss':
+          return {
+            to: 'LOST',
+            requiresCopyStatus: null,
+            copyStatus: null,
+            copyHolder: null,
+            stamp: null,
+            event: 'LOSS_CLOSED',
+          }
+        case 'return':
+        case 'mark_lost':
+          return { kind: 'refused' }
+      }
+      break
+    case 'RETURNED':
+      return { kind: 'refused' }
+  }
+
+  return { kind: 'refused' }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 10 (10f.3, рев'ю): єдина точка входу диспетчера переходів.
+// ---------------------------------------------------------------------------
+
+/**
+ * До цього виправлення `LoanService.runTransition` викликав `resolveTransition`, а
+ * `GuestLoanService.applyTransition` — `resolveGuestTransition`, кожен окремо. Те, що обидві
+ * функції жили в одному файлі, не робило їх «спільним диспетчером» — рішення «яку з двох таблиць
+ * запитати» було розкидане по двох різних сервісах. `resolveLoanTransition` — типізована
+ * тегована сполука (`kind: 'REGISTERED' | 'GUEST'`), крізь яку **обидва** сервіси тепер
+ * зобов'язані пройти: внутрішні таблиці (`resolveTransition`/`resolveGuestTransition`) лишаються
+ * окремими — гостьова позика не має ні протилежної сторони, ні `LoanActor`/`LoanOrigin`, і
+ * силувати їх в один тип означало б додавати реєстрованій таблиці поля, які їй не потрібні.
+ * Транзакційні сервіси (лок, запис, сповіщення) **не** об'єднані — вони лишаються двома різними
+ * реалізаціями з різною формою рядка `Loan`, як і раніше.
+ */
+export interface RegisteredTransitionRequest {
+  kind: 'REGISTERED'
+  from: LoanStatus
+  action: LoanAction
+  actor: LoanActor
+  origin: LoanOrigin
+}
+
+export interface GuestTransitionRequest {
+  kind: 'GUEST'
+  from: GuestLoanStatus
+  action: GuestLoanAction
+}
+
+export type LoanTransitionRequest = RegisteredTransitionRequest | GuestTransitionRequest
+
+export interface RegisteredTransitionDecision {
+  kind: 'REGISTERED'
+  result: LoanTransitionResult
+}
+
+export interface GuestTransitionDecision {
+  kind: 'GUEST'
+  result: GuestLoanTransitionResult
+}
+
+export type LoanTransitionDecision = RegisteredTransitionDecision | GuestTransitionDecision
+
+/**
+ * Єдина функція, крізь яку проходить рішення «чи можна» — і для реєстрованої, і для гостьової
+ * позики. Перевантаження (не одна загальна сигнатура) — щоб виклик із буквальним `kind:
+ * 'REGISTERED'`/`kind: 'GUEST'` повертав звужений тип одразу, без ручного звуження на кожному
+ * виклику в `LoanService`/`GuestLoanService`.
+ */
+export function resolveLoanTransition(
+  request: RegisteredTransitionRequest,
+): RegisteredTransitionDecision
+export function resolveLoanTransition(request: GuestTransitionRequest): GuestTransitionDecision
+export function resolveLoanTransition(request: LoanTransitionRequest): LoanTransitionDecision {
+  if (request.kind === 'GUEST') {
+    return { kind: 'GUEST', result: resolveGuestTransition(request.from, request.action) }
+  }
+
+  return {
+    kind: 'REGISTERED',
+    result: resolveTransition(request.from, request.action, request.actor, request.origin),
   }
 }

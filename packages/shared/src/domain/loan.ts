@@ -121,7 +121,13 @@ export const loanOriginSchema = z.enum(LOAN_ORIGIN)
 
 export type LoanOrigin = z.infer<typeof loanOriginSchema>
 
-/** Stage 10 (T4): типи подій audit trail. Значення `LINK_*` додасть крок 10i. */
+/**
+ * Stage 10 (T4): типи подій audit trail. Значення `LINK_*` додасть крок 10i.
+ *
+ * `LOSS_CLOSED` (10f.3, T7b): власник закрив питання втрати гостьової позики без факту
+ * повернення чи знахідки — окремо від `RECOVERED`, і не взаємовиключне з ним (§6.11.1: `recover`
+ * дозволений і після `LOSS_CLOSED`, Q3c).
+ */
 export const LOAN_EVENT_TYPE = [
   'RECORD_PROPOSED',
   'RECORD_AMENDED',
@@ -132,8 +138,24 @@ export const LOAN_EVENT_TYPE = [
   'LOAN_RETURNED',
   'LOAN_LOST',
   'RECOVERED',
+  'LOSS_CLOSED',
 ] as const
 
 export const loanEventTypeSchema = z.enum(LOAN_EVENT_TYPE)
 
 export type LoanEventType = z.infer<typeof loanEventTypeSchema>
+
+/**
+ * Stage 10 (10f.3): переходи гостьової позики — `PATCH /loans/guest/:id { action }`.
+ *
+ * Окремий, вужчий словник від `LOAN_ACTIONS`: гостьова позика не має ні запиту, ні підтвердження
+ * від другої сторони (гість без акаунта), тож дії request-flow й запису (`approve`, `confirm_record`
+ * тощо) для неї синтаксично неможливі — це виключає їх на рівні DTO, а не лише в чистій функції
+ * переходів. `close_loss` — тут і тільки тут (T7b, §6.11.1): дія стосується виключно гостьових
+ * `LOST`-позик, для яких немає власника контакту, окрім самого власника примірника.
+ */
+export const GUEST_LOAN_ACTIONS = ['return', 'mark_lost', 'recover', 'close_loss'] as const
+
+export const guestLoanActionSchema = z.enum(GUEST_LOAN_ACTIONS)
+
+export type GuestLoanAction = z.infer<typeof guestLoanActionSchema>

@@ -6,6 +6,8 @@ import {
   copyHistoryResponseSchema,
   myHistoryResponseSchema,
   workHistoryResponseSchema,
+  type MyHistoryEntry,
+  type NamedHistoryEntry,
 } from '@bookswap/shared'
 import { createTestApp } from './auth.helpers'
 import {
@@ -20,6 +22,17 @@ import {
 } from './loan.helpers'
 import type { INestApplication } from '@nestjs/common'
 import type { App } from 'supertest/types'
+
+/**
+ * Stage 10 (10f.3): `MyHistoryEntry.entry` тепер union (`lent` може містити анонімний гостьовий
+ * факт, §6.9 execution plan) — ці тести працюють лише з реєстрованими лоанами, де він завжди
+ * іменований, тож звужуємо тип тут, а не послаблюємо перевірку.
+ */
+function named(item: MyHistoryEntry): NamedHistoryEntry {
+  if (!item.entry.names) throw new Error('Очікувався іменований запис історії')
+
+  return item.entry
+}
 
 /**
  * §6.6 «Історія» плюс рядок §9 «Історія примірника з іменами».
@@ -290,7 +303,7 @@ describe('Історія (e2e)', () => {
 
       const borrowerHistory = myHistoryResponseSchema.parse(asBorrower.body)
 
-      expect(borrowerHistory.borrowed.map((item) => item.entry.loanId)).toContain(loanId)
+      expect(borrowerHistory.borrowed.map((item) => named(item).loanId)).toContain(loanId)
       expect(borrowerHistory.lent).toHaveLength(0)
 
       const asOwner = await request(app.getHttpServer())
@@ -300,7 +313,7 @@ describe('Історія (e2e)', () => {
 
       const ownerHistory = myHistoryResponseSchema.parse(asOwner.body)
 
-      expect(ownerHistory.lent.map((item) => item.entry.loanId)).toContain(loanId)
+      expect(ownerHistory.lent.map((item) => named(item).loanId)).toContain(loanId)
       expect(ownerHistory.borrowed).toHaveLength(0)
     })
 
@@ -319,7 +332,7 @@ describe('Історія (e2e)', () => {
       const [item] = myHistoryResponseSchema.parse(response.body).borrowed
 
       expect(item?.entry.names).toBe(true)
-      expect(item?.entry.owner.id).toBe(owner.id)
+      expect(item === undefined ? undefined : named(item).owner.id).toBe(owner.id)
     })
 
     it('чужих лоанів у власній історії немає', async () => {

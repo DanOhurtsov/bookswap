@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -47,5 +48,12 @@ export class ExternalBorrowersController {
     @Body() dto: UpdateExternalBorrowerDto,
   ): Promise<ExternalBorrowerResponse> {
     return this.contacts.updateAlias(user.id, id, dto.alias)
+  }
+
+  /** Stage 10 (10f.3, Q3d): дострокова чистка — лише без активної позики й незакритої `LOST`. */
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  delete(@CurrentUser() user: UserModel, @Param('id') id: string): Promise<void> {
+    return this.contacts.delete(user.id, id)
   }
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import {
   createExternalBorrowerRequestSchema,
@@ -8,9 +9,10 @@ import {
 } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { validate } from '@/app/lib/validation'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { createContact, renameContact } from '../api/contacts-requests'
+import { createContact, deleteContact, renameContact } from '../api/contacts-requests'
 import { useContacts } from '../model/use-contacts'
 
 const toError = (error: unknown): Error =>
@@ -25,7 +27,7 @@ const toError = (error: unknown): Error =>
  * person's confirmation and not a legal basis (D2 is still open), and the text must not say so.
  */
 export function ContactsScreen() {
-  const { state, reload, upsert } = useContacts()
+  const { state, reload, upsert, remove } = useContacts()
 
   return (
     <section aria-labelledby="contacts-heading">
@@ -58,12 +60,22 @@ export function ContactsScreen() {
           ) : (
             <ul className="books">
               {state.contacts.map((contact) => (
-                <ContactRow key={contact.id} contact={contact} onChanged={upsert} />
+                <ContactRow
+                  key={contact.id}
+                  contact={contact}
+                  onChanged={upsert}
+                  onDeleted={remove}
+                />
               ))}
             </ul>
           )}
         </>
       )}
+
+      <p className="form__aside">
+        <Link href="/loans/guest">Гостьові позики</Link> ·{' '}
+        <Link href="/library">Моя бібліотека</Link> · <Link href="/">На головну</Link>
+      </p>
     </section>
   )
 }
@@ -157,9 +169,11 @@ function CreateContactForm({ onCreated }: { onCreated: (contact: ExternalBorrowe
 function ContactRow({
   contact,
   onChanged,
+  onDeleted,
 }: {
   contact: ExternalBorrower
   onChanged: (contact: ExternalBorrower) => void
+  onDeleted: (contactId: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [alias, setAlias] = useState(contact.alias)
@@ -167,6 +181,9 @@ function ContactRow({
   const [failure, setFailure] = useState<unknown>()
   const [notice, setNotice] = useState<string>()
   const [pending, setPending] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteFailure, setDeleteFailure] = useState<unknown>()
+  const [deleting, setDeleting] = useState(false)
 
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
@@ -196,22 +213,69 @@ function ContactRow({
     }
   }
 
+  /**
+   * Item 3 (10f.3 web-рев'ю): сервер сам відмовляє (409) з ясним поясненням — «активна позика» чи
+   * «незакрита втрата» (Q3d). Фронт не вгадує причину, лише показує повідомлення сервера й лишає
+   * контакт у списку; лише 204 прибирає рядок.
+   */
+  async function remove(): Promise<void> {
+    setDeleteFailure(undefined)
+    setDeleting(true)
+
+    try {
+      await deleteContact(contact.id)
+      onDeleted(contact.id)
+    } catch (caught) {
+      setDeleteFailure(toError(caught))
+    } finally {
+      setDeleting(false)
+      setConfirmingDelete(false)
+    }
+  }
+
   if (!editing) {
     return (
       <li className="book">
         <span className="book__title">{contact.alias}</span>
-        <button
-          type="button"
-          className="button--ghost"
-          onClick={() => {
-            setAlias(contact.alias)
-            setNotice(undefined)
-            setEditing(true)
-          }}
-        >
-          Змінити аліас
-        </button>
+        <div className="person__actions">
+          <button
+            type="button"
+            className="button--ghost"
+            disabled={deleting}
+            onClick={() => {
+              setAlias(contact.alias)
+              setNotice(undefined)
+              setEditing(true)
+            }}
+          >
+            Змінити аліас
+          </button>
+          <button
+            type="button"
+            className="button--danger"
+            disabled={deleting}
+            onClick={() => {
+              setConfirmingDelete(true)
+            }}
+          >
+            {deleting ? 'Видаляю…' : 'Видалити'}
+          </button>
+        </div>
         {notice !== undefined && <FormStatus success={notice} />}
+        <FormStatus error={deleteFailure} />
+        <ConfirmDialog
+          open={confirmingDelete}
+          title="Видалити контакт?"
+          description="Видалити можна лише за відсутності активної гостьової позики й незакритої втрати. Факт минулих позик і дати лишаться в історії — зникне лише псевдонім."
+          confirmLabel="Видалити"
+          pending={deleting}
+          onConfirm={() => {
+            void remove()
+          }}
+          onCancel={() => {
+            setConfirmingDelete(false)
+          }}
+        />
       </li>
     )
   }

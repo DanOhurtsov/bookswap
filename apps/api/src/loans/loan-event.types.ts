@@ -4,10 +4,10 @@ import type { LoanEventType } from '@bookswap/shared'
 /**
  * Stage 10 (T4, §6.8): strict-схеми `LoanEvent.payload` за типом події.
  *
- * Описані лише типи, які реально пишуть кроки 10d–10e (`LOAN_LOST`, `RECOVERED`, `LOAN_RETURNED` для записаних
- * позик, `RECORD_*`). Решту (`GUEST_LOAN_RECORDED`, …) додадуть кроки, що їх використовують, — разом зі своєю схемою. У payload не буває alias, email,
- * id контакту чи вільного тексту: `z.strictObject({})` відхиляє будь-яке поле, тож витік не
- * проходить мовчки. Фактична дата події — колонка `effectiveAt`, а не payload.
+ * Описані типи, які реально пишуть кроки 10d–10f.3 (`LOAN_LOST`, `RECOVERED`, `LOAN_RETURNED` для
+ * записаних позик, `RECORD_*`, і, з 10f.3, `GUEST_LOAN_RECORDED`/`LOSS_CLOSED`). У payload не буває
+ * alias, email, id контакту чи вільного тексту: `z.strictObject({})` відхиляє будь-яке поле, тож витік
+ * не проходить мовчки. Фактична дата події — колонка `effectiveAt`, а не payload.
  */
 const emptyPayloadSchema = z.strictObject({})
 
@@ -28,6 +28,9 @@ export const LOAN_EVENT_PAYLOAD_SCHEMA = {
   RECORD_CONFIRMED: emptyPayloadSchema,
   RECORD_DECLINED: emptyPayloadSchema,
   RECORD_WITHDRAWN: emptyPayloadSchema,
+  // Stage 10 (10f.3): створення й закриття втрати гостьової позики — жодного alias/contactId у payload.
+  GUEST_LOAN_RECORDED: emptyPayloadSchema,
+  LOSS_CLOSED: emptyPayloadSchema,
 } as const satisfies Partial<Record<LoanEventType, z.ZodTypeAny>>
 
 export type WritableLoanEventType = keyof typeof LOAN_EVENT_PAYLOAD_SCHEMA
