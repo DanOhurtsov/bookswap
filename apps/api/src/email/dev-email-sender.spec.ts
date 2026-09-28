@@ -152,6 +152,44 @@ describe('DevEmailSender поза production', () => {
 
     expect(sender.outbox).toHaveLength(0)
   })
+
+  describe('redactRecipient (Stage 10, 10g, Q4)', () => {
+    it('не потрапляє в outbox, не лишає адресу в лозі, але лишає тіло з посиланням', async () => {
+      const logged: string[] = []
+
+      jest.spyOn(sender['logger'], 'log').mockImplementation((value: unknown) => {
+        logged.push(String(value))
+      })
+
+      await sender.send({ ...message, redactRecipient: true })
+
+      expect(sender.outbox).toHaveLength(0)
+      expect(sender.lastTo(message.to)).toBeUndefined()
+      expect(logged.join('\n')).not.toContain(message.to)
+      // Без API-поля з токеном лог лишається єдиним способом пройти флоу вручну (§0.8).
+      expect(logged.join('\n')).toContain(message.body)
+      expect(logged.join('\n')).toContain('[приховано]')
+    })
+
+    it('не впливає на звичайні листи до й після себе', async () => {
+      await sender.send(message)
+      await sender.send({ ...message, redactRecipient: true })
+      await sender.send({ ...message, subject: 'Другий звичайний' })
+
+      expect(sender.outbox).toHaveLength(2)
+      expect(sender.outbox.map((item) => item.subject)).toEqual([
+        message.subject,
+        'Другий звичайний',
+      ])
+    })
+
+    it('redactRecipient=false поводиться так само, як його відсутність', async () => {
+      await sender.send({ ...message, redactRecipient: false })
+
+      expect(sender.outbox).toHaveLength(1)
+      expect(sender.lastTo(message.to)).toBeDefined()
+    })
+  })
 })
 
 /** Знімає readonly лише в межах тесту, який навмисно намагається зіпсувати копію. */

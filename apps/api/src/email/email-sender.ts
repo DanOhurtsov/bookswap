@@ -25,6 +25,16 @@ export interface EmailMessage {
    * там немає.
    */
   idempotencyKey?: string
+  /**
+   * Stage 10 (10g, Q4): true means the raw `to` must not outlive this call — no dev
+   * outbox entry, no log line with the address, whatever the implementation would
+   * otherwise keep. Set only by the guest-invitation path
+   * (`InvitationsService.createGuestEmail`); every other caller omits it, and
+   * `DevEmailSender` keeps today's outbox/log behaviour for them unchanged.
+   * `ResendEmailSender` ignores it — a real provider call never reaches guest
+   * invitations in the first place (see `InvitationsService.createGuestEmail`).
+   */
+  redactRecipient?: boolean
 }
 
 export interface EmailSender {

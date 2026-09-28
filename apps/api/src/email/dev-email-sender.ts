@@ -82,6 +82,22 @@ export class DevEmailSender implements EmailSender {
 
     if (refusal !== undefined) return Promise.reject(refusal)
 
+    // Stage 10 (10g, Q4): гостьове запрошення. Сирий email існує лише всередині цього
+    // виклику й ніде його не переживає — ні в БД (не тут узагалі), ні в outbox нижче.
+    // Лог — виняток, і свідомий: без нього посилання не можна пройти вручну (немає
+    // API-поля з токеном — саме так задумано, §0.8 execution plan). Тому тіло
+    // друкується цілком (у ньому лише ім'я запрошувача й посилання — жодного alias чи
+    // назви книжки, §6.4), а адресат замінюється на «[приховано]» — той самий рівень
+    // приватності, що й для звичайного листа, мінус сама адреса.
+    if (message.redactRecipient === true) {
+      this.logger.log(
+        `Лист (dev, нікуди не відправлено, гостьове запрошення) → [приховано]\n` +
+          `Тема: ${message.subject}\n${message.body}`,
+      )
+
+      return Promise.resolve()
+    }
+
     this.sent.push(message)
 
     if (this.sent.length > OUTBOX_LIMIT) this.sent.shift()

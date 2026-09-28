@@ -1,6 +1,8 @@
 import {
+  externalBorrowerInvitationResponseSchema,
   externalBorrowerListResponseSchema,
   externalBorrowerResponseSchema,
+  type CreateExternalBorrowerInvitationRequest,
   type CreateExternalBorrowerRequest,
   type UpdateExternalBorrowerRequest,
 } from '@bookswap/shared'
@@ -29,3 +31,14 @@ export const renameContact = (id: string, body: UpdateExternalBorrowerRequest) =
  */
 export const deleteContact = (id: string) =>
   apiRequest(`/me/external-borrowers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+/**
+ * Stage 10 (10g, D2): запрошення гостя. Відповідь не містить email — сервер його
+ * ніколи не відлунює (Q4).
+ */
+export const sendContactInvitation = (id: string, body: CreateExternalBorrowerInvitationRequest) =>
+  apiRequest(`/me/external-borrowers/${encodeURIComponent(id)}/invitation`, {
+    method: 'POST',
+    body,
+    schema: externalBorrowerInvitationResponseSchema,
+  })

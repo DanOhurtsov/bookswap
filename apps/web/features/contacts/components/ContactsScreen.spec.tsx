@@ -62,6 +62,20 @@ beforeEach(() => {
         return Promise.resolve(undefined)
       }
 
+      if (options?.method === 'POST' && path.endsWith('/invitation')) {
+        return Promise.resolve({
+          invitation: {
+            id: 'inv-1',
+            kind: 'EMAIL',
+            status: 'ACTIVE',
+            expiresAt: '2026-10-11T00:00:00.000Z',
+            createdAt: '2026-09-27T00:00:00.000Z',
+            acceptedCount: 0,
+            maxUses: 1,
+          },
+        })
+      }
+
       return Promise.reject(new Error(`unexpected ${path}`))
     },
   )
@@ -312,5 +326,131 @@ describe('ContactsScreen', () => {
     await screen.findByText('Контактів поки немає.')
     expect(container.textContent.toLowerCase()).not.toMatch(/згод/)
     expect(screen.getByText(/не є підтвердженням з боку самої людини/)).toBeInTheDocument()
+  })
+
+  describe('запрошення гостя (10g)', () => {
+    async function openInviteForm(): Promise<void> {
+      stored = [contact('c-1', 'Гість')]
+      render(<ContactsScreen />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Запросити гостя' }))
+    }
+
+    it('form is closed by default; opening it does not call the API', async () => {
+      stored = [contact('c-1', 'Гість')]
+      render(<ContactsScreen />)
+
+      await screen.findByText('Гість')
+      expect(screen.queryByLabelText('Email гостя')).not.toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Запросити гостя' }))
+
+      expect(await screen.findByLabelText('Email гостя')).toBeInTheDocument()
+      expect(
+        apiRequest.mock.calls.filter(
+          ([path, options]) => options?.method === 'POST' && path.endsWith('/invitation'),
+        ),
+      ).toHaveLength(0)
+    })
+
+    it('rejects a non-synthetic domain locally, without calling the API', async () => {
+      await openInviteForm()
+
+      await userEvent.type(screen.getByLabelText('Email гостя'), 'guest@example.com')
+      await userEvent.click(screen.getByRole('button', { name: 'Надіслати запрошення' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('guest.invalid')
+      expect(
+        apiRequest.mock.calls.filter(
+          ([path, options]) => options?.method === 'POST' && path.endsWith('/invitation'),
+        ),
+      ).toHaveLength(0)
+    })
+
+    it('sends exactly { email } to the contact-scoped route, shows success and clears the field', async () => {
+      await openInviteForm()
+
+      await userEvent.type(screen.getByLabelText('Email гостя'), 'guest@guest.invalid')
+      await userEvent.click(screen.getByRole('button', { name: 'Надіслати запрошення' }))
+
+      expect(await screen.findByText(/Створено тестове запрошення/)).toBeInTheDocument()
+      expect(apiRequest).toHaveBeenCalledWith('/me/external-borrowers/c-1/invitation', {
+        method: 'POST',
+        body: { email: 'guest@guest.invalid' },
+        schema: expect.anything(),
+      })
+      // Q4/UI: адреса не лишається в стані сторінки після результату.
+      expect(screen.getByLabelText('Email гостя')).toHaveValue('')
+    })
+
+    it('blocks a second submit while the first is pending', async () => {
+      stored = [contact('c-1', 'Гість')]
+      render(<ContactsScreen />)
+      await userEvent.click(await screen.findByRole('button', { name: 'Запросити гостя' }))
+
+      let finish: (value: unknown) => void = () => undefined
+
+      apiRequest.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          }),
+      )
+
+      await userEvent.type(screen.getByLabelText('Email гостя'), 'guest@guest.invalid')
+
+      const submit = screen.getByRole('button', { name: /Надсилаю|Надіслати запрошення/ })
+
+      await userEvent.click(submit)
+      await userEvent.click(submit)
+
+      expect(
+        apiRequest.mock.calls.filter(
+          ([path, options]) => options?.method === 'POST' && path.endsWith('/invitation'),
+        ),
+      ).toHaveLength(1)
+
+      finish({
+        invitation: {
+          id: 'inv-1',
+          kind: 'EMAIL',
+          status: 'ACTIVE',
+          expiresAt: '2026-10-11T00:00:00.000Z',
+          createdAt: '2026-09-27T00:00:00.000Z',
+          acceptedCount: 0,
+          maxUses: 1,
+        },
+      })
+      expect(await screen.findByText(/Створено тестове запрошення/)).toBeInTheDocument()
+    })
+
+    it('shows a server error and clears the field; the API never echoes the address back', async () => {
+      await openInviteForm()
+      apiRequest.mockImplementationOnce((path: string, options?: { method?: string }) =>
+        path.endsWith('/invitation') && options?.method === 'POST'
+          ? Promise.reject(
+              new ApiRequestError(429, {
+                code: 'INVITE_RATE_LIMITED',
+                message: 'Забагато запрошень поштою. Спробуйте пізніше або поділіться посиланням.',
+              }),
+            )
+          : Promise.reject(new Error('unexpected call')),
+      )
+
+      await userEvent.type(screen.getByLabelText('Email гостя'), 'guest@guest.invalid')
+      await userEvent.click(screen.getByRole('button', { name: 'Надіслати запрошення' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Забагато запрошень поштою')
+      expect(screen.getByLabelText('Email гостя')).toHaveValue('')
+    })
+
+    it('hiding the form clears any typed address', async () => {
+      await openInviteForm()
+
+      await userEvent.type(screen.getByLabelText('Email гостя'), 'guest@guest.invalid')
+      await userEvent.click(screen.getByRole('button', { name: 'Сховати' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Запросити гостя' }))
+
+      expect(screen.getByLabelText('Email гостя')).toHaveValue('')
+    })
   })
 })

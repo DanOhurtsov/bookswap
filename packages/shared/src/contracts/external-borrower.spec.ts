@@ -1,6 +1,9 @@
 import {
   EXTERNAL_BORROWER_LIMITS,
+  GUEST_INVITATION_EMAIL_DOMAIN,
+  createExternalBorrowerInvitationRequestSchema,
   createExternalBorrowerRequestSchema,
+  externalBorrowerInvitationResponseSchema,
   externalBorrowerListResponseSchema,
   externalBorrowerSchema,
   updateExternalBorrowerRequestSchema,
@@ -83,5 +86,55 @@ describe('відповіді', () => {
     expect(externalBorrowerListResponseSchema.parse({ contacts: [contact] })).toEqual({
       contacts: [contact],
     })
+  })
+})
+
+describe('createExternalBorrowerInvitationRequestSchema', () => {
+  it('приймає адресу зарезервованого тестового домену, нормалізуючи регістр і пробіли', () => {
+    expect(
+      createExternalBorrowerInvitationRequestSchema.parse({
+        email: `  Guest@${GUEST_INVITATION_EMAIL_DOMAIN.toUpperCase()}  `,
+      }),
+    ).toEqual({ email: `guest@${GUEST_INVITATION_EMAIL_DOMAIN}` })
+  })
+
+  it.each([
+    ['реальний домен', 'guest@example.com'],
+    ['схожий, але інший домен', `guest@${GUEST_INVITATION_EMAIL_DOMAIN}.evil.test`],
+    ['некоректна адреса', 'not-an-email'],
+    ['порожня адреса', ''],
+  ])('відхиляє: %s', (_name, email) => {
+    expect(createExternalBorrowerInvitationRequestSchema.safeParse({ email }).success).toBe(false)
+  })
+
+  it.each(['alias', 'contactId', 'note'])('відхиляє зайве поле %s', (field) => {
+    expect(
+      createExternalBorrowerInvitationRequestSchema.safeParse({
+        email: `guest@${GUEST_INVITATION_EMAIL_DOMAIN}`,
+        [field]: 'x',
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('externalBorrowerInvitationResponseSchema', () => {
+  it('не пропускає email чи будь-яке поле, крім invitation', () => {
+    const invitation = {
+      id: 'inv-1',
+      kind: 'EMAIL',
+      status: 'ACTIVE',
+      expiresAt: '2026-10-11T00:00:00.000Z',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      acceptedCount: 0,
+      maxUses: 1,
+    }
+
+    expect(externalBorrowerInvitationResponseSchema.safeParse({ invitation }).success).toBe(true)
+    expect(
+      externalBorrowerInvitationResponseSchema.safeParse({
+        invitation,
+        email: `guest@${GUEST_INVITATION_EMAIL_DOMAIN}`,
+      }).success,
+    ).toBe(false)
   })
 })

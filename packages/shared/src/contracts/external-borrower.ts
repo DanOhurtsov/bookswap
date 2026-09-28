@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { invitationSchema } from './invitation'
+import { emailSchema } from './user'
 
 /**
  * Stage 10, крок 10f.2: приватні контакти `ExternalBorrower`.
@@ -52,3 +54,37 @@ export const externalBorrowerListResponseSchema = z.strictObject({
 })
 
 export type ExternalBorrowerListResponse = z.infer<typeof externalBorrowerListResponseSchema>
+
+/**
+ * Stage 10, крок 10g: `POST /me/external-borrowers/:id/invitation`.
+ *
+ * D2 лишається відкритим release blocker — цей маршрут існує лише для розробки й перевірки з
+ * вигаданими даними (T9: `GuestLoansEnabledGuard` + `GUEST_LOANS_SYNTHETIC_ONLY`). Як другий,
+ * незалежний рубіж (а не заміна організаційної заборони, яку тримає PO) адреса обмежена
+ * зарезервованим RFC 2606 доменом `.invalid`: він гарантовано не резолвиться, тож навіть помилкова
+ * конфігурація транспорту не може випадково дістати реальну людину. Реальні персональні дані гостя
+ * заборонені в усіх середовищах.
+ */
+export const GUEST_INVITATION_EMAIL_DOMAIN = 'guest.invalid'
+
+export const guestInvitationEmailSchema = emailSchema.refine(
+  (email) => email.endsWith(`@${GUEST_INVITATION_EMAIL_DOMAIN}`),
+  `Лише синтетичні адреси домену ${GUEST_INVITATION_EMAIL_DOMAIN} (D2 — реальні дані заборонені)`,
+)
+
+export const createExternalBorrowerInvitationRequestSchema = z.strictObject({
+  email: guestInvitationEmailSchema,
+})
+
+export type CreateExternalBorrowerInvitationRequest = z.infer<
+  typeof createExternalBorrowerInvitationRequestSchema
+>
+
+/** Без відлуння email (Q4): лист і його адресат ніде в цій відповіді не з'являються. */
+export const externalBorrowerInvitationResponseSchema = z.strictObject({
+  invitation: invitationSchema,
+})
+
+export type ExternalBorrowerInvitationResponse = z.infer<
+  typeof externalBorrowerInvitationResponseSchema
+>

@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import {
+  GUEST_INVITATION_EMAIL_DOMAIN,
+  createExternalBorrowerInvitationRequestSchema,
   createExternalBorrowerRequestSchema,
   updateExternalBorrowerRequestSchema,
   type ExternalBorrower,
@@ -12,7 +14,12 @@ import { validate } from '@/app/lib/validation'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { createContact, deleteContact, renameContact } from '../api/contacts-requests'
+import {
+  createContact,
+  deleteContact,
+  renameContact,
+  sendContactInvitation,
+} from '../api/contacts-requests'
 import { useContacts } from '../model/use-contacts'
 
 const toError = (error: unknown): Error =>
@@ -263,6 +270,7 @@ function ContactRow({
         </div>
         {notice !== undefined && <FormStatus success={notice} />}
         <FormStatus error={deleteFailure} />
+        <InviteContactForm contactId={contact.id} />
         <ConfirmDialog
           open={confirmingDelete}
           title="Видалити контакт?"
@@ -316,5 +324,108 @@ function ContactRow({
         </button>
       </form>
     </li>
+  )
+}
+
+/**
+ * Stage 10 (10g, D2): запрошення гостя поштою. `pending` disables the submit button —
+ * a second click mid-flight cannot fire a second request. Q4/UI: the address itself is
+ * cleared from this component's own state as soon as the request settles (success or
+ * error alike), never written to the URL or to browser storage — nothing here outlives
+ * the request that needed it.
+ */
+function InviteContactForm({ contactId }: { contactId: string }) {
+  const [open, setOpen] = useState(false)
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState<string>()
+  const [failure, setFailure] = useState<unknown>()
+  const [notice, setNotice] = useState<string>()
+  const [pending, setPending] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (pending) return
+
+    setFailure(undefined)
+    setNotice(undefined)
+
+    const result = validate(createExternalBorrowerInvitationRequestSchema, { email })
+
+    if (!result.ok) {
+      setError(result.errors.email)
+      return
+    }
+
+    setError(undefined)
+    setPending(true)
+
+    try {
+      await sendContactInvitation(contactId, result.data)
+      setNotice(
+        'Створено тестове запрошення. Лист нікуди не відправлено — це синтетичний ' +
+          'транспорт; посилання можна знайти в dev-логу API.',
+      )
+    } catch (caught) {
+      setFailure(toError(caught))
+    } finally {
+      setEmail('')
+      setPending(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="button--ghost"
+        onClick={() => {
+          setOpen(true)
+        }}
+      >
+        Запросити гостя
+      </button>
+    )
+  }
+
+  return (
+    <form
+      className="form"
+      noValidate
+      onSubmit={(event) => {
+        void submit(event)
+      }}
+    >
+      <FormStatus error={failure} success={notice} />
+      <TextField
+        id={`contact-invite-email-${contactId}`}
+        label="Email гостя"
+        type="email"
+        autoComplete="off"
+        hint={`Лише синтетичні адреси домену ${GUEST_INVITATION_EMAIL_DOMAIN} — тестове середовище, реальні контакти заборонені.`}
+        value={email}
+        error={error}
+        onChange={(event) => {
+          setEmail(event.target.value)
+        }}
+      />
+      <button type="submit" disabled={pending}>
+        {pending ? 'Надсилаю…' : 'Надіслати запрошення'}
+      </button>{' '}
+      <button
+        type="button"
+        className="button--ghost"
+        disabled={pending}
+        onClick={() => {
+          setOpen(false)
+          setEmail('')
+          setError(undefined)
+          setFailure(undefined)
+          setNotice(undefined)
+        }}
+      >
+        Сховати
+      </button>
+    </form>
   )
 }

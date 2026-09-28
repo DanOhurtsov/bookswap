@@ -1,11 +1,13 @@
 import './helpers/guest-loans-off'
 import 'reflect-metadata'
 import request from 'supertest'
+import { ThrottlerGuard } from '@nestjs/throttler'
 import { apiErrorSchema, sessionResponseSchema } from '@bookswap/shared'
 import { createTestApp } from './auth.helpers'
 import { registerAccount, url, type Account } from './loan.helpers'
 import { SessionService } from '../src/auth/session.service'
 import { ExternalBorrowersService } from '../src/external-borrowers/external-borrowers.service'
+import { InvitationsService } from '../src/invitations/invitations.service'
 import { GuestLoanService } from '../src/loans/guest-loan.service'
 import { LoanService } from '../src/loans/loan.service'
 import { PrismaService } from '../src/prisma/prisma.service'
@@ -17,10 +19,21 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
   let app: INestApplication<App>
   let prisma: PrismaService
   let owner: Account
+  let throttlerCanActivate: jest.Mock
   const http = (): App => app.getHttpServer()
 
   beforeAll(async () => {
-    app = await createTestApp()
+    // `withRateLimit: true` пропускає замовчувану підміну `ThrottlerGuard`, щоб цей файл
+    // міг сам підставити свій стаб (10g): він завжди дозволяє (жоден інший тест тут не
+    // мусить упертися в справжній ліміт), але записує виклики — доказ, що `sendInvitation`
+    // (10g) при вимкненому прапорі не доходить навіть до нього.
+    app = await createTestApp({
+      withRateLimit: true,
+      configure: (builder) => {
+        throttlerCanActivate = jest.fn().mockReturnValue(true)
+        builder.overrideGuard(ThrottlerGuard).useValue({ canActivate: throttlerCanActivate })
+      },
+    })
     prisma = app.get(PrismaService)
     owner = await registerAccount(app, 'r10f2-off')
   })
@@ -38,6 +51,7 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
     ['GET', 'get', '/me/external-borrowers', undefined],
     ['PATCH', 'patch', '/me/external-borrowers/any-id', { alias: 'Нове' }],
     ['DELETE', 'delete', '/me/external-borrowers/any-id', undefined],
+    ['POST', 'post', '/me/external-borrowers/any-id/invitation', { email: 'guest@guest.invalid' }],
   ]
 
   it.each(routes)(
@@ -50,6 +64,8 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
         jest.spyOn(service, 'list'),
         jest.spyOn(service, 'updateAlias'),
         jest.spyOn(service, 'delete'),
+        jest.spyOn(service, 'sendInvitation'),
+        jest.spyOn(app.get(InvitationsService), 'createGuestEmail'),
       ]
       const model = prisma.externalBorrower
       const dbSpies = [
@@ -72,6 +88,7 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
       expect(validate).not.toHaveBeenCalled()
       for (const spy of [...spies, ...dbSpies]) expect(spy).not.toHaveBeenCalled()
       expect(await prisma.externalBorrower.count({ where: { ownerId: owner.id } })).toBe(0)
+      expect(await prisma.invitation.count({ where: { inviterId: owner.id } })).toBe(0)
 
       // Sanity: the spies really see calls made through the same client.
       await prisma.externalBorrower.findMany({ take: 1 })
@@ -133,6 +150,24 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
       )
     },
   )
+
+  /**
+   * Stage 10 (10g): `sendInvitation` додає метод-рівневий `ThrottlerGuard` (той самий
+   * ліміт, що й `POST /invitations`). Порядок guard'ів у Nest — клас, тоді метод, тож
+   * `GuestLoansEnabledGuard` (клас, перший) усе одно спрацьовує раніше за throttler.
+   */
+  it('POST .../invitation при вимкненому прапорі не викликає навіть ThrottlerGuard', async () => {
+    throttlerCanActivate.mockClear()
+
+    const response = await request(http())
+      .post(url('/me/external-borrowers/any-id/invitation'))
+      .set('Cookie', owner.cookie)
+      .send({ email: 'guest@guest.invalid' })
+
+    expect(response.status).toBe(403)
+    expect(apiErrorSchema.parse(response.body).code).toBe('FEATURE_DISABLED')
+    expect(throttlerCanActivate).not.toHaveBeenCalled()
+  })
 
   it('невалідне тіло теж не доходить до валідації: 403, а не 400', async () => {
     const response = await request(http())

@@ -2,10 +2,13 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
   EXCLUSIVE_LOAN_STATUS,
+  type ExternalBorrowerInvitationResponse,
   type ExternalBorrowerListResponse,
   type ExternalBorrowerResponse,
 } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
+import type { UserModel } from '../generated/prisma/models'
+import { InvitationsService } from '../invitations/invitations.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { toExternalBorrower } from './external-borrower.mapper'
 
@@ -19,7 +22,10 @@ const EXCLUSIVE_STATUSES: readonly string[] = EXCLUSIVE_LOAN_STATUS
  */
 @Injectable()
 export class ExternalBorrowersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly invitations: InvitationsService,
+  ) {}
 
   async create(ownerId: string, alias: string): Promise<ExternalBorrowerResponse> {
     const row = await this.prisma.externalBorrower.create({
@@ -51,6 +57,33 @@ export class ExternalBorrowersService {
     if (row === null) throw notFound()
 
     return { contact: toExternalBorrower(row) }
+  }
+
+  /**
+   * Stage 10 (10g, D2): `POST /me/external-borrowers/:id/invitation`. Чужий і відсутній
+   * контакт нерозрізненні (той самий `notFound()`, що й `updateAlias`/`delete`) — і
+   * саме тому перевірка контакту йде **до** будь-якого запиту до `InvitationsService`:
+   * стороння людина не має способу дізнатися навіть про існування чужого контакту,
+   * не кажучи вже про запуск ліміту чи відправки листа.
+   *
+   * Лист не містить alias — `createGuestEmail` про контакт нічого не знає, отримує
+   * лише `owner` і `email`.
+   */
+  async sendInvitation(
+    owner: UserModel,
+    id: string,
+    email: string,
+  ): Promise<ExternalBorrowerInvitationResponse> {
+    const contact = await this.prisma.externalBorrower.findFirst({
+      where: { id, ownerId: owner.id },
+      select: { id: true },
+    })
+
+    if (contact === null) throw notFound()
+
+    const { invitation } = await this.invitations.createGuestEmail(owner, email)
+
+    return { invitation }
   }
 
   /**

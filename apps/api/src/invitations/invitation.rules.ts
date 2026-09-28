@@ -5,6 +5,15 @@ const DAY_MS = 24 * 60 * 60 * 1000
 /** D1: 14 днів для обох видів, без вибору користувача. */
 export const INVITATION_TTL_MS = 14 * DAY_MS
 
+/**
+ * D4 / Stage 10 (10g, Q5): вікно ліміту на одну адресу — те саме вікно, яким
+ * `InvitationsService` рахує `perRecipient`, і те саме, після якого
+ * `InviteEmailHashCleanupService` обнуляє `recipientEmailHash`: поки ліміт може ще
+ * побачити цей запис, хеш лишається; щойно запис випадає з вікна ліміту — обнулення
+ * безпечне. Поле спільне для звичайних email-запрошень Етапу 9 і гостьових (10g).
+ */
+export const EMAIL_RECIPIENT_LIMIT_WINDOW_MS = 7 * DAY_MS
+
 export interface InvitationFacts {
   expiresAt: Date
   revokedAt: Date | null
