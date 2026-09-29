@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Notification } from '@bookswap/shared'
+import { isGuestResponseNotificationType, type Notification } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
 import { NOTIFICATION_TYPE_LABELS, formatDate } from '../../lib/labels'
@@ -171,6 +171,11 @@ function NotificationRow({
   // §4.8: payload — самі ідентифікатори, тож посилання будується з них, а не з
   // тексту сповіщення.
   const loanId = notification.payload.loanId
+  // Stage 10 (10i.3): відповідь гостя веде до запиту підтвердження в гостьових позиках, а не до
+  // зареєстрованого позичання; у payload лише id (жодного нікнейма/email гостя).
+  const confirmationId = isGuestResponseNotificationType(notification.type)
+    ? notification.payload.confirmationId
+    : undefined
 
   return (
     <li className={unread ? 'person notification--unread' : 'person'}>
@@ -185,7 +190,13 @@ function NotificationRow({
       <div className="person__actions">
         {/* §4.8: payload несе id — тож посилання веде до КОНКРЕТНОГО лоану, а
             не до списку, у якому його ще треба знайти. */}
-        {loanId !== undefined && <Link href={`/loans?loanId=${loanId}`}>Відкрити позичання</Link>}
+        {confirmationId !== undefined ? (
+          <Link href={`/loans/guest?confirmationId=${encodeURIComponent(confirmationId)}`}>
+            Відкрити запит підтвердження
+          </Link>
+        ) : (
+          loanId !== undefined && <Link href={`/loans?loanId=${loanId}`}>Відкрити позичання</Link>
+        )}
         {unread && (
           <button
             type="button"

@@ -5,6 +5,8 @@ import type {
   CopyStatus,
   EditionFormat,
   GuestLoanAction,
+  GuestLoanConfirmationStatus,
+  GuestLoanEvidence,
   LoanAction,
   LoanStatus,
   NotificationType,
@@ -104,6 +106,33 @@ export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>
   LOAN_RECORD_CONFIRMED: 'Отримання підтверджено',
   LOAN_RECORD_DECLINED: 'Запис про передачу відхилено',
   LOAN_RECORD_WITHDRAWN: 'Запис про передачу відкликано',
+  // Stage 10 (10i.3): відповіді гостя. IN_APP змістовно, EMAIL лише загальний лист; без нікнейма й email гостя.
+  GUEST_LOAN_RECEIVED: 'Гість підтвердив отримання книжки',
+  GUEST_LOAN_DENIED: 'Гість заперечує отримання книжки',
+}
+
+/**
+ * Stage 10 (10i.3): джерело гостьової передачі — окремо від статусу позики. Чотири формулювання рішення PO
+ * (§0.10): «зі слів власника» — ручний запис 10f.3 і «залишити зі слів власника»; «очікуємо відповідь гостя» —
+ * запит відкритий, отримання НЕ підтверджене; «підтверджено гостем» — відповідь через посилання після
+ * підтвердження контролю введеного гостем email (не доведена особа); «гість заперечує» — розбіжність.
+ */
+export const GUEST_EVIDENCE_LABELS: Readonly<Record<GuestLoanEvidence, string>> = {
+  OWNER_STATEMENT: 'зі слів власника',
+  AWAITING_GUEST: 'очікуємо відповідь гостя',
+  GUEST_CONFIRMED: 'підтверджено гостем',
+  GUEST_DENIED: 'гість заперечує',
+}
+
+/** Технічні стани запиту підтвердження (§0.13: назви — технічні, не продуктові правила). */
+export const GUEST_CONFIRMATION_STATUS_LABELS: Readonly<
+  Record<GuestLoanConfirmationStatus, string>
+> = {
+  OPEN: 'Очікує відповіді гостя',
+  DENIED: 'Гість заперечує отримання',
+  RECEIVED: 'Гість підтвердив отримання',
+  CANCELLED: 'Передачу скасовано',
+  OWNER_RECORDED: 'Залишено зі слів власника',
 }
 
 /**
@@ -158,5 +187,16 @@ export function formatDate(iso: string): string {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+  })
+}
+
+/** Дата й час для строку дії посилання: точність до хвилини, локаль явна. */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('uk-UA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }

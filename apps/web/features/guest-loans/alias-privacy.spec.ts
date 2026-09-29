@@ -37,3 +37,33 @@ describe('приватність alias гостьового контакту (St
     expect(source).toContain('contact.alias')
   })
 })
+
+/**
+ * Stage 10 (10i.3): публічна сторінка гостя не знає ні про сесію власника, ні про контакт/alias/дату
+ * передачі, ні про сховища браузера: токен лише в пам'яті, до перевірки email — лише назва, автори, строк.
+ */
+describe('публічна сторінка гостя (Stage 10, 10i.3)', () => {
+  const source = () =>
+    read('apps/web/features/guest-loans/components/GuestLoanResponse.tsx') +
+    read('apps/web/features/guest-loans/model/guest-link-token.ts')
+
+  it.each([
+    'handedAt',
+    'alias',
+    'contact',
+    'useSession',
+    'sessionStorage',
+    'localStorage',
+    'guestEmail',
+    'guestNickname',
+  ])('не згадує %s', (word) => {
+    expect(source()).not.toContain(word)
+  })
+
+  it('прибирає токен з адреси й шле його лише в тілі запиту', () => {
+    expect(source()).toContain('history.replaceState')
+    expect(read('apps/web/features/guest-loans/api/guest-confirmation-requests.ts')).toMatch(
+      /guest-loan-responses\/resolve[\s\S]*body: \{ token \}/,
+    )
+  })
+})

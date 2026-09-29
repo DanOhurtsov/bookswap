@@ -12,6 +12,7 @@ const base = {
   handedAt: '2026-03-03T10:00:00.000Z',
   returnedAt: '2026-03-10T10:00:00.000Z',
   dueAt: null,
+  guestEvidence: null,
   names: false,
 } as const
 
@@ -49,5 +50,26 @@ describe('HistoryEntryLine (H5)', () => {
 
     expect(screen.getByText(/Записано власником/)).toBeInTheDocument()
     expect(screen.queryByText(/Попросили/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['OWNER_STATEMENT', 'джерело: зі слів власника'],
+    ['AWAITING_GUEST', 'джерело: очікуємо відповідь гостя'],
+    ['GUEST_CONFIRMED', 'джерело: підтверджено гостем'],
+    ['GUEST_DENIED', 'джерело: гість заперечує'],
+  ] as const)(
+    'гостьова позика: джерело %s показується окремо від «Записано власником»',
+    (evidence, text) => {
+      renderEntry({ origin: 'RECORDED_GUEST', requestedAt: null, guestEvidence: evidence })
+
+      expect(screen.getByText(new RegExp(text))).toBeInTheDocument()
+      expect(screen.getByText(/Записано власником/)).toBeInTheDocument()
+    },
+  )
+
+  it('без гостьового джерела (guestEvidence = null) рядка «джерело» немає', () => {
+    renderEntry({ origin: 'RECORDED_EXISTING', requestedAt: null, guestEvidence: null })
+
+    expect(screen.queryByText(/джерело/)).not.toBeInTheDocument()
   })
 })

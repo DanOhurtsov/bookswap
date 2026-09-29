@@ -7,9 +7,15 @@ import type { GuestLoan, GuestLoanAction } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, describeError } from '@/app/lib/api'
-import { CONDITION_LABELS, LOAN_STATUS_LABELS, formatDate } from '@/app/lib/labels'
+import {
+  CONDITION_LABELS,
+  GUEST_EVIDENCE_LABELS,
+  LOAN_STATUS_LABELS,
+  formatDate,
+} from '@/app/lib/labels'
 import { useGuestLoan, useGuestLoans } from '@/app/lib/use-guest-loans'
 import { actOnGuestLoan } from '../api/guest-loans-requests'
+import { GuestConfirmationsSection, SingleGuestConfirmationView } from './GuestConfirmationsSection'
 import { GuestLoanActions } from './GuestLoanActions'
 
 /**
@@ -29,8 +35,22 @@ export function GuestLoansScreen() {
 function GuestLoansBody() {
   const parameters = useSearchParams()
   const loanId = parameters.get('loanId')
+  const confirmationId = parameters.get('confirmationId')
 
-  return loanId === null ? <GuestLoanListView /> : <SingleGuestLoanView loanId={loanId} />
+  if (loanId !== null) return <SingleGuestLoanView loanId={loanId} />
+
+  // 10i.3: один запит підтвердження (з посилання сповіщення про відповідь гостя).
+  if (confirmationId !== null) {
+    return (
+      <>
+        <SyntheticDataNotice />
+        <SingleGuestConfirmationView confirmationId={confirmationId} />
+        <Footer />
+      </>
+    )
+  }
+
+  return <GuestLoanListView />
 }
 
 /**
@@ -79,6 +99,11 @@ function GuestLoanListView() {
   return (
     <>
       <SyntheticDataNotice />
+
+      {/* 10i.3: запити підтвердження — окремий ресурс (`/guest-loan-confirmations`), не частина цього списку. */}
+      <GuestConfirmationsSection />
+
+      <h2>Гостьові позики</h2>
 
       <FormStatus error={actions.failure} />
 
@@ -191,6 +216,12 @@ function GuestLoanCard({
       <span className="book__meta">
         Передано {formatDate(loan.handedAt)}
         {loan.returnedAt !== null && ` · повернено ${formatDate(loan.returnedAt)}`}
+      </span>
+
+      {/* 10i.3: джерело факту окремо від статусу. Ручні записи 10f.3 лишаються «зі слів власника»
+          і не стають підтвердженими заднім числом. */}
+      <span className="book__meta">
+        Джерело факту передачі: <strong>{GUEST_EVIDENCE_LABELS[loan.evidence]}</strong>
       </span>
 
       <GuestLoanActions loan={loan} busy={busyKey !== undefined} busyKey={busyKey} onAct={onAct} />

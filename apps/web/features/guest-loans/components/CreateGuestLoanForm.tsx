@@ -8,6 +8,7 @@ import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { validate, type FieldErrors } from '@/app/lib/validation'
 import { useContacts } from '@/features/contacts/index.client'
+import { createGuestConfirmation } from '../api/guest-confirmation-requests'
 import { createGuestLoan } from '../api/guest-loans-requests'
 
 interface CreateGuestLoanFormProps {
@@ -37,8 +38,10 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<unknown>()
   const [pending, setPending] = useState(false)
+  /** Створений запит підтвердження: форма лишається, щоб вести власника до видачі посилання. */
+  const [requestedId, setRequestedId] = useState<string>()
 
-  async function submit(): Promise<void> {
+  async function submit(mode: 'manual' | 'confirmation'): Promise<void> {
     const result = validate(createGuestLoanRequestSchema, {
       copyId,
       externalBorrowerId,
@@ -56,8 +59,15 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
     setPending(true)
 
     try {
-      await createGuestLoan(result.data)
-      await onCreated()
+      if (mode === 'manual') {
+        await createGuestLoan(result.data)
+        await onCreated()
+      } else {
+        const created = await createGuestConfirmation(result.data)
+
+        setRequestedId(created.confirmation.id)
+        setPending(false)
+      }
     } catch (error) {
       setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
       setPending(false)
@@ -88,6 +98,33 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
     )
   }
 
+  if (requestedId !== undefined) {
+    return (
+      <div className="form">
+        <div className="alert alert--ok" role="status">
+          <p>
+            Запит підтвердження створено. Отримання гостем <strong>ще не підтверджене</strong>, а
+            примірник недоступний для нових позик. Далі видайте гостю посилання.
+          </p>
+        </div>
+        <div className="person__actions">
+          <Link href={`/loans/guest?confirmationId=${encodeURIComponent(requestedId)}`}>
+            Видати посилання гостю
+          </Link>
+          <button
+            type="button"
+            className="button--ghost"
+            onClick={() => {
+              void onCreated()
+            }}
+          >
+            Закрити
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="form">
       <div className="alert alert--warn" role="note">
@@ -98,8 +135,11 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
       </div>
 
       <p className="form__aside">
-        Це позика людині без акаунта BookSwap: підтвердження від неї не буде, книжка одразу
-        позначиться як передана. Друзям і стороннім цей факт завжди видно анонімно.
+        Це позика людині без акаунта BookSwap. Можна записати її одразу — тоді вона позначиться як
+        передана <strong>зі слів власника</strong> (гість її не підтверджує). Або записати й
+        попросити гостя підтвердити отримання за посиланням: до його відповіді книжка недоступна для
+        нових позик, а отримання не вважається підтвердженим. Друзям і стороннім цей факт завжди
+        видно анонімно.
       </p>
 
       <SelectField
@@ -148,8 +188,16 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
       <FormStatus error={failure} />
 
       <div className="person__actions">
-        <button type="button" disabled={pending} onClick={() => void submit()}>
+        <button type="button" disabled={pending} onClick={() => void submit('manual')}>
           {pending ? 'Записую…' : 'Записати гостьову позику'}
+        </button>
+        <button
+          type="button"
+          className="button--ghost"
+          disabled={pending}
+          onClick={() => void submit('confirmation')}
+        >
+          Записати й попросити підтвердження гостя
         </button>
         <CancelButton onCancel={onCancel} disabled={pending} />
       </div>

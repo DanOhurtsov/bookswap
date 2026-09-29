@@ -83,7 +83,7 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
     setup()
 
     expect(await screen.findByText(/Лише синтетичні тестові дані/)).toBeInTheDocument()
-    expect(screen.getByText(/підтвердження від неї не буде/)).toBeInTheDocument()
+    expect(screen.getByText(/зі слів власника/)).toBeInTheDocument()
     expect(screen.getByLabelText('Коли віддали')).toHaveAttribute(
       'max',
       new Date().toISOString().slice(0, 10),
@@ -180,6 +180,104 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
 
       expect(createCall).toBeDefined()
       expect(JSON.stringify(createCall?.[1]?.body ?? {})).not.toContain('alias')
+    })
+  })
+
+  describe('10i.3: другий шлях — запит підтвердження гостя', () => {
+    const fill = async () => {
+      await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'contact-1')
+      await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
+    }
+
+    it('обидва шляхи видно: ручний запис (зі слів власника) і запит підтвердження', async () => {
+      mockContacts([CONTACT])
+      setup()
+
+      expect(
+        await screen.findByRole('button', { name: 'Записати гостьову позику' }),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }),
+      ).toBeInTheDocument()
+      expect(screen.getByText(/зі слів власника/)).toBeInTheDocument()
+      expect(screen.getByText(/отримання не вважається підтвердженим/)).toBeInTheDocument()
+    })
+
+    it('POST /guest-loan-confirmations з тими самими полями; onCreated не викликається, поки власник не закриє; веде до видачі посилання', async () => {
+      mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
+        if (path === '/me/external-borrowers') return Promise.resolve({ contacts: [CONTACT] })
+        if (path === '/guest-loan-confirmations' && options?.method === 'POST') {
+          return Promise.resolve({ confirmation: { id: 'conf-new' } })
+        }
+
+        return Promise.reject(new Error(`unexpected ${path}`))
+      })
+
+      const { onCreated } = setup()
+
+      await fill()
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }),
+      )
+
+      expect(await screen.findByText(/Запит підтвердження створено/)).toBeInTheDocument()
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/guest-loan-confirmations',
+        expect.objectContaining({
+          method: 'POST',
+          body: { copyId: 'copy-1', externalBorrowerId: 'contact-1', handedAt: '2026-09-01' },
+        }),
+      )
+      // Ручного запису 10f.3 не було.
+      expect(mockApiRequest).not.toHaveBeenCalledWith('/loans/guest', expect.anything())
+      expect(screen.getByText(/ще не підтверджене/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Видати посилання гостю' })).toHaveAttribute(
+        'href',
+        '/loans/guest?confirmationId=conf-new',
+      )
+      expect(onCreated).not.toHaveBeenCalled()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Закрити' }))
+
+      expect(onCreated).toHaveBeenCalled()
+    })
+
+    it('валідація спільна: без контакту й дати запит підтвердження не надсилається', async () => {
+      mockContacts([CONTACT])
+      setup()
+
+      await userEvent.click(
+        await screen.findByRole('button', { name: 'Записати й попросити підтвердження гостя' }),
+      )
+
+      expect(mockApiRequest).not.toHaveBeenCalledWith(
+        '/guest-loan-confirmations',
+        expect.anything(),
+      )
+    })
+
+    it('відмова API на запиті підтвердження показується, форма лишається', async () => {
+      mockApiRequest.mockImplementation((path: string) => {
+        if (path === '/me/external-borrowers') return Promise.resolve({ contacts: [CONTACT] })
+
+        return Promise.reject(
+          new ApiRequestError(409, {
+            code: 'LOAN_COPY_UNAVAILABLE',
+            message: 'Примірник не вільний',
+          }),
+        )
+      })
+
+      const { onCreated } = setup()
+
+      await fill()
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }),
+      )
+
+      expect(await screen.findByText('Примірник не вільний')).toBeInTheDocument()
+      expect(onCreated).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: 'Записати гостьову позику' })).toBeEnabled()
     })
   })
 })

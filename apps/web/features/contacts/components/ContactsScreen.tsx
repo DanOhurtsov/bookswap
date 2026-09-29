@@ -10,6 +10,7 @@ import {
   type ExternalBorrower,
 } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
+import { formatDateTime } from '@/app/lib/labels'
 import { validate } from '@/app/lib/validation'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TextField } from '@/components/Form/FormFields'
@@ -244,6 +245,15 @@ function ContactRow({
     return (
       <li className="book">
         <span className="book__title">{contact.alias}</span>
+        {/* Stage 10 (10i.3): підтверджене гостем — лише тут, у приватному контексті контакту власника.
+            Alias власника не змінюється; після видалення контакту це не відновлюється. */}
+        {contact.guestNickname !== null && contact.guestEmail !== null && (
+          <span className="book__meta" data-testid="contact-guest-details">
+            Підтверджено гостем: нікнейм «{contact.guestNickname}», email {contact.guestEmail}
+            {contact.guestEmailVerifiedAt !== null &&
+              ` (контроль email підтверджено ${formatDateTime(contact.guestEmailVerifiedAt)})`}
+          </span>
+        )}
         <div className="person__actions">
           <button
             type="button"
@@ -274,7 +284,7 @@ function ContactRow({
         <ConfirmDialog
           open={confirmingDelete}
           title="Видалити контакт?"
-          description="Видалити можна лише за відсутності активної гостьової позики й незакритої втрати. Факт минулих позик і дати лишаться в історії — зникне лише псевдонім."
+          description="Видалити можна лише за відсутності активної гостьової позики й незакритої втрати. Факт минулих позик, дати й джерело факту лишаться в історії — зникнуть лише псевдонім та підтверджені гостем нікнейм і email."
           confirmLabel="Видалити"
           pending={deleting}
           onConfirm={() => {

@@ -19,6 +19,9 @@ const contact = (id: string, alias: string) => ({
   alias,
   ownerInformedAt: '2026-09-27T10:00:00.000Z',
   createdAt: '2026-09-27T10:00:00.000Z',
+  guestNickname: null as string | null,
+  guestEmail: null as string | null,
+  guestEmailVerifiedAt: null as string | null,
 })
 
 let stored: ReturnType<typeof contact>[] = []
@@ -82,6 +85,27 @@ beforeEach(() => {
 })
 
 describe('ContactsScreen', () => {
+  it('10i.3: confirmed guest nickname/email are shown to the owner only in the contact, alias untouched; absent when not confirmed', async () => {
+    stored = [
+      {
+        ...contact('c-confirmed', 'Мій Псевдонім'),
+        guestNickname: 'Нік Гостя',
+        guestEmail: 'guest-b@guest.invalid',
+        guestEmailVerifiedAt: '2026-09-29T10:00:00.000Z',
+      },
+      contact('c-plain', 'Без відповіді'),
+    ]
+    render(<ContactsScreen />)
+
+    const details = await screen.findByTestId('contact-guest-details')
+
+    expect(details).toHaveTextContent('Нік Гостя')
+    expect(details).toHaveTextContent('guest-b@guest.invalid')
+    expect(screen.getByText('Мій Псевдонім')).toBeInTheDocument()
+    // Контакт без підтвердженої відповіді нічого не показує.
+    expect(screen.getAllByTestId('contact-guest-details')).toHaveLength(1)
+  })
+
   it('shows the synthetic-data banner and a loading state first', async () => {
     apiRequest.mockImplementation(() => new Promise(() => undefined))
     render(<ContactsScreen />)

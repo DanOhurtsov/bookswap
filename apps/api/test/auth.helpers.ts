@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config'
 import { Test, type TestingModuleBuilder } from '@nestjs/testing'
 import { ThrottlerGuard } from '@nestjs/throttler'
 import type { INestApplication } from '@nestjs/common'
@@ -70,6 +71,14 @@ export async function createTestApp({
   const app = moduleRef.createNestApplication<INestApplication<App>>()
 
   configureApp(app, { trustProxy })
+
+  // Те саме, що `main.ts`: браузер на `WEB_ORIGIN` ходить в API з кукі. Для supertest це нічого не змінює
+  // (він не надсилає `Origin`), але без цього `createTestApp()` був би не тим самим застосунком, що `main.ts`,
+  // і браузерний e2e (`test:browser`) не міг би працювати проти нього.
+  app.enableCors({
+    origin: app.get(ConfigService).getOrThrow<string>('WEB_ORIGIN'),
+    credentials: true,
+  })
 
   // `listen(0)`, а не `init()`: один слухач на весь файл.
   //

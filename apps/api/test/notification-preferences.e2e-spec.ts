@@ -7,6 +7,7 @@ import {
   PREFERENCE_CHANNEL,
   apiErrorSchema,
   defaultPreferenceEnabled,
+  isGuestResponseNotificationType,
   notificationListResponseSchema,
   notificationPreferencesResponseSchema,
 } from '@bookswap/shared'
@@ -119,10 +120,14 @@ describe('Налаштування сповіщень (e2e)', () => {
       )
 
       expect(after.channels.telegram.connected).toBe(true)
-      // §7.6: «після підключення Telegram — усе в TELEGRAM».
+      // §7.6: «після підключення Telegram — усе в TELEGRAM» — крім in-app-only типів (10i.3, відповіді гостя).
       expect(
-        after.preferences.filter((row) => row.channel === 'TELEGRAM').every((row) => row.enabled),
+        after.preferences
+          .filter((row) => row.channel === 'TELEGRAM' && !isGuestResponseNotificationType(row.type))
+          .every((row) => row.enabled),
       ).toBe(true)
+      expect(cell(after.preferences, 'GUEST_LOAN_RECEIVED', 'TELEGRAM')).toBe(false)
+      expect(cell(after.preferences, 'GUEST_LOAN_DENIED', 'TELEGRAM')).toBe(false)
       // …«з можливістю вимкнути email», а не з автоматичним вимкненням.
       expect(cell(after.preferences, 'LOAN_REQUESTED', 'EMAIL')).toBe(true)
     })

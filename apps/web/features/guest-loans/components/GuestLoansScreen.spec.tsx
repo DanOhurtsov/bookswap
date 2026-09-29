@@ -70,6 +70,9 @@ beforeAll(() => {
   }
 })
 
+/** 10i.3: екран тягне ще й `/guest-loan-confirmations` — тут він порожній, якщо тест не каже іншого. */
+const NO_CONFIRMATIONS = Promise.resolve({ confirmations: [] })
+
 beforeEach(() => {
   mockApiRequest.mockReset()
   parameters = new URLSearchParams()
@@ -84,11 +87,16 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
   })
 
   it('empty: пояснює, де записати гостьову позику', async () => {
-    mockApiRequest.mockResolvedValue({ loans: [] })
+    mockApiRequest.mockImplementation((path: string) =>
+      path === '/guest-loan-confirmations' ? NO_CONFIRMATIONS : Promise.resolve({ loans: [] }),
+    )
     render(<GuestLoansScreen />)
 
     expect(await screen.findByText(/Гостьових позик поки немає/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'бібліотеці' })).toHaveAttribute('href', '/library')
+    // Обидва розділи (запити підтвердження й позики) ведуть до бібліотеки.
+    for (const link of screen.getAllByRole('link', { name: 'бібліотеці' })) {
+      expect(link).toHaveAttribute('href', '/library')
+    }
   })
 
   it('error: показує повідомлення сервера', async () => {
@@ -97,11 +105,13 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
     )
     render(<GuestLoansScreen />)
 
-    expect(await screen.findByText(/Збій/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/Збій/)).length).toBeGreaterThan(0)
   })
 
   it('ready: список показує книжку, гостя й попередження про синтетичні дані', async () => {
-    mockApiRequest.mockResolvedValue({ loans: [LOAN] })
+    mockApiRequest.mockImplementation((path: string) =>
+      path === '/guest-loan-confirmations' ? NO_CONFIRMATIONS : Promise.resolve({ loans: [LOAN] }),
+    )
     render(<GuestLoansScreen />)
 
     expect(await screen.findByText('Тестова книга')).toBeInTheDocument()
@@ -110,7 +120,11 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
   })
 
   it('приватність: контакт видалено — показує «контакт видалено», а не старий alias', async () => {
-    mockApiRequest.mockResolvedValue({ loans: [{ ...LOAN, contact: null }] })
+    mockApiRequest.mockImplementation((path: string) =>
+      path === '/guest-loan-confirmations'
+        ? NO_CONFIRMATIONS
+        : Promise.resolve({ loans: [{ ...LOAN, contact: null }] }),
+    )
     render(<GuestLoansScreen />)
 
     expect(await screen.findByText(/контакт видалено/)).toBeInTheDocument()
@@ -132,6 +146,7 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
 
   it('дія «Повернуто»: PATCH, потім оновлення списку', async () => {
     mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === '/guest-loan-confirmations') return NO_CONFIRMATIONS
       if (path === '/loans/guest' && options?.method === undefined) {
         return Promise.resolve({ loans: [LOAN] })
       }
@@ -166,6 +181,7 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
     let listCallCount = 0
 
     mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === '/guest-loan-confirmations') return NO_CONFIRMATIONS
       if (path === '/loans/guest' && options?.method === undefined) {
         listCallCount += 1
         return Promise.resolve({ loans: [LOAN] })
@@ -191,6 +207,7 @@ describe('GuestLoansScreen (Stage 10, 10f.3)', () => {
 
   it('дія «Втрачено» після підтвердження: PATCH з action mark_lost', async () => {
     mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path === '/guest-loan-confirmations') return NO_CONFIRMATIONS
       if (path === '/loans/guest' && options?.method === undefined) {
         return Promise.resolve({ loans: [LOAN] })
       }

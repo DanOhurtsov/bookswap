@@ -20,6 +20,7 @@
     "lint": "eslint src test prisma prisma.config.ts --max-warnings=0",
     "test": "jest",
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
+    "test:browser": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-browser.json",
     "test:db": "pnpm run test:e2e && node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-db.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rimraf dist .turbo src/generated *.tsbuildinfo"
@@ -60,6 +61,7 @@
     "@types/yauzl": "^3.4.0",
     "dotenv": "^17.4.2",
     "jest": "^30.4.2",
+    "playwright-core": "1.63.0",
     "prisma": "^7.9.1",
     "rimraf": "^6.0.1",
     "supertest": "^7.2.2",

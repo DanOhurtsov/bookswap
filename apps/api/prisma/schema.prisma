@@ -847,6 +847,9 @@ enum NotificationType {
   LOAN_RECORD_DECLINED
   LOAN_RECORD_WITHDRAWN
   LOAN_RECORD_AMENDED
+  /// Stage 10 (10i.3): відповідь гостя на запит підтвердження. Лише in-app (технічна пропозиція).
+  GUEST_LOAN_RECEIVED
+  GUEST_LOAN_DENIED
 }
 
 enum Channel {

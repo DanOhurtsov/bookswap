@@ -85,3 +85,46 @@ jobs:
 
       - name: Тести constraint'ів і e2e
         run: pnpm test:db
+
+  # Браузерний e2e гостьового потоку (Stage 10, 10i.3). Окрема job: потребує PostgreSQL, Chromium і його
+  # системних бібліотек, яких немає в `pnpm install`, тому в локальний `gate.sh` не входить. Відсутній
+  # Chromium дає ПАДІННЯ тесту, а не пропуск. Поштовий провайдер у тесті примусово `dev` (browser-env.ts).
+  browser-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: bookswap
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: bookswap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bookswap -d bookswap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Згенерувати Prisma Client
+        run: pnpm db:generate
+
+      # Версія браузера визначається закріпленою версією playwright-core (apps/api/package.json).
+      - name: Chromium і його системні залежності
+        run: pnpm --filter @bookswap/api exec playwright-core install --with-deps chromium
+
+      - name: Браузерний e2e
+        run: pnpm --filter @bookswap/api test:browser

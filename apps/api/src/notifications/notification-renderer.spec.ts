@@ -1,4 +1,4 @@
-import { NOTIFICATION_TYPE } from '@bookswap/shared'
+import { NOTIFICATION_TYPE, type Channel } from '@bookswap/shared'
 import { renderNotification, type NotificationView } from './notification-renderer'
 
 const base: NotificationView = {
@@ -41,6 +41,68 @@ describe('renderNotification: сповіщення запису наявної �
     ] as const) {
       expect(record(type).subject).not.toMatch(/запит на|погоджено|просить/i)
     }
+  })
+})
+
+describe('renderNotification: відповідь гостя (Stage 10, 10i.3)', () => {
+  const guest = (type: NotificationView['type'], channel: Channel = 'IN_APP') =>
+    renderNotification(
+      {
+        ...base,
+        type,
+        payload: { loanId: 'loan-1', copyId: 'copy-1', confirmationId: 'conf-1' },
+        actorName: null,
+      },
+      channel,
+    )
+
+  it('IN_APP: змістовний текст без кнопок, посилання на екран гостьових позик власника', () => {
+    for (const type of ['GUEST_LOAN_RECEIVED', 'GUEST_LOAN_DENIED'] as const) {
+      const rendered = guest(type)
+
+      expect(rendered.actions).toEqual([])
+      expect(rendered.subject).toContain('Шантарам')
+      expect(rendered.body).toContain('/loans/guest?confirmationId=conf-1')
+      expect(rendered.body).not.toContain('/loans?loanId')
+    }
+  })
+
+  it('IN_APP DENIED називає розбіжність, а не повернення, і не обіцяє звільнення примірника', () => {
+    const rendered = guest('GUEST_LOAN_DENIED')
+
+    expect(rendered.subject).toContain('заперечує')
+    expect(rendered.body).toContain('не повернення')
+    expect(rendered.body).toContain('недоступним')
+  })
+
+  it('IN_APP не стверджує доведену особу й не має ні імені гостя, ні «хтось із друзів»', () => {
+    for (const type of ['GUEST_LOAN_RECEIVED', 'GUEST_LOAN_DENIED'] as const) {
+      const rendered = guest(type)
+
+      expect(`${rendered.subject}\n${rendered.body}`).not.toMatch(
+        /Хтось із друзів|особу|ідентифік/i,
+      )
+    }
+  })
+
+  it('EMAIL: строго загальний і однаковий для обох типів, без книжки, результату та id запиту', () => {
+    const received = guest('GUEST_LOAN_RECEIVED', 'EMAIL')
+    const denied = guest('GUEST_LOAN_DENIED', 'EMAIL')
+
+    expect(received).toEqual(denied)
+    expect(received.subject).toBe('У вас нове повідомлення в BookSwap')
+    expect(received.body).toBe(
+      'У вас нове повідомлення в BookSwap\n\nЩоб його прочитати, увійдіть у BookSwap: https://bookswap.example/login',
+    )
+    expect(received.actions).toEqual([])
+    expect(`${received.subject}${received.body}`).not.toMatch(
+      /Шантарам|conf-1|loan-1|copy-1|гість|отрим|заперечує/i,
+    )
+  })
+
+  it('TELEGRAM для цих типів не рендериться', () => {
+    expect(() => guest('GUEST_LOAN_RECEIVED', 'TELEGRAM')).toThrow()
+    expect(() => guest('GUEST_LOAN_DENIED', 'TELEGRAM')).toThrow()
   })
 })
 

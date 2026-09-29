@@ -7,6 +7,7 @@ import {
   DIGEST_NOTIFICATION_TYPE,
   NOTIFICATION_TYPE,
   isDigestNotificationType,
+  isGuestResponseNotificationType,
   telegramLinkResponseSchema,
   type NotificationPreferencesResponse,
   type NotificationType,
@@ -318,6 +319,11 @@ function SettingsForm({ data, reload, notice, onNotice }: FormProps) {
                     {isDigestNotificationType(type) && (
                       <span className="matrix__detail">одним дайджестом або повідомленням</span>
                     )}
+                    {isGuestResponseNotificationType(type) && (
+                      <span className="matrix__detail">
+                        пошта — лише загальне нагадування без подробиць; Telegram недоступний
+                      </span>
+                    )}
                   </th>
                   {states.map((channel) => (
                     <td key={channel.channel}>
@@ -325,7 +331,11 @@ function SettingsForm({ data, reload, notice, onNotice }: FormProps) {
                         type={type}
                         channel={channel.channel}
                         checked={matrix[type][channel.channel]}
-                        disabled={busy || !channel.editable}
+                        disabled={
+                          busy ||
+                          !channel.editable ||
+                          (channel.channel === 'TELEGRAM' && isGuestResponseNotificationType(type))
+                        }
                         onToggle={() => {
                           setMatrix(toggleCell(matrix, type, channel.channel))
                         }}

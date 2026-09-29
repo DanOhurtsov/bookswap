@@ -386,6 +386,19 @@ export class GuestLoanResponseService {
       actorId: null,
     })
 
+    // 10i.3: in-app-сповіщення власнику — в ТІЙ САМІЙ транзакції, що й відповідь: збій запису відкочує
+    // усе. Лише id (позика, примірник, запит): ні нікнейма, ні email гостя тут немає й не буде. Один факт —
+    // одна Notification; IN_APP + (за налаштуваннями) EMAIL — рядки доставок цієї ж Notification, Telegram
+    // для типу недоступний (`GUEST_RESPONSE_NOTIFICATION_TYPE`). Лист рендериться загальним (renderer).
+    await this.notifications.create(
+      {
+        userId: ownerId,
+        type: received ? 'GUEST_LOAN_RECEIVED' : 'GUEST_LOAN_DENIED',
+        payload: { loanId: loan.id, copyId: copy.id, confirmationId: id },
+      },
+      tx,
+    )
+
     // Доведена відповідь (обидві) пишеться приватно в контакт і ЗАМІНЮЄ попередні гостьові значення;
     // alias власника не змінюється (§0.13 п. 1, Q27). Час — момент перевірки коду, не відповіді.
     await tx.externalBorrower.update({

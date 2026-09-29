@@ -75,11 +75,14 @@ export {
   DIGEST_NOTIFICATION_TYPE,
   FLOW_CRITICAL_NOTIFICATION_TYPE,
   IMMEDIATE_NOTIFICATION_TYPE,
+  GUEST_RESPONSE_NOTIFICATION_TYPE,
   NOTIFICATION_TYPE,
   defaultPreferenceEnabled,
   isDigestNotificationType,
+  isGuestResponseNotificationType,
   notificationTypeSchema,
   type DigestNotificationType,
+  type GuestResponseNotificationType,
   type NotificationType,
 } from './domain/notification'
 export {
