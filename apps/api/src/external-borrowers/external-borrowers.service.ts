@@ -11,6 +11,7 @@ import type { UserModel } from '../generated/prisma/models'
 import { InvitationsService } from '../invitations/invitations.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { toExternalBorrower } from './external-borrower.mapper'
+import { RETENTION_NO_LOAN_WINDOW_MS } from './retention'
 
 const EXCLUSIVE_STATUSES: readonly string[] = EXCLUSIVE_LOAN_STATUS
 
@@ -27,9 +28,22 @@ export class ExternalBorrowersService {
     private readonly invitations: InvitationsService,
   ) {}
 
+  /**
+   * Stage 10 (10h, Q2 §0.9 execution plan): контакт без жодної позики зберігається 90 днів від
+   * `createdAt` — `retainUntil` встановлюється одразу, тут, а не лишається `NULL` до першої
+   * позики/чистки. `createdAt`/`retainUntil` рахуються від того самого `now`, щоб різниця між
+   * ними була рівно 90 днів, без дрейфу від окремого виклику БД `now()`.
+   */
   async create(ownerId: string, alias: string): Promise<ExternalBorrowerResponse> {
+    const now = new Date()
     const row = await this.prisma.externalBorrower.create({
-      data: { ownerId, alias, ownerInformedAt: new Date() },
+      data: {
+        ownerId,
+        alias,
+        ownerInformedAt: now,
+        createdAt: now,
+        retainUntil: new Date(now.getTime() + RETENTION_NO_LOAN_WINDOW_MS),
+      },
     })
 
     return { contact: toExternalBorrower(row) }

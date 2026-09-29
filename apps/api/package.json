@@ -9,6 +9,7 @@
     "start": "node dist/main",
     "funnel:report": "pnpm run build && node dist/cli/funnel-report.js",
     "merge:works": "pnpm run build && node dist/cli/merge-works.js",
+    "retention:guest-contacts": "pnpm run build && node dist/cli/guest-contact-retention-cleanup.js",
     "template:xlsx": "tsx src/cli/build-import-template.ts",
     "generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

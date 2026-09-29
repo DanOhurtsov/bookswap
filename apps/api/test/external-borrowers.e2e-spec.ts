@@ -85,7 +85,7 @@ describe('Stage 10 (10f.2): приватні контакти (e2e)', () => {
   })
 
   describe('створення', () => {
-    it('201: ownerId із сесії, ownerInformedAt від сервера, retainUntil порожній, alias обрізано', async () => {
+    it('201: ownerId із сесії, ownerInformedAt від сервера, retainUntil=createdAt+90д (10h, Q2), alias обрізано', async () => {
       const owner = await registerAccount(app, 'r10f2-create')
       const before = Date.now()
       const response = await request(http())
@@ -103,8 +103,11 @@ describe('Stage 10 (10f.2): приватні контакти (e2e)', () => {
       const row = await prisma.externalBorrower.findUniqueOrThrow({ where: { id: contact.id } })
 
       expect(row.ownerId).toBe(owner.id)
-      expect(row.retainUntil).toBeNull()
       expect(row.ownerInformedAt).not.toBeNull()
+      // 10h (Q2, §0.9 execution plan): контакт без жодної позики — retainUntil = createdAt + 90д,
+      // встановлюється одразу при створенні (не лишається NULL до першої позики/чистки).
+      expect(row.retainUntil).not.toBeNull()
+      expect(row.retainUntil?.getTime()).toBe(row.createdAt.getTime() + 90 * 24 * 60 * 60 * 1000)
     })
 
     it.each([

@@ -10,6 +10,7 @@ import {
 } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
 import { isUniqueViolationOn } from '../common/prisma-errors'
+import { recomputeRetainUntil } from '../external-borrowers/retention'
 import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../prisma/prisma.service'
 import {
@@ -235,6 +236,11 @@ export class GuestLoanService {
       actorId: ownerId,
     })
 
+    // Stage 10 (10h, §0.9 execution plan): нова активна позика скидає retainUntil контакту в
+    // NULL — той самий перерахунок, що й на return/mark_lost/recover/close_loss. ExternalBorrower
+    // уже locований кроком 1 вище (§6.11.2) — тут повторного локу не потрібно.
+    await recomputeRetainUntil(tx, request.externalBorrowerId)
+
     return requireGuestRow(
       await tx.loan.findUniqueOrThrow({ where: { id: created.id }, include: WITH_GUEST_CONTEXT }),
     )
@@ -336,7 +342,31 @@ export class GuestLoanService {
     id: string,
     request: UpdateGuestLoanRequest,
   ): Promise<GuestLoanRow> {
-    // 1. Copy — локується через JOIN з Loan, той самий патерн, що в registered `runTransition`
+    // 0. Stage 10 (10h): `return`/`mark_lost`/`recover`/`close_loss` тепер теж пишуть
+    //    ExternalBorrower.retainUntil (крок 4 нижче) — і мусять тому теж дотримуватись
+    //    глобального порядку локів `ExternalBorrower → Copy → Loan` (§6.11.2), а не брати EB
+    //    ПІСЛЯ Copy/Loan (це дало б порядок Copy → Loan → EB — зворотний до DELETE і цикл
+    //    очікування, `retention.ts` docstring). Неlocований пошук лише вирішує, ЯКИЙ контакт
+    //    locати першим — не авторизує нічого сам: авторитетна перевірка лишається кроком 2
+    //    нижче (Copy-через-Loan join), як і раніше.
+    const [lookup] = await tx.$queryRaw<{ borrowerContactId: string | null }[]>`
+      SELECT "borrowerContactId" FROM "Loan"
+      WHERE "id" = ${id} AND "ownerId" = ${ownerId}
+        AND "origin" = 'RECORDED_GUEST' AND "borrowerKind" = 'GUEST'
+    `
+    const contactId = lookup?.borrowerContactId ?? null
+
+    // 1. ExternalBorrower — locується ПЕРШИМ, коли позика досі вказує на контакт (не після
+    //    DELETE, Q3c). Авторизація (ownerId) вбудована в сам запит; відсутній рядок (чужий
+    //    контакт чи контакт, щойно стертий конкурентним DELETE) — не помилка тут: крок 4 нижче
+    //    просто не знайде контакту й пропустить перерахунок.
+    if (contactId !== null) {
+      await tx.$queryRaw`
+        SELECT "id" FROM "ExternalBorrower" WHERE "id" = ${contactId} AND "ownerId" = ${ownerId} FOR UPDATE
+      `
+    }
+
+    // 2. Copy — локується через JOIN з Loan, той самий патерн, що в registered `runTransition`
     //    (loan.service.ts:600-608). Авторизація (ownerId) **і** межа валідних гостьових статусів
     //    (GUEST_LOAN_ROW/GUEST_LOAN_STATUSES — CHECK `loan_borrower_kind_valid` статус не обмежує)
     //    застосовані ТУТ, у самому локувальному запиті: чужа, неіснуюча чи синтетична позика з
@@ -354,7 +384,7 @@ export class GuestLoanService {
 
     if (locked === undefined) throw notFoundLoan()
 
-    // 2. Перечитування ПІСЛЯ локу — обов'язково (§6.11.2): рішення на знімку до очікування було б
+    // 3. Перечитування ПІСЛЯ локу — обов'язково (§6.11.2): рішення на знімку до очікування було б
     //    застарілим, якщо конкурент саме встиг завершити свій перехід, поки ми чекали.
     const loanRow = await tx.loan.findUnique({ where: { id }, include: WITH_GUEST_CONTEXT })
     const copy = await tx.copy.findUnique({ where: { id: locked.copyId } })
@@ -379,7 +409,7 @@ export class GuestLoanService {
       )
     }
 
-    // 3. `recover`/`close_loss`: додатковий, явний лок САМЕ рядка `Loan` — спільний для обох дій,
+    // 4. `recover`/`close_loss`: додатковий, явний лок САМЕ рядка `Loan` — спільний для обох дій,
     //    незалежно від того, яка з них також торкається `Copy`. Це і є точка серіалізації
     //    `recover ∥ close_loss` (§6.11.2): без неї два часткові унікальні індекси на різні `type`
     //    не гарантують, що одна дія побачить факт закінченої іншої.
@@ -440,7 +470,7 @@ export class GuestLoanService {
       }
     }
 
-    // 4. Структурна передумова на Copy (§6.11.2, розширена модель тримача для гостя) — усі три
+    // 5. Структурна передумова на Copy (§6.11.2, розширена модель тримача для гостя) — усі три
     //    умови обов'язкові, жодна не замінює іншу:
     //    (a) Copy.status у стані, якого вимагає перехід;
     //    (b) currentHolderId === null — гостя ніколи не тримає зареєстрований користувач, тож
@@ -499,6 +529,15 @@ export class GuestLoanService {
       effectiveAt,
     })
 
+    // 6. Stage 10 (10h, §0.7/§0.7.1/§0.9 execution plan): перерахунок retainUntil у ТІЙ САМІЙ
+    //    транзакції, що й перехід (§6.11: «значення перераховується в тій самій транзакції, що й
+    //    відповідний перехід»). `loanRow.borrowerContactId` — стан ПІСЛЯ перечитування кроком 3,
+    //    жоден з чотирьох переходів це поле не змінює, тож воно й лишається актуальним тут; `null`
+    //    означає, що контакт уже стерто чисткою до цього виклику (Q3c) — перераховувати нічого.
+    if (loanRow.borrowerContactId !== null) {
+      await recomputeRetainUntil(tx, loanRow.borrowerContactId)
+    }
+
     return requireGuestRow(
       await tx.loan.findUniqueOrThrow({ where: { id: loan.id }, include: WITH_GUEST_CONTEXT }),
     )
@@ -521,6 +560,7 @@ type TransactionClient = Pick<
   | 'loan'
   | 'loanEvent'
   | 'copy'
+  | 'externalBorrower'
   | 'notification'
   | 'notificationDelivery'
   | 'notificationPreference'
