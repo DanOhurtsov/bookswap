@@ -46,6 +46,8 @@ const COPY_CATALOG = {
 const WITH_SIDES = {
   owner: { select: PUBLIC_USER_FIELDS },
   borrower: { select: PUBLIC_USER_FIELDS },
+  // Stage 10 (10i.1): лише статус — джерело доказу гостьової передачі виводиться з нього.
+  guestConfirmation: { select: { status: true } },
 } as const
 
 /**

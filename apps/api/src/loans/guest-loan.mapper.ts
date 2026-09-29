@@ -1,4 +1,10 @@
-import type { GuestLoan, LoanEventType, LoanStatus } from '@bookswap/shared'
+import {
+  guestLoanEvidenceOf,
+  type GuestLoan,
+  type GuestLoanConfirmationStatus,
+  type LoanEventType,
+  type LoanStatus,
+} from '@bookswap/shared'
 import {
   toEdition,
   toWork,
@@ -47,6 +53,11 @@ export type GuestLoanRow = Pick<LoanModel, 'id' | 'createdAt' | 'returnedAt' | '
   borrowerContact: Pick<ExternalBorrowerModel, 'id' | 'alias'> | null
   /** Лише `RECOVERED`/`LOSS_CLOSED` — решта audit trail цим контрактом не віддається. */
   events: GuestLoanEventRow[]
+  /**
+   * Stage 10 (10i.1): лише статус рядка підтвердження (джерело доказу виводиться з нього). `null` для
+   * старих ручних позик 10f.3, що рядка підтвердження не мають.
+   */
+  guestConfirmation: { status: GuestLoanConfirmationStatus } | null
 }
 
 /** Точно `GuestLoanRow`, лише зі `status`/`handedAt` ще не звуженими — форма, яку справді повертає Prisma. */
@@ -68,6 +79,24 @@ export function asGuestLoan(row: UnvalidatedGuestLoanRow): GuestLoanRow | null {
   return row as GuestLoanRow
 }
 
+/**
+ * Джерело доказу для позики, що вже перейшла в `HANDED_OVER`/`RETURNED`/`LOST`: без рядка підтвердження
+ * (старий ручний запис) чи після `OWNER_RECORDED` — зі слів власника; після `RECEIVED` — підтверджено
+ * гостем. Інші стани (`OPEN`/`DENIED`/`CANCELLED`) для такої позики неможливі — це порушена цілісність.
+ */
+function evidenceOfActive(loan: GuestLoanRow): GuestLoan['evidence'] {
+  const evidence = guestLoanEvidenceOf(loan.guestConfirmation?.status ?? null)
+
+  if (evidence !== 'OWNER_STATEMENT' && evidence !== 'GUEST_CONFIRMED') {
+    throw new Error(
+      `Позика ${loan.id}: статус ${loan.status} несумісний зі станом підтвердження ` +
+        `${loan.guestConfirmation?.status ?? 'null'} — цілісність даних порушена`,
+    )
+  }
+
+  return evidence
+}
+
 export function toGuestLoan(loan: GuestLoanRow, now: Date = new Date()): GuestLoan {
   const recovery = loan.events.find((event) => event.type === 'RECOVERED')
   const lossClosure = loan.events.find((event) => event.type === 'LOSS_CLOSED')
@@ -75,6 +104,7 @@ export function toGuestLoan(loan: GuestLoanRow, now: Date = new Date()): GuestLo
   return {
     id: loan.id,
     status: loan.status,
+    evidence: evidenceOfActive(loan),
     isOverdue: isOverdue(loan, now),
     createdAt: loan.createdAt.toISOString(),
     handedAt: loan.handedAt.toISOString(),

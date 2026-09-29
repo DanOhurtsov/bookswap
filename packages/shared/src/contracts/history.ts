@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { conditionSchema, copyStatusSchema } from '../domain/copy'
-import { loanOriginSchema, loanStatusSchema } from '../domain/loan'
+import { guestLoanEvidenceSchema, loanOriginSchema, loanStatusSchema } from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { publicUserSchema } from './user'
 
@@ -33,6 +33,12 @@ const historyFactsSchema = z.object({
    * запит: `REQUESTED` — звичайний request-flow, інакше позику записав власник.
    */
   origin: loanOriginSchema,
+  /**
+   * Stage 10 (10i.1): джерело доказу гостьової передачі, виведене з рядка підтвердження — «зі слів
+   * власника» / «очікується відповідь» / «підтверджено гостем» / «гість заперечує». `null` для
+   * позик не-гостьового походження. Лише факт про джерело, без alias/нікнейма/email.
+   */
+  guestEvidence: guestLoanEvidenceSchema.nullable(),
   /**
    * Stage 10 (T2): `null` для записаних власником позик — запиту не було, і дата не вигадується.
    * Але БД має дефолт `now()`, тож ненульове значення при `origin ≠ REQUESTED` не означає запиту:

@@ -53,6 +53,7 @@ const WITH_GUEST_CONTEXT = {
     },
   },
   borrowerContact: { select: { id: true, alias: true } },
+  guestConfirmation: { select: { status: true } },
   events: {
     where: { type: { in: CLOSURE_EVENT_TYPES } },
     select: { type: true, occurredAt: true, effectiveAt: true },
@@ -250,8 +251,11 @@ export class GuestLoanService {
    * §6.2 execution plan: наявні `REQUESTED` (`origin = REQUESTED`, `borrowerKind = REGISTERED`) на
    * цей `Copy` відхиляються атомарно в момент створення гостьової позики — той самий механізм, що
    * `rejectRivals` у `LoanService` (§5.1), але для guest-create, не для `approve`/`confirm_record`.
+   *
+   * Публічний (10i.1): той самий механізм використовує перехід «запис лише зі слів власника» в
+   * `GuestLoanConfirmationService`. Викликач мусить тримати локи `ExternalBorrower → Copy`.
    */
-  private async rejectRequestedRivals(
+  async rejectRequestedRivals(
     tx: TransactionClient,
     copyId: string,
     actorId: string,
@@ -590,7 +594,7 @@ function sameOrBothNull(one: string | null, other: string | null): boolean {
   return one === other
 }
 
-function assertSingleRow(count: number): void {
+export function assertSingleRow(count: number): void {
   if (count !== 1) {
     throw new ApiException(
       API_ERROR_CODES.CONFLICT,
@@ -601,12 +605,12 @@ function assertSingleRow(count: number): void {
 }
 
 /** Фактична дата передачі — початок доби UTC (день без часу, як у `LoanService`). */
-function toHandedDate(day: string): Date {
+export function toHandedDate(day: string): Date {
   return new Date(`${day}T00:00:00.000Z`)
 }
 
 /** Той самий принцип, що `assertRecordDates` у `LoanService` (10e): не в майбутньому, не раніше передачі. */
-function assertGuestLoanDates(handedOn: string, dueOn: string | null, now: Date): void {
+export function assertGuestLoanDates(handedOn: string, dueOn: string | null, now: Date): void {
   if (handedOn > now.toISOString().slice(0, 10) || (dueOn !== null && dueOn < handedOn)) {
     throw new ApiException(
       API_ERROR_CODES.LOAN_RECORD_DATE_INVALID,
@@ -645,7 +649,7 @@ function alreadyClosed(): ApiException {
   )
 }
 
-function copyUnavailable(): ApiException {
+export function copyUnavailable(): ApiException {
   return new ApiException(
     API_ERROR_CODES.LOAN_COPY_UNAVAILABLE,
     'Цей примірник зараз не можна записати як позичений: він не вільний і не вдома',
@@ -653,14 +657,14 @@ function copyUnavailable(): ApiException {
   )
 }
 
-function notFoundCopy(): ApiException {
+export function notFoundCopy(): ApiException {
   return new ApiException(API_ERROR_CODES.NOT_FOUND, 'Примірника не знайдено', HttpStatus.NOT_FOUND)
 }
 
-function notFoundContact(): ApiException {
+export function notFoundContact(): ApiException {
   return new ApiException(API_ERROR_CODES.NOT_FOUND, 'Контакт не знайдено', HttpStatus.NOT_FOUND)
 }
 
-function notFoundLoan(): ApiException {
+export function notFoundLoan(): ApiException {
   return new ApiException(API_ERROR_CODES.NOT_FOUND, 'Позичання не знайдено', HttpStatus.NOT_FOUND)
 }

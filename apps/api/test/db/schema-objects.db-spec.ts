@@ -218,10 +218,14 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[0]?.definition).toMatch(/"currentHolderId" = "ownerId"/)
 
     // 2. Не вдома — лише LENT_OUT або UNAVAILABLE. RESERVED сюди не входить, тож
-    //    «домовлено» автоматично означає «ще вдома» (§5.2).
+    //    «домовлено» автоматично означає «ще вдома» (§5.2) — ЄДИНИЙ виняток (Stage 10, 10i.1):
+    //    RESERVED поза домом дозволений лише тоді, коли книжку тримає контакт-гість
+    //    (`heldByContactId IS NOT NULL`) — «фізично передано, гість ще не підтвердив».
     expect(rows[1]?.definition).toMatch(/LENT_OUT/)
     expect(rows[1]?.definition).toMatch(/UNAVAILABLE/)
-    expect(rows[1]?.definition).not.toMatch(/RESERVED/)
+    expect(rows[1]?.definition).toMatch(
+      /RESERVED'::"CopyStatus"\) AND \("heldByContactId" IS NOT NULL\)/,
+    )
 
     // 3. Зворотний бік: LENT_OUT означає, що книжка фізично в іншої людини.
     //    Stage 10: «не вдома» = NOT(home), де home враховує NULL-тримача (COALESCE) і контакт.
@@ -229,6 +233,31 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[2]?.definition).toMatch(/COALESCE/)
     expect(rows[2]?.definition).toMatch(/"heldByContactId" IS NULL/)
     expect(rows[3]?.definition).toMatch(/"currentHolderId" IS NULL/)
+  })
+
+  it('Stage 10 (10i.1): CHECK-обмеження ExternalBorrower і GuestLoanConfirmation існують', async () => {
+    const borrower = await prisma.$queryRaw<{ conname: string; definition: string }[]>`
+      SELECT conname, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"ExternalBorrower"'::regclass AND contype = 'c'
+      ORDER BY conname
+    `
+
+    expect(borrower.map((row) => row.conname)).toEqual([
+      'external_borrower_guest_identity_all_or_none',
+    ])
+    expect(borrower[0]?.definition).toMatch(/"guestNickname" IS NULL/)
+    expect(borrower[0]?.definition).toMatch(/"guestEmailVerifiedAt" IS NULL/)
+
+    const confirmation = await prisma.$queryRaw<{ conname: string; definition: string }[]>`
+      SELECT conname, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"GuestLoanConfirmation"'::regclass AND contype = 'c'
+      ORDER BY conname
+    `
+
+    expect(confirmation.map((row) => row.conname)).toEqual(['guest_loan_confirmation_resolved_at'])
+    expect(confirmation[0]?.definition).toMatch(/"resolvedAt" IS NULL/)
   })
 
   it('blockedById має зовнішній ключ на User — від нього залежить право (§6.2)', async () => {

@@ -106,8 +106,8 @@ export class ExternalBorrowersService {
    * контакт зупиняє транзакцію тут, до будь-якого запиту до `Copy`), потім явно й заздалегідь
    * locаються рядки `Copy`, яких за секунду до цього торкнеться `ON DELETE SET NULL`
    * (`schema.prisma:444`), потім усі позики контакту одразу (`ORDER BY "id"` — детермінований
-   * порядок для кількох рядків). Сам `DELETE` далі не бере жодного нового локу: каскад лише
-   * записує в уже заблоковані рядки.
+   * порядок для кількох рядків), потім (10i.1) рядки `GuestLoanConfirmation` контакту. Сам `DELETE`
+   * далі не бере жодного нового локу: каскад лише записує в уже заблоковані рядки.
    */
   async delete(ownerId: string, id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
@@ -125,6 +125,13 @@ export class ExternalBorrowersService {
 
       const loans = await tx.$queryRaw<{ id: string; status: string }[]>`
         SELECT "id", "status" FROM "Loan" WHERE "borrowerContactId" = ${id} ORDER BY "id" FOR UPDATE
+      `
+
+      // Stage 10 (10i.1): GuestLoanConfirmation — ЧЕТВЕРТИЙ ресурс порядку (`ExternalBorrower → Copy →
+      // Loan → GuestLoanConfirmation`). `DELETE` контакту записує в ці рядки (FK `SET NULL`), тож їх
+      // locаємо заздалегідь у детермінованому порядку, після `Loan` — так само, як `Copy`/`Loan`.
+      await tx.$queryRaw`
+        SELECT "id" FROM "GuestLoanConfirmation" WHERE "externalBorrowerId" = ${id} ORDER BY "id" FOR UPDATE
       `
 
       if (loans.some((loan) => EXCLUSIVE_STATUSES.includes(loan.status))) {

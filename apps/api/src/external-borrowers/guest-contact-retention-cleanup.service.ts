@@ -178,6 +178,14 @@ export class GuestContactRetentionCleanupService {
           WHERE "borrowerContactId" IN (${Prisma.join(ids)})
           ORDER BY "id" FOR UPDATE
         `
+        // 3b. GuestLoanConfirmation — четвертий ресурс (10i.1): `DELETE` контакту записує в ці рядки
+        //     (FK `SET NULL`), тож вони locаються тут, після `Loan`, у детермінованому порядку.
+        await tx.$queryRaw`
+          SELECT "id" FROM "GuestLoanConfirmation"
+          WHERE "externalBorrowerId" IN (${Prisma.join(ids)})
+          ORDER BY "id" FOR UPDATE
+        `
+
         const activeContactIds = new Set(
           loans
             .filter((loan) => EXCLUSIVE_STATUSES.includes(loan.status))

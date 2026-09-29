@@ -9,6 +9,7 @@ import {
 const rawGuestLoan = {
   id: 'guest-loan-1',
   status: 'HANDED_OVER',
+  evidence: 'OWNER_STATEMENT',
   isOverdue: false,
   createdAt: '2026-06-01T10:00:00.000Z',
   handedAt: '2026-06-01T00:00:00.000Z',
@@ -72,8 +73,14 @@ describe('guestLoanSchema (Stage 10, 10f.3)', () => {
     }
   })
 
-  it('status обмежений трьома значеннями — REQUESTED/APPROVED/PENDING_CONFIRMATION/DECLINED неможливі', () => {
-    for (const status of ['REQUESTED', 'APPROVED', 'PENDING_CONFIRMATION', 'DECLINED']) {
+  it('status обмежений трьома значеннями — REQUESTED/APPROVED/PENDING_CONFIRMATION/CANCELLED/DECLINED неможливі', () => {
+    for (const status of [
+      'REQUESTED',
+      'APPROVED',
+      'PENDING_CONFIRMATION',
+      'CANCELLED',
+      'DECLINED',
+    ]) {
       expect(guestLoanSchema.safeParse({ ...rawGuestLoan, status }).success).toBe(false)
     }
 
@@ -91,6 +98,20 @@ describe('guestLoanSchema (Stage 10, 10f.3)', () => {
     }
 
     expect(guestLoanSchema.safeParse(both).success).toBe(true)
+  })
+
+  it('evidence (10i.1): лише OWNER_STATEMENT або GUEST_CONFIRMED, поле обовʼязкове', () => {
+    expect(
+      guestLoanSchema.safeParse({ ...rawGuestLoan, evidence: 'GUEST_CONFIRMED' }).success,
+    ).toBe(true)
+
+    for (const evidence of ['AWAITING_GUEST', 'GUEST_DENIED', 'CANCELLED', null]) {
+      expect(guestLoanSchema.safeParse({ ...rawGuestLoan, evidence }).success).toBe(false)
+    }
+
+    const { evidence: _omitted, ...withoutEvidence } = rawGuestLoan
+
+    expect(guestLoanSchema.safeParse(withoutEvidence).success).toBe(false)
   })
 
   it('lossClosure не має effectiveAt (§6.11.1: клієнтська дата закриття не приймається)', () => {

@@ -33,6 +33,7 @@ function loanRow(overrides: Partial<NamedHistoryLoanRow> = {}): NamedHistoryLoan
     dueAt: new Date('2026-06-12T23:59:59.999Z'),
     owner: MARTA,
     borrower: OLES,
+    guestConfirmation: null,
     ...overrides,
   }
 }
@@ -173,5 +174,38 @@ describe('записана власником позика без requestedAt (S
     const late = loanRow({ id: 'b', requestedAt: new Date('2026-06-01T00:00:00Z') })
 
     expect(byRequestedAt(early, late)).toBeLessThan(0)
+  })
+})
+
+describe('guestEvidence (10i.1): джерело доказу виводиться з рядка підтвердження', () => {
+  const guestRow = (
+    status: 'OPEN' | 'DENIED' | 'RECEIVED' | 'CANCELLED' | 'OWNER_RECORDED' | null,
+  ) =>
+    ({
+      ...loanRow({ origin: 'RECORDED_GUEST' }),
+      borrower: null,
+      guestConfirmation: status === null ? null : { status },
+    }) satisfies HistoryLoanRow
+
+  it('не-гостьова позика → null', () => {
+    expect(toAnonymousEntry(loanRow(), NOW).guestEvidence).toBeNull()
+    expect(toAnonymousEntry(loanRow({ origin: 'RECORDED_EXISTING' }), NOW).guestEvidence).toBeNull()
+  })
+
+  it.each([
+    [null, 'OWNER_STATEMENT'],
+    ['OWNER_RECORDED', 'OWNER_STATEMENT'],
+    ['OPEN', 'AWAITING_GUEST'],
+    ['DENIED', 'GUEST_DENIED'],
+    ['RECEIVED', 'GUEST_CONFIRMED'],
+    ['CANCELLED', null],
+  ] as const)('гостьова позика, підтвердження %s → %s', (status, evidence) => {
+    expect(toAnonymousEntry(guestRow(status), NOW).guestEvidence).toBe(evidence)
+  })
+
+  it('анонімний запис і далі без ідентифікуючих ключів', () => {
+    const raw = JSON.stringify(toAnonymousEntry(guestRow('RECEIVED'), NOW))
+
+    for (const key of IDENTIFYING_KEYS) expect(raw).not.toContain(`"${key}"`)
   })
 })

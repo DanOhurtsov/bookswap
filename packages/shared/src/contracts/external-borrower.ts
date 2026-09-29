@@ -39,6 +39,14 @@ export const externalBorrowerSchema = z.strictObject({
   alias: z.string(),
   ownerInformedAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  /**
+   * Stage 10 (10i.1, §0.13): нікнейм, email і час перевірки контролю email, які ПІДТВЕРДИВ гість
+   * (усі три — `null` або всі не-`null`). Приватні: цей контракт owner-only (`/me/external-borrowers`,
+   * `/guest-loan-confirmations`), у публічних відповідях їх немає. Не замінюють `alias` власника.
+   */
+  guestNickname: z.string().nullable(),
+  guestEmail: z.string().nullable(),
+  guestEmailVerifiedAt: z.iso.datetime().nullable(),
 })
 
 export type ExternalBorrower = z.infer<typeof externalBorrowerSchema>

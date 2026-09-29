@@ -139,6 +139,10 @@ export const LOAN_EVENT_TYPE = [
   'LOAN_LOST',
   'RECOVERED',
   'LOSS_CLOSED',
+  // Stage 10 (10i.1): запит гостьового підтвердження — технічні назви, не окремі продуктові правила.
+  'GUEST_CONFIRMATION_REQUESTED',
+  'GUEST_HANDOVER_CANCELLED',
+  'GUEST_LOAN_OWNER_RECORDED',
 ] as const
 
 export const loanEventTypeSchema = z.enum(LOAN_EVENT_TYPE)
@@ -159,3 +163,68 @@ export const GUEST_LOAN_ACTIONS = ['return', 'mark_lost', 'recover', 'close_loss
 export const guestLoanActionSchema = z.enum(GUEST_LOAN_ACTIONS)
 
 export type GuestLoanAction = z.infer<typeof guestLoanActionSchema>
+
+/**
+ * Stage 10 (10i.1): технічний стан запиту гостьового підтвердження (окремо від `LoanStatus`: заперечення
+ * гостя нового статусу позики не створює). Дзеркало Prisma-enum `GuestLoanConfirmationStatus`;
+ * розсинхрон ловить `enum-parity.spec.ts`. Назви — технічні деталі, а не затверджені продуктові правила.
+ */
+export const GUEST_LOAN_CONFIRMATION_STATUS = [
+  'OPEN',
+  'DENIED',
+  'RECEIVED',
+  'CANCELLED',
+  'OWNER_RECORDED',
+] as const
+
+export const guestLoanConfirmationStatusSchema = z.enum(GUEST_LOAN_CONFIRMATION_STATUS)
+
+export type GuestLoanConfirmationStatus = z.infer<typeof guestLoanConfirmationStatusSchema>
+
+/**
+ * Stage 10 (10i.1): дії власника над запитом гостьового підтвердження —
+ * `PATCH /guest-loan-confirmations/:id { action }`.
+ * `cancel_handover` — «книжка фізично в мене, передачу записано помилково»; `record_owner_statement` —
+ * «залишити позику активною як запис лише зі слів власника».
+ */
+export const GUEST_CONFIRMATION_ACTIONS = ['cancel_handover', 'record_owner_statement'] as const
+
+export const guestConfirmationActionSchema = z.enum(GUEST_CONFIRMATION_ACTIONS)
+
+export type GuestConfirmationAction = z.infer<typeof guestConfirmationActionSchema>
+
+/**
+ * Stage 10 (10i.1): джерело доказу гостьової передачі — ВИВОДИТЬСЯ з рядка підтвердження, а не
+ * зберігається окремо. Немає рядка (старий ручний запис 10f.3) або `OWNER_RECORDED` → зі слів власника;
+ * `OPEN` → очікується відповідь гостя; `RECEIVED` → підтверджено гостем; `DENIED` → гість заперечує.
+ * Скасована передача доказом не є (`null`).
+ */
+export const GUEST_LOAN_EVIDENCE = [
+  'OWNER_STATEMENT',
+  'AWAITING_GUEST',
+  'GUEST_CONFIRMED',
+  'GUEST_DENIED',
+] as const
+
+export const guestLoanEvidenceSchema = z.enum(GUEST_LOAN_EVIDENCE)
+
+export type GuestLoanEvidence = z.infer<typeof guestLoanEvidenceSchema>
+
+/** Чиста проєкція: статус рядка підтвердження (або його відсутність) → джерело доказу. */
+export function guestLoanEvidenceOf(
+  confirmationStatus: GuestLoanConfirmationStatus | null,
+): GuestLoanEvidence | null {
+  switch (confirmationStatus) {
+    case null:
+    case 'OWNER_RECORDED':
+      return 'OWNER_STATEMENT'
+    case 'OPEN':
+      return 'AWAITING_GUEST'
+    case 'RECEIVED':
+      return 'GUEST_CONFIRMED'
+    case 'DENIED':
+      return 'GUEST_DENIED'
+    case 'CANCELLED':
+      return null
+  }
+}

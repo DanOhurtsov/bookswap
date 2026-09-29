@@ -18,6 +18,12 @@ export const RETENTION_CLOSED_WINDOW_MS = 90 * DAY_MS
  */
 export const RETENTION_UNRESOLVED_LOSS_WINDOW_MS = 365 * DAY_MS
 
+/**
+ * Q26 (§0.11, §6.11 п. 9; реалізовано в 10i.1): 90 днів від серверного `occurredAt` ПЕРШОЇ події
+ * `GUEST_HANDOVER_CANCELLED` — скасованої помилкової гостьової передачі. Окремий доданок `max()`.
+ */
+export const RETENTION_CANCELLED_HANDOVER_WINDOW_MS = 90 * DAY_MS
+
 const EXCLUSIVE_STATUSES: readonly string[] = EXCLUSIVE_LOAN_STATUS
 const CLOSURE_EVENT_TYPES = new Set(['RECOVERED', 'LOSS_CLOSED'])
 
@@ -87,6 +93,28 @@ function candidateFor(loan: LoanFacts, events: readonly EventFacts[]): Date {
     return addMs(lost.occurredAt, RETENTION_UNRESOLVED_LOSS_WINDOW_MS)
   }
 
+  if (loan.status === 'CANCELLED') {
+    // Лише гостьова позика з `borrowerContactId` може бути тут (зареєстровані `CANCELLED` контакту не
+    // мають). Відсутня подія скасування — порушена цілісність: дату скасування не вигадують
+    // (той самий принцип, що для `LOST` без `LOAN_LOST`).
+    const cancellations = events.filter(
+      (event) => event.loanId === loan.id && event.type === 'GUEST_HANDOVER_CANCELLED',
+    )
+
+    if (cancellations.length === 0) {
+      throw new Error(
+        `Позика ${loan.id}: CANCELLED без LoanEvent GUEST_HANDOVER_CANCELLED — цілісність даних порушена`,
+      )
+    }
+
+    const cancelledAt = cancellations.reduce(
+      (earliest, event) => (event.occurredAt < earliest ? event.occurredAt : earliest),
+      cancellations[0]!.occurredAt,
+    )
+
+    return addMs(cancelledAt, RETENTION_CANCELLED_HANDOVER_WINDOW_MS)
+  }
+
   throw new Error(
     `Позика ${loan.id}: неочікуваний статус ${loan.status} для перерахунку retainUntil`,
   )
@@ -105,7 +133,9 @@ function candidateFor(loan: LoanFacts, events: readonly EventFacts[]): Date {
  *   - є хоча б одна активна позика (`EXCLUSIVE_LOAN_STATUS`) → `NULL`;
  *   - інакше — `max()` по всіх позиках контакту: `RETURNED` дає `returnedAt + 90д`; закрита
  *     (`RECOVERED`/`LOSS_CLOSED`) `LOST` дає `closedAt + 90д`; ще НЕ закрита `LOST` дає
- *     `LOAN_LOST.occurredAt + 365д` — кожна незакрита `LOST` окремо, без взаємного витіснення.
+ *     `LOAN_LOST.occurredAt + 365д` — кожна незакрита `LOST` окремо, без взаємного витіснення;
+ *     скасована помилкова гостьова передача (`CANCELLED`, 10i.1, Q26) дає `occurredAt першої події
+ *     GUEST_HANDOVER_CANCELLED + 90д`.
  *
  * Якщо контакт конкурентно видалено між тим, як викликач дізнався його id, і цим викликом
  * (можливо лише якщо викликач порушив контракт локу вище), функція мовчки нічого не робить.
@@ -136,7 +166,7 @@ export async function recomputeRetainUntil(
     const events = await tx.loanEvent.findMany({
       where: {
         loanId: { in: loans.map((loan) => loan.id) },
-        type: { in: ['LOAN_LOST', 'RECOVERED', 'LOSS_CLOSED'] },
+        type: { in: ['LOAN_LOST', 'RECOVERED', 'LOSS_CLOSED', 'GUEST_HANDOVER_CANCELLED'] },
       },
       select: { loanId: true, type: true, occurredAt: true },
     })

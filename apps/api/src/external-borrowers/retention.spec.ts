@@ -1,4 +1,5 @@
 import {
+  RETENTION_CANCELLED_HANDOVER_WINDOW_MS,
   RETENTION_CLOSED_WINDOW_MS,
   RETENTION_NO_LOAN_WINDOW_MS,
   RETENTION_UNRESOLVED_LOSS_WINDOW_MS,
@@ -323,5 +324,132 @@ describe('recomputeRetainUntil — формула §0.9', () => {
     const tx = client as unknown as RetentionTxClient
 
     await expect(recomputeRetainUntil(tx, 'gone')).resolves.toBeUndefined()
+  })
+})
+
+describe('recomputeRetainUntil — скасована помилкова гостьова передача (10i.1, Q26)', () => {
+  const contactCreatedAt = new Date('2025-01-01T00:00:00.000Z')
+
+  it('CANC1: єдина CANCELLED-позика → occurredAt першої події скасування + 90д', async () => {
+    const cancelledAt = new Date('2026-09-01T10:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [{ id: 'l-1', status: 'CANCELLED', returnedAt: null }],
+      [{ loanId: 'l-1', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: cancelledAt }],
+    )
+
+    expect(result?.getTime()).toBe(cancelledAt.getTime() + RETENTION_CANCELLED_HANDOVER_WINDOW_MS)
+    expect(RETENTION_CANCELLED_HANDOVER_WINDOW_MS).toBe(90 * DAY_MS)
+  })
+
+  it('CANC2: береться ПЕРША подія скасування, а не пізніша', async () => {
+    const first = new Date('2026-09-01T10:00:00.000Z')
+    const second = new Date('2026-09-20T10:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [{ id: 'l-1', status: 'CANCELLED', returnedAt: null }],
+      [
+        { loanId: 'l-1', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: second },
+        { loanId: 'l-1', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: first },
+      ],
+    )
+
+    expect(result?.getTime()).toBe(first.getTime() + RETENTION_CANCELLED_HANDOVER_WINDOW_MS)
+  })
+
+  it('CANC3: подія скасування іншої позики не рахується', async () => {
+    const own = new Date('2026-09-01T10:00:00.000Z')
+    const foreign = new Date('2025-01-01T10:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [{ id: 'l-1', status: 'CANCELLED', returnedAt: null }],
+      [
+        { loanId: 'l-other', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: foreign },
+        { loanId: 'l-1', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: own },
+      ],
+    )
+
+    expect(result?.getTime()).toBe(own.getTime() + RETENTION_CANCELLED_HANDOVER_WINDOW_MS)
+  })
+
+  it('CANC4: кілька позик — max(): пізніше повернення переважає ранню скасовану', async () => {
+    const cancelledAt = new Date('2026-06-01T00:00:00.000Z')
+    const returnedAt = new Date('2026-09-01T00:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [
+        { id: 'l-c', status: 'CANCELLED', returnedAt: null },
+        { id: 'l-r', status: 'RETURNED', returnedAt },
+      ],
+      [{ loanId: 'l-c', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: cancelledAt }],
+    )
+
+    expect(result?.getTime()).toBe(returnedAt.getTime() + RETENTION_CLOSED_WINDOW_MS)
+  })
+
+  it('CANC5: кілька позик — max(): пізніша скасована переважає раніше повернення', async () => {
+    const returnedAt = new Date('2026-03-01T00:00:00.000Z')
+    const cancelledAt = new Date('2026-09-01T00:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [
+        { id: 'l-r', status: 'RETURNED', returnedAt },
+        { id: 'l-c', status: 'CANCELLED', returnedAt: null },
+      ],
+      [{ loanId: 'l-c', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: cancelledAt }],
+    )
+
+    expect(result?.getTime()).toBe(cancelledAt.getTime() + RETENTION_CANCELLED_HANDOVER_WINDOW_MS)
+  })
+
+  it('CANC6: скасована + незакрита LOST → більший із двох доданків (365д від втрати)', async () => {
+    const cancelledAt = new Date('2026-09-01T00:00:00.000Z')
+    const lostAt = new Date('2026-08-01T00:00:00.000Z')
+    const result = await retainUntilFor(
+      contactCreatedAt,
+      [
+        { id: 'l-c', status: 'CANCELLED', returnedAt: null },
+        { id: 'l-l', status: 'LOST', returnedAt: null },
+      ],
+      [
+        { loanId: 'l-c', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: cancelledAt },
+        { loanId: 'l-l', type: 'LOAN_LOST', occurredAt: lostAt },
+      ],
+    )
+
+    expect(result?.getTime()).toBe(lostAt.getTime() + RETENTION_UNRESOLVED_LOSS_WINDOW_MS)
+  })
+
+  it('CANC7: скасована + активна позика (HANDED_OVER/PENDING_CONFIRMATION) → NULL', async () => {
+    const cancelledAt = new Date('2026-09-01T00:00:00.000Z')
+
+    for (const status of ['HANDED_OVER', 'PENDING_CONFIRMATION']) {
+      const result = await retainUntilFor(
+        contactCreatedAt,
+        [
+          { id: 'l-c', status: 'CANCELLED', returnedAt: null },
+          { id: 'l-a', status, returnedAt: null },
+        ],
+        [{ loanId: 'l-c', type: 'GUEST_HANDOVER_CANCELLED', occurredAt: cancelledAt }],
+      )
+
+      expect(result).toBeNull()
+    }
+  })
+
+  it('CANC8: відсутня audit-подія скасування — падає гучно, дата не вигадується', async () => {
+    await expect(
+      retainUntilFor(
+        contactCreatedAt,
+        [{ id: 'l-1', status: 'CANCELLED', returnedAt: null }],
+        [{ loanId: 'l-1', type: 'LOAN_LOST', occurredAt: new Date('2026-01-01T00:00:00.000Z') }],
+      ),
+    ).rejects.toThrow(/CANCELLED без LoanEvent GUEST_HANDOVER_CANCELLED/)
+  })
+
+  it('CANC9: не гостьовий статус (REJECTED) і далі неочікуваний — падає гучно', async () => {
+    await expect(
+      retainUntilFor(contactCreatedAt, [{ id: 'l-1', status: 'REJECTED', returnedAt: null }], []),
+    ).rejects.toThrow(/неочікуваний статус REJECTED/)
   })
 })

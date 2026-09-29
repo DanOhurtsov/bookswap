@@ -322,3 +322,56 @@ SELECT count(*) FROM "Loan" WHERE status IN ('PENDING_CONFIRMATION','DECLINED');
 
 **Відомі межі 10e.** Непідтверджений запис не скасовується автоматично (Q6); нагадування власнику через 30 днів (10e-r)
 **лише заплановано** і в цій міграції відсутнє. Правка дат після підтвердження заборонена (Q12).
+
+## Крок 10i.1: M9a `20260929090000_stage10_guest_confirmation_enum` і M9b `20260929090100_stage10_guest_confirmation_expand`
+
+Лише синтетичні дані (D2 відкритий; реальні email і нікнейми гостей заборонені в будь-якому середовищі). Публічних
+маршрутів гостя, посилань, email-коду й UI цей крок не додає — лише owner-only API `/api/v1/guest-loan-confirmations`
+за `GuestLoansEnabledGuard`.
+
+**M9a** — `ALTER TYPE "LoanEventType" ADD VALUE` ×3 (`GUEST_CONFIRMATION_REQUESTED`, `GUEST_HANDOVER_CANCELLED`,
+`GUEST_LOAN_OWNER_RECORDED`). Окрема міграція: PostgreSQL не дозволяє вжити нове значення enum у тій самій
+транзакції (той самий принцип, що M1/M5a/M8a). Жодного рядка не читає й не змінює.
+
+**M9b** — expand (лише додає й послаблює один CHECK):
+
+- новий enum `GuestLoanConfirmationStatus` (`OPEN`, `DENIED`, `RECEIVED`, `CANCELLED`, `OWNER_RECORDED`) і таблиця
+  `GuestLoanConfirmation` (`loanId` UNIQUE, `externalBorrowerId` → `ExternalBorrower` `ON DELETE SET NULL`, `Loan` —
+  `RESTRICT`); CHECK `guest_loan_confirmation_resolved_at` (`resolvedAt IS NULL` ⇔ статус `OPEN`/`DENIED`);
+- `ExternalBorrower.guestNickname/guestEmail/guestEmailVerifiedAt` (nullable); CHECK
+  `external_borrower_guest_identity_all_or_none` (усі три `NULL` або всі не-`NULL`);
+- `copy_away_is_lent_or_unavailable` перестворено: додається **єдиний** виняток — `RESERVED` поза домом дозволений,
+  лише коли книжку тримає контакт (`heldByContactId IS NOT NULL`). Це стан «фізично передано, гість ще не
+  підтвердив». Для наявних рядків вираз рівнозначний старому (жодного `RESERVED` поза домом досі не існувало).
+
+**Що міграції НЕ роблять.** Не читають і не змінюють жодного `Copy`/`Loan`/`LoanEvent`; не створюють рядків
+підтвердження — старі ручні гостьові позики (10f.3) їх **не** отримують і лишаються «зі слів власника». Наявні
+`ExternalBorrower` лише отримують три `NULL`-колонки.
+
+**Порядок розгортання.** backup → `pnpm db:deploy` (M9a, потім M9b; таблиця нова, індекси будуються миттєво) → деплой
+API. Код 10i.1 **потребує** M9b: без послабленого CHECK створення запиту (`Copy = RESERVED` у контакта) впаде.
+Старий код (до 10i.1) з M9a/M9b сумісний: він нових колонок/таблиці не читає.
+
+**Відкат: лише вперед** (feature-flag `GUEST_LOANS_ENABLED=false` + виправлення вперед). Після появи рядків
+`GuestLoanConfirmation`, `Loan = PENDING_CONFIRMATION` з `borrowerKind = GUEST` і `Copy = RESERVED` у контакта
+відкат коду на реліз до 10i.1 **небезпечний**: старий код цих станів не знає. Повернення старого CHECK міграцією
+впало б на таких `Copy`. Значення enum видалити не можна.
+
+**Наслідок для видалення контакту.** `RESERVED` у контакта не переживає його видалення (`SET NULL` дав би `RESERVED`
+без тримача — CHECK це гучно відхиляє). У застосунку це недосяжно: `PENDING_CONFIRMATION` входить до
+`EXCLUSIVE_LOAN_STATUS` і блокує ручний `DELETE` та CLI-чистку контакту (`EXTERNAL_BORROWER_HAS_ACTIVE_LOAN`); після
+скасування передачі `Copy` уже `AVAILABLE` вдома.
+
+**Порядок локів** (нові транзакції узгоджено з ручним `DELETE` і CLI-чисткою): `ExternalBorrower → Copy → Loan →
+GuestLoanConfirmation`.
+
+**Автоматизований доказ.**
+
+- `apps/api/test/db/stage10-guest-confirmation-migration.db-spec.ts` — на scratch-базі з наповненими даними: M9a+M9b не
+  змінюють жодного `Copy`/`Loan`/`LoanEvent`; рядків підтвердження немає; нові значення enum працюють; CHECK-и `Copy`,
+  `ExternalBorrower`, `GuestLoanConfirmation`; UNIQUE `loanId`; FK `SET NULL`/`RESTRICT`.
+- `apps/api/test/db/schema-objects.db-spec.ts`, `loan-constraints.db-spec.ts` — форма CHECK-ів і `RESERVED` у контакта.
+- `apps/api/test/guest-loan-confirmations.e2e-spec.ts` — owner API, права, старий шлях 10f.3, конкурентні `REQUESTED`,
+  `DELETE`/CLI після скасування, гонки create/cancel/record/delete, відсутність витоку `guestNickname`/`guestEmail`.
+- `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` — схема й міграції
+  еквівалентні.

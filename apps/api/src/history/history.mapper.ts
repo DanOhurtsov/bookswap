@@ -1,4 +1,10 @@
-import type { HistoryCopy, HistoryEntry, NamedHistoryEntry } from '@bookswap/shared'
+import {
+  guestLoanEvidenceOf,
+  type GuestLoanConfirmationStatus,
+  type HistoryCopy,
+  type HistoryEntry,
+  type NamedHistoryEntry,
+} from '@bookswap/shared'
 import {
   toEdition,
   toWork,
@@ -46,6 +52,11 @@ export type HistoryLoanRow = Pick<
    * (D4); до того — і тут, і для всіх — запис анонімний.
    */
   borrower: PublicUserRow | null
+  /**
+   * Stage 10 (10i.1): лише `status` рядка підтвердження — з нього виводиться джерело доказу. Жодного
+   * alias/нікнейма/email тут немає й бути не може.
+   */
+  guestConfirmation: { status: GuestLoanConfirmationStatus } | null
 }
 
 /** Позика із зареєстрованим позичальником — єдина, що має іменовану проєкцію до кроку 10f. */
@@ -69,6 +80,10 @@ function factsOf(
   return {
     status: loan.status,
     origin: loan.origin,
+    guestEvidence:
+      loan.origin === 'RECORDED_GUEST'
+        ? guestLoanEvidenceOf(loan.guestConfirmation?.status ?? null)
+        : null,
     isOverdue: isOverdue(loan, now),
     requestedAt: loan.requestedAt?.toISOString() ?? null,
     respondedAt: loan.respondedAt?.toISOString() ?? null,

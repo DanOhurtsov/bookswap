@@ -96,7 +96,15 @@ describe('Stage 10 (10f.2): приватні контакти (e2e)', () => {
       const { contact } = externalBorrowerResponseSchema.parse(response.body)
 
       expect(contact.alias).toBe('Тестовий Гість')
-      expect(Object.keys(contact).sort()).toEqual(['alias', 'createdAt', 'id', 'ownerInformedAt'])
+      expect(Object.keys(contact).sort()).toEqual([
+        'alias',
+        'createdAt',
+        'guestEmail',
+        'guestEmailVerifiedAt',
+        'guestNickname',
+        'id',
+        'ownerInformedAt',
+      ])
       expect(Date.parse(contact.ownerInformedAt ?? '')).toBeGreaterThanOrEqual(before - 1000)
       expect(Date.parse(contact.ownerInformedAt ?? '')).toBeLessThanOrEqual(Date.now() + 1000)
 

@@ -10,6 +10,7 @@ import {
   EDITION_FORMAT,
   EXCLUSIVE_LOAN_STATUS,
   FRIENDSHIP_STATUS,
+  GUEST_LOAN_CONFIRMATION_STATUS,
   IMMEDIATE_NOTIFICATION_TYPE,
   LIBRARY_IMPORT_ROW_STATUS,
   LIBRARY_IMPORT_STATUS,
@@ -33,6 +34,7 @@ import type {
   EditionFormat as SharedEditionFormat,
   FriendshipStatus as SharedFriendshipStatus,
   LibraryImportRowStatus as SharedLibraryImportRowStatus,
+  GuestLoanConfirmationStatus as SharedGuestLoanConfirmationStatus,
   LibraryImportStatus as SharedLibraryImportStatus,
   LoanEventType as SharedLoanEventType,
   LoanOrigin as SharedLoanOrigin,
@@ -50,6 +52,7 @@ import {
   DeliveryStatus as PrismaDeliveryStatus,
   EditionFormat as PrismaEditionFormat,
   FriendshipStatus as PrismaFriendshipStatus,
+  GuestLoanConfirmationStatus as PrismaGuestLoanConfirmationStatus,
   LibraryImportRowStatus as PrismaLibraryImportRowStatus,
   LibraryImportStatus as PrismaLibraryImportStatus,
   LoanEventType as PrismaLoanEventType,
@@ -68,6 +71,7 @@ import type {
   DeliveryStatus as PrismaDeliveryStatusType,
   EditionFormat as PrismaEditionFormatType,
   FriendshipStatus as PrismaFriendshipStatusType,
+  GuestLoanConfirmationStatus as PrismaGuestLoanConfirmationStatusType,
   LibraryImportRowStatus as PrismaLibraryImportRowStatusType,
   LibraryImportStatus as PrismaLibraryImportStatusType,
   LoanEventType as PrismaLoanEventTypeType,
@@ -95,6 +99,10 @@ const _loanStatusMatches: Equal<SharedLoanStatus, PrismaLoanStatusType> = true
 const _borrowerKindMatches: Equal<SharedBorrowerKind, PrismaBorrowerKindType> = true
 const _loanOriginMatches: Equal<SharedLoanOrigin, PrismaLoanOriginType> = true
 const _loanEventTypeMatches: Equal<SharedLoanEventType, PrismaLoanEventTypeType> = true
+const _guestLoanConfirmationStatusMatches: Equal<
+  SharedGuestLoanConfirmationStatus,
+  PrismaGuestLoanConfirmationStatusType
+> = true
 const _notificationTypeMatches: Equal<SharedNotificationType, PrismaNotificationTypeType> = true
 const _channelMatches: Equal<SharedChannel, PrismaChannelType> = true
 const _deliveryStatusMatches: Equal<SharedDeliveryStatus, PrismaDeliveryStatusType> = true
@@ -287,6 +295,13 @@ describe('Stage 10: BorrowerKind, LoanOrigin, LoanEventType: shared ↔ Prisma',
   it('LoanEventType містить ті самі значення', () => {
     expect([...LOAN_EVENT_TYPE].sort()).toEqual(Object.values(PrismaLoanEventType).sort())
     expect(_loanEventTypeMatches).toBe(true)
+  })
+
+  it('10i.1: GuestLoanConfirmationStatus містить ті самі значення', () => {
+    expect([...GUEST_LOAN_CONFIRMATION_STATUS].sort()).toEqual(
+      Object.values(PrismaGuestLoanConfirmationStatus).sort(),
+    )
+    expect(_guestLoanConfirmationStatusMatches).toBe(true)
   })
 
   it('M5 (10e): PENDING_CONFIRMATION ексклюзивний і відкритий, DECLINED — ні', () => {

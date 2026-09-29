@@ -1,8 +1,11 @@
 import { LOAN_EVENT_PAYLOAD_SCHEMA, isWritableLoanEventType } from './loan-event.types'
 
 describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
-  it('описує лише типи, які реально пишуть 10d–10f.3', () => {
+  it('описує лише типи, які реально пишуть 10d–10i.1', () => {
     expect(Object.keys(LOAN_EVENT_PAYLOAD_SCHEMA).sort()).toEqual([
+      'GUEST_CONFIRMATION_REQUESTED',
+      'GUEST_HANDOVER_CANCELLED',
+      'GUEST_LOAN_OWNER_RECORDED',
       'GUEST_LOAN_RECORDED',
       'LOAN_LOST',
       'LOAN_RETURNED',
@@ -51,6 +54,9 @@ describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
     'RECORD_WITHDRAWN',
     'GUEST_LOAN_RECORDED',
     'LOSS_CLOSED',
+    'GUEST_CONFIRMATION_REQUESTED',
+    'GUEST_HANDOVER_CANCELLED',
+    'GUEST_LOAN_OWNER_RECORDED',
   ] as const)('%s: порожній payload проходить', (type) => {
     expect(LOAN_EVENT_PAYLOAD_SCHEMA[type].safeParse({}).success).toBe(true)
   })
@@ -64,6 +70,9 @@ describe('LOAN_EVENT_PAYLOAD_SCHEMA (Stage 10, T4)', () => {
     'RECORD_WITHDRAWN',
     'GUEST_LOAN_RECORDED',
     'LOSS_CLOSED',
+    'GUEST_CONFIRMATION_REQUESTED',
+    'GUEST_HANDOVER_CANCELLED',
+    'GUEST_LOAN_OWNER_RECORDED',
   ] as const)('%s: strict — жодного alias, email, contactId чи вільного тексту', (type) => {
     for (const extra of [
       { alias: 'Іра' },

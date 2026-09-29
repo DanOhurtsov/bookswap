@@ -505,6 +505,8 @@ model Loan {
   borrower User? @relation("LoanBorrower", fields: [borrowerId], references: [id], onDelete: Restrict)
   borrowerContact ExternalBorrower? @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id], onDelete: SetNull)
   events   LoanEvent[]
+  /// Stage 10 (10i.1): є лише в позик, створених через запит гостьового підтвердження.
+  guestConfirmation GuestLoanConfirmation?
 
   @@index([copyId, status])
   @@index([borrowerContactId])
@@ -553,6 +555,12 @@ enum LoanEventType {
   LOAN_LOST
   RECOVERED
   LOSS_CLOSED
+  /// Stage 10 (10i.1): власник створив запит гостьового підтвердження після фізичної передачі.
+  GUEST_CONFIRMATION_REQUESTED
+  /// Stage 10 (10i.1): власник скасував помилкову передачу (книжка фізично в нього).
+  GUEST_HANDOVER_CANCELLED
+  /// Stage 10 (10i.1): власник залишив позику активною як запис лише зі слів власника.
+  GUEST_LOAN_OWNER_RECORDED
 }
 
 /// Stage 10 (D1): контакт-гість у межах бібліотеки одного власника. Не `User`, не спільний
@@ -567,13 +575,49 @@ model ExternalBorrower {
   /// D3: NULL — є активна позика; інакше момент видалення контакту.
   retainUntil     DateTime?
   createdAt       DateTime  @default(now())
+  /// Stage 10 (10i.1, §0.13): нікнейм, email і час перевірки контролю email, які ПІДТВЕРДИВ гість.
+  /// Приватні, лише для власника; alias власника вони не замінюють. Усі три — NULL або всі не-NULL
+  /// (CHECK `external_borrower_guest_identity_all_or_none`). Видаляються разом із контактом (D3).
+  guestNickname        String?
+  guestEmail           String?
+  guestEmailVerifiedAt DateTime?
 
   owner         User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   loans         Loan[]  @relation("LoanBorrowerContact")
   heldCopies    Copy[]  @relation("CopyHeldByContact")
+  guestConfirmations GuestLoanConfirmation[]
 
   @@index([ownerId])
   @@index([retainUntil])
+}
+
+/// Stage 10 (10i.1): технічний стан запиту гостьового підтвердження конкретної позики. Окремо від
+/// `LoanStatus`: заперечення гостя нового статусу позики не створює (Q27).
+enum GuestLoanConfirmationStatus {
+  OPEN
+  DENIED
+  RECEIVED
+  CANCELLED
+  OWNER_RECORDED
+}
+
+/// Stage 10 (10i.1): запит гостьового підтвердження, пов'язаний з конкретними `Loan` і `ExternalBorrower`.
+/// Старі ручні гостьові позики (10f.3) рядка не мають. `externalBorrowerId` → NULL після видалення
+/// контакту (D3/ручний DELETE); сам рядок і `Loan` лишаються. Порядок локів: ExternalBorrower → Copy →
+/// Loan → GuestLoanConfirmation.
+model GuestLoanConfirmation {
+  id                 String                      @id @default(cuid())
+  loanId             String                      @unique
+  externalBorrowerId String?
+  status             GuestLoanConfirmationStatus @default(OPEN)
+  createdAt          DateTime                    @default(now())
+  /// NULL, поки статус OPEN чи DENIED; інакше момент завершення (CHECK `guest_loan_confirmation_resolved_at`).
+  resolvedAt         DateTime?
+
+  loan             Loan              @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  externalBorrower ExternalBorrower? @relation(fields: [externalBorrowerId], references: [id], onDelete: SetNull)
+
+  @@index([externalBorrowerId])
 }
 
 /// Stage 10 (T4): append-only audit trail. `payload` — strict-схема на тип, без alias/email.

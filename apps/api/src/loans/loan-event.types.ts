@@ -31,6 +31,11 @@ export const LOAN_EVENT_PAYLOAD_SCHEMA = {
   // Stage 10 (10f.3): створення й закриття втрати гостьової позики — жодного alias/contactId у payload.
   GUEST_LOAN_RECORDED: emptyPayloadSchema,
   LOSS_CLOSED: emptyPayloadSchema,
+  // Stage 10 (10i.1): запит підтвердження, скасування помилкової передачі, запис лише зі слів власника —
+  // жодного alias/нікнейма/email/id контакту в payload. Події відповіді гостя додасть 10i.2.
+  GUEST_CONFIRMATION_REQUESTED: emptyPayloadSchema,
+  GUEST_HANDOVER_CANCELLED: emptyPayloadSchema,
+  GUEST_LOAN_OWNER_RECORDED: emptyPayloadSchema,
 } as const satisfies Partial<Record<LoanEventType, z.ZodTypeAny>>
 
 export type WritableLoanEventType = keyof typeof LOAN_EVENT_PAYLOAD_SCHEMA

@@ -8,6 +8,7 @@ import { registerAccount, url, type Account } from './loan.helpers'
 import { SessionService } from '../src/auth/session.service'
 import { ExternalBorrowersService } from '../src/external-borrowers/external-borrowers.service'
 import { InvitationsService } from '../src/invitations/invitations.service'
+import { GuestLoanConfirmationService } from '../src/loans/guest-loan-confirmation.service'
 import { GuestLoanService } from '../src/loans/guest-loan.service'
 import { LoanService } from '../src/loans/loan.service'
 import { PrismaService } from '../src/prisma/prisma.service'
@@ -148,6 +149,61 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
       expect(await prisma.loan.count({ where: { ownerId: owner.id, borrowerKind: 'GUEST' } })).toBe(
         0,
       )
+    },
+  )
+
+  /**
+   * Stage 10 (10i.1, GATE1): owner-only ресурс `/guest-loan-confirmations` — окремий контролер з тим
+   * самим порядком guard'ів: `403` до сесії, сервісу й БД (і з сесією, і без).
+   */
+  const confirmationRoutes: [string, 'post' | 'get' | 'patch', string, object | undefined][] = [
+    [
+      'POST',
+      'post',
+      '/guest-loan-confirmations',
+      { copyId: 'x', externalBorrowerId: 'y', handedAt: '2026-01-01' },
+    ],
+    ['GET', 'get', '/guest-loan-confirmations', undefined],
+    ['GET', 'get', '/guest-loan-confirmations/any-id', undefined],
+    [
+      'PATCH',
+      'patch',
+      '/guest-loan-confirmations/any-id',
+      { action: 'cancel_handover', bookIsWithOwner: true },
+    ],
+  ]
+
+  it.each(confirmationRoutes)(
+    '%s /guest-loan-confirmations[...] → 403 FEATURE_DISABLED, session/service/БД не викликаються',
+    async (_name, method, path, body) => {
+      const validate = jest.spyOn(app.get(SessionService), 'validate')
+      const service = app.get(GuestLoanConfirmationService)
+      const spies = [
+        jest.spyOn(service, 'create'),
+        jest.spyOn(service, 'list'),
+        jest.spyOn(service, 'get'),
+        jest.spyOn(service, 'apply'),
+      ]
+      const dbSpies = [
+        jest.spyOn(prisma.guestLoanConfirmation, 'findMany'),
+        jest.spyOn(prisma.guestLoanConfirmation, 'findFirst'),
+        jest.spyOn(prisma, '$transaction'),
+      ]
+
+      for (const cookie of [owner.cookie, undefined]) {
+        const base = request(http())[method](url(path))
+        const call = cookie === undefined ? base : base.set('Cookie', cookie)
+        const response = await (body === undefined ? call : call.send(body))
+
+        expect(response.status).toBe(403)
+        expect(apiErrorSchema.parse(response.body).code).toBe('FEATURE_DISABLED')
+      }
+
+      expect(validate).not.toHaveBeenCalled()
+      for (const spy of [...spies, ...dbSpies]) expect(spy).not.toHaveBeenCalled()
+      expect(
+        await prisma.guestLoanConfirmation.count({ where: { loan: { ownerId: owner.id } } }),
+      ).toBe(0)
     },
   )
 

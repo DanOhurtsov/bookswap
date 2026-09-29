@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { guestLoanActionSchema, loanStatusSchema } from '../domain/loan'
+import { guestLoanActionSchema, guestLoanEvidenceSchema, loanStatusSchema } from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { externalBorrowerAliasSchema } from './external-borrower'
 import { LOAN_LIMITS, loanCopySchema, loanRecoverySchema } from './loan'
@@ -43,8 +43,17 @@ export type GuestLoanLossClosure = z.infer<typeof guestLoanLossClosureSchema>
 
 export const guestLoanSchema = z.strictObject({
   id: z.string(),
-  /** Гостьова позика ніколи не буває `REQUESTED`/`APPROVED`/`PENDING_CONFIRMATION`/`DECLINED`. */
+  /**
+   * Цим (старим, 10f.3) контрактом гостьова позика ніколи не буває `REQUESTED`/`APPROVED`/
+   * `PENDING_CONFIRMATION`/`CANCELLED`/`DECLINED`: очікувані й скасовані запити віддає лише окремий
+   * ресурс `/guest-loan-confirmations` (10i.1).
+   */
   status: loanStatusSchema.extract(['HANDED_OVER', 'RETURNED', 'LOST']),
+  /**
+   * Stage 10 (10i.1): джерело доказу, виведене з рядка підтвердження. Без рядка (старий ручний запис) і
+   * після «запису лише зі слів власника» — `OWNER_STATEMENT`; після отримання гостем — `GUEST_CONFIRMED`.
+   */
+  evidence: guestLoanEvidenceSchema.extract(['OWNER_STATEMENT', 'GUEST_CONFIRMED']),
   isOverdue: z.boolean(),
   createdAt: z.iso.datetime(),
   handedAt: z.iso.datetime(),

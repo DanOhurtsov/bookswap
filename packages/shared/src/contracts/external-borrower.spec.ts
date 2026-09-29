@@ -74,7 +74,24 @@ describe('відповіді', () => {
     alias: 'Гість',
     ownerInformedAt: '2026-09-27T10:00:00.000Z',
     createdAt: '2026-09-27T10:00:00.000Z',
+    guestNickname: null,
+    guestEmail: null,
+    guestEmailVerifiedAt: null,
   }
+
+  it('10i.1: підтверджені гостем нікнейм/email/час перевірки — nullable рядки, owner-only', () => {
+    expect(
+      externalBorrowerSchema.safeParse({
+        ...contact,
+        guestNickname: 'Синтетичний',
+        guestEmail: 'guest@guest.invalid',
+        guestEmailVerifiedAt: '2026-09-29T10:00:00.000Z',
+      }).success,
+    ).toBe(true)
+    expect(
+      externalBorrowerSchema.safeParse({ ...contact, guestEmailVerifiedAt: 'вчора' }).success,
+    ).toBe(false)
+  })
 
   it('контакт не має ownerId і retainUntil', () => {
     expect(externalBorrowerSchema.safeParse(contact).success).toBe(true)
