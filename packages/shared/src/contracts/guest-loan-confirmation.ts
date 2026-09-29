@@ -7,6 +7,7 @@ import {
 } from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { externalBorrowerAliasSchema } from './external-borrower'
+import { guestInvitationEmailSchema } from './external-borrower'
 import { createGuestLoanRequestSchema } from './guest-loan'
 import { loanCopySchema } from './loan'
 
@@ -53,6 +54,21 @@ export const guestConfirmationLoanSchema = z.strictObject({
 
 export type GuestConfirmationLoan = z.infer<typeof guestConfirmationLoanSchema>
 
+/**
+ * Stage 10 (10i.2): стан ПОТОЧНОГО посилання для власника. Сам токен і адреса доставки тут не з'являються
+ * ніколи; `null` — посилання не видавалося, погашене відповіддю чи дією власника.
+ * `isExpired` — 7 днів від серверного часу видачі минули (запит при цьому лишається відкритим).
+ */
+export const guestConfirmationLinkSchema = z
+  .strictObject({
+    issuedAt: z.iso.datetime(),
+    expiresAt: z.iso.datetime(),
+    isExpired: z.boolean(),
+  })
+  .nullable()
+
+export type GuestConfirmationLink = z.infer<typeof guestConfirmationLinkSchema>
+
 export const guestLoanConfirmationSchema = z.strictObject({
   id: z.string(),
   status: guestLoanConfirmationStatusSchema,
@@ -68,6 +84,7 @@ export const guestLoanConfirmationSchema = z.strictObject({
   authors: z.array(workAuthorSchema),
   /** `null` після видалення контакту (D3/ручний `DELETE`): рядок і позика лишаються. */
   contact: guestConfirmationContactSchema,
+  link: guestConfirmationLinkSchema,
 })
 
 export type GuestLoanConfirmation = z.infer<typeof guestLoanConfirmationSchema>
@@ -113,4 +130,37 @@ export const guestLoanConfirmationListResponseSchema = z.strictObject({
 
 export type GuestLoanConfirmationListResponse = z.infer<
   typeof guestLoanConfirmationListResponseSchema
+>
+
+// --- Видача посилання власником (10i.2) ----------------------------------------
+
+/** Строк дії посилання від серверного часу видачі (Q24, §0.11). */
+export const GUEST_LINK_TTL_DAYS = 7
+
+/**
+ * `POST /guest-loan-confirmations/:id/link`. `COPY` — власник сам копіює посилання з відповіді;
+ * `EMAIL` — лист на адресу `email`, введену власником. Адреса — ЛИШЕ для доставки: її не зіставляють
+ * з адресою гостя й не зберігають. D2: лише синтетичний домен `guest.invalid`.
+ */
+export const issueGuestConfirmationLinkRequestSchema = z.discriminatedUnion('delivery', [
+  z.strictObject({ delivery: z.literal('COPY') }),
+  z.strictObject({ delivery: z.literal('EMAIL'), email: guestInvitationEmailSchema }),
+])
+
+export type IssueGuestConfirmationLinkRequest = z.infer<
+  typeof issueGuestConfirmationLinkRequestSchema
+>
+
+/**
+ * `url` — лише для `COPY` і лише в цій відповіді (токен зберігається виключно як геш). Для `EMAIL`
+ * `url` = `null`, адреси доставки у відповіді немає.
+ */
+export const issueGuestConfirmationLinkResponseSchema = z.strictObject({
+  confirmation: guestLoanConfirmationSchema,
+  delivery: z.enum(['COPY', 'EMAIL']),
+  url: z.string().nullable(),
+})
+
+export type IssueGuestConfirmationLinkResponse = z.infer<
+  typeof issueGuestConfirmationLinkResponseSchema
 >

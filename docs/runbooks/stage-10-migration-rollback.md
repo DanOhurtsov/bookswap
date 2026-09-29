@@ -375,3 +375,54 @@ GuestLoanConfirmation`.
   `DELETE`/CLI після скасування, гонки create/cancel/record/delete, відсутність витоку `guestNickname`/`guestEmail`.
 - `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` — схема й міграції
   еквівалентні.
+
+## Крок 10i.2: M9c `20260929120000_stage10_guest_response_enum` і M9d `20260929120100_stage10_guest_response_expand`
+
+Лише синтетичні дані (D2 відкритий). Крок додає backend видачі посилання власником і публічної відповіді гостя без
+акаунта (`POST /guest-loan-confirmations/:id/link`, `/api/v1/guest-loan-responses/*`); web UI й сповіщення (10i.3) не
+додає.
+
+**M9c** — `ALTER TYPE "LoanEventType" ADD VALUE` ×2 (`GUEST_LOAN_RECEIVED`, `GUEST_LOAN_DENIED`). Окрема міграція
+(нове значення enum не можна вжити в тій самій транзакції; той самий принцип, що M9a). Жодного рядка не читає й не змінює.
+
+**M9d** — expand: лише додає до `GuestLoanConfirmation` колонки посилання (`linkTokenHash` UNIQUE, `linkIssuedAt`,
+`linkExpiresAt`), виклику перевірки email (`challengeMac`, `codeHash`, `codeExpiresAt`, `codeAttempts`,
+`codeFailedTotal`, `codeSentCount`, `codeWindowStartedAt`) і доказу (`proofHash`, `proofExpiresAt`, `verifiedAt`) та
+дев'ять CHECK-ів `guest_confirmation_*`: посилання — усе або нічого; строк — **рівно 7 діб** від видачі; посилання лише
+для статусу `OPEN`; код і доказ — усе або нічого й **не одночасно**; виклик існує лише разом із кодом чи доказом і лише в межах
+чинного посилання; лічильники ≥ 0. Усі нові колонки — `NULL` (лічильники — `0`): жоден наявний рядок `Copy`/`Loan`/`LoanEvent`/
+`ExternalBorrower`/`GuestLoanConfirmation` не змінюється, старі ручні позики 10f.3 рядків підтвердження й посилань не отримують.
+У БД **не зберігаються** сирі токен, код, email гостя чи нікнейм — лише SHA-256 (токен, доказ) і HMAC-SHA-256 (виклик, код);
+підтверджені нікнейм/email потрапляють лише в `ExternalBorrower.guestNickname/guestEmail` і лише після доведеної відповіді.
+
+**Порядок розгортання.** backup → `pnpm db:deploy` (M9c, потім M9d) → деплой API. Код 10i.2 **потребує** M9d (колонки
+й CHECK-и); старий код (10i.1) з M9c/M9d сумісний: нових колонок не читає. Публічні маршрути лишаються за `GUEST_LOANS_ENABLED`
+(`GuestLoansEnabledGuard` першим, до БД).
+
+**Ключ HMAC.** Виклик і код рахуються з `INVITE_EMAIL_HMAC_SECRET` (окремі префікси доменів; нового env-ключа немає). Зміна
+ключа або рестарт без ключа (поза production ключ випадковий) робить **чинні коди й докази недійсними** — гість просить новий код;
+відкритий запит, посилання (геш токена не залежить від ключа) і `Loan`/`Copy` не страждають.
+
+**Відкат: лише вперед** (`GUEST_LOANS_ENABLED=false` + виправлення вперед). Значення enum видалити не можна; колонки M9d
+можна залишити (nullable/`DEFAULT`). Вимкнення функції гасить публічні маршрути, але не чинні посилання в БД (вони
+безпечні: без маршруту відповісти неможливо; рішення власника чи нова видача їх обнулюють).
+
+**Автоматизований доказ.**
+
+- `apps/api/test/db/stage10-guest-response-migration.db-spec.ts` — на scratch-базі з наповненими даними (відкритий і
+  заперечений запити, ручна позика 10f.3): M9c+M9d не змінюють жодного наявного рядка, нові значення enum працюють, кожен CHECK
+  (7 діб, `OPEN`-лише, all-or-none, код XOR доказ, узгодженість виклику, лічильники), UNIQUE геш токена.
+- `apps/api/test/db/schema-objects.db-spec.ts` — перелік CHECK-ів `GuestLoanConfirmation`.
+- `apps/api/test/guest-loan-responses.e2e-spec.ts`, `guest-loan-responses-provider.e2e-spec.ts`, `external-borrowers-off.e2e-spec.ts`
+  — поведінка (див. [план §9.3](../plan/stage-10-real-world-history.md#93-invite-10g-гостьове-підтвердження-10i-та-відкладений-d5)).
+- `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` — схема й міграції еквівалентні.
+
+### Доповнення 10i.2: M9e `20260929130000_stage10_guest_code_nonce` (виправлення рев'ю)
+
+Forward-міграція (M9c/M9d не редагуються): `GuestLoanConfirmation.codeNonce` (nullable) і CHECK `guest_confirmation_code_nonce`
+(`codeNonce IS NULL` ⇔ `codeHash IS NULL`). Nonce — випадковий 128-бітний ідентифікатор **кожної видачі коду**; за ним `requestCode`
+гасить код після збою відправки. `codeHash` для цього не годиться: за тих самих підтвердження/email/нікнейма однакові шість цифр дають
+однаковий HMAC. Усі наявні рядки: `codeHash` і `codeNonce` — `NULL` (обмеження істинне), жоден рядок не змінюється. Порядок
+розгортання й відкат — як для M9d (лише вперед; nullable-колонку можна залишити). Код 10i.2 після цього виправлення **потребує** M9e.
+Доказ: `stage10-guest-response-migration.db-spec.ts` (M9e на наповненій БД, CHECK), `schema-objects.db-spec.ts`, e2e
+«рев'ю 10i.2» (збій першої відправки не гасить код із тими самими шістьма цифрами).

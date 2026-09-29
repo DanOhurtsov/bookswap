@@ -9,10 +9,13 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common'
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import {
   API_ERROR_CODES,
   type GuestLoanConfirmationListResponse,
   type GuestLoanConfirmationResponse,
+  type IssueGuestConfirmationLinkRequest,
+  type IssueGuestConfirmationLinkResponse,
 } from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
 import { SessionGuard } from '../auth/session.guard'
@@ -22,8 +25,12 @@ import {
   CreateGuestLoanConfirmationDto,
   UpdateGuestLoanConfirmationDto,
 } from './dto/guest-loan-confirmation.dto'
+import { IssueGuestConfirmationLinkDto } from './dto/guest-loan-response.dto'
 import { GuestLoanConfirmationService } from './guest-loan-confirmation.service'
 import type { UserModel } from '../generated/prisma/models'
+
+/** Видача посилання: те саме обмеження, що для запрошень (`POST /invitations`) — кожна видача може бути листом. */
+const ISSUE_LINK_LIMIT = { auth: { limit: 30, ttl: 60 * 60_000 } }
 
 /**
  * Stage 10 (10i.1): owner-only ресурс `/api/v1/guest-loan-confirmations`. `GuestLoansEnabledGuard` —
@@ -54,6 +61,47 @@ export class GuestLoanConfirmationsController {
     @Param('id') id: string,
   ): Promise<GuestLoanConfirmationResponse> {
     return this.confirmations.get(user.id, id)
+  }
+
+  /**
+   * Stage 10 (10i.2): видати ПОТОЧНЕ посилання (повторна видача гасить попереднє). `COPY` — посилання в
+   * відповіді, `EMAIL` — лист на адресу власника (лише доставка, не зберігається).
+   */
+  @Post(':id/link')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(ISSUE_LINK_LIMIT)
+  @HttpCode(HttpStatus.CREATED)
+  issueLink(
+    @CurrentUser() user: UserModel,
+    @Param('id') id: string,
+    @Body() dto: IssueGuestConfirmationLinkDto,
+  ): Promise<IssueGuestConfirmationLinkResponse> {
+    // Пару «спосіб ↔ адреса» `class-validator` не виражає (як і `bookIsWithOwner` нижче).
+    let request: IssueGuestConfirmationLinkRequest
+
+    if (dto.delivery === 'EMAIL') {
+      if (dto.email === undefined) {
+        throw new ApiException(
+          API_ERROR_CODES.VALIDATION_ERROR,
+          'Для доставки листом потрібна email-адреса',
+          HttpStatus.BAD_REQUEST,
+        )
+      }
+
+      request = { delivery: 'EMAIL', email: dto.email }
+    } else {
+      if (dto.email !== undefined) {
+        throw new ApiException(
+          API_ERROR_CODES.VALIDATION_ERROR,
+          'Адресу вказують лише для доставки листом',
+          HttpStatus.BAD_REQUEST,
+        )
+      }
+
+      request = { delivery: 'COPY' }
+    }
+
+    return this.confirmations.issueLink(user.id, id, request)
   }
 
   @Patch(':id')

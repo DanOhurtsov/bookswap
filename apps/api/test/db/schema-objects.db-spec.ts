@@ -256,8 +256,26 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
       ORDER BY conname
     `
 
-    expect(confirmation.map((row) => row.conname)).toEqual(['guest_loan_confirmation_resolved_at'])
-    expect(confirmation[0]?.definition).toMatch(/"resolvedAt" IS NULL/)
+    // 10i.1 + 10i.2 (M9d): посилання, виклик перевірки email, код, доказ, лічильники.
+    expect(confirmation.map((row) => row.conname)).toEqual([
+      'guest_confirmation_challenge_consistent',
+      'guest_confirmation_challenge_needs_link',
+      'guest_confirmation_code_all_or_none',
+      'guest_confirmation_code_nonce',
+      'guest_confirmation_code_xor_proof',
+      'guest_confirmation_counters_non_negative',
+      'guest_confirmation_link_all_or_none',
+      'guest_confirmation_link_only_open',
+      'guest_confirmation_link_ttl',
+      'guest_confirmation_proof_all_or_none',
+      'guest_loan_confirmation_resolved_at',
+    ])
+
+    const byName = new Map(confirmation.map((row) => [row.conname, row.definition]))
+
+    expect(byName.get('guest_loan_confirmation_resolved_at')).toMatch(/"resolvedAt" IS NULL/)
+    expect(byName.get('guest_confirmation_link_ttl')).toMatch(/'7 days'::interval/)
+    expect(byName.get('guest_confirmation_link_only_open')).toMatch(/"linkTokenHash" IS NULL/)
   })
 
   it('blockedById має зовнішній ключ на User — від нього залежить право (§6.2)', async () => {

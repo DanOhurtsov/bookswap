@@ -35,6 +35,14 @@ export interface EmailMessage {
    * invitations in the first place (see `InvitationsService.createGuestEmail`).
    */
   redactRecipient?: boolean
+  /**
+   * Stage 10 (10i.2, D2): лист гостьового підтвердження, що несе одноразовий секрет (токен посилання чи
+   * шестизначний код) на синтетичну адресу гостя. Ні адреса, ні тіло не потрапляють у лог і в звичайний
+   * `outbox`; `DevEmailSender` тримає такий лист в окремому обмеженому сховищі, доступному лише
+   * тестові через `sealedTo(email)` (ключ — геш адреси, сама адреса в пам'яті не лежить).
+   * Реальний провайдер такий лист приймати не смів би: `ResendEmailSender` його відхиляє.
+   */
+  sealed?: boolean
 }
 
 export interface EmailSender {

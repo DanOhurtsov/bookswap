@@ -1,15 +1,21 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import {
   API_ERROR_CODES,
   type CreateGuestLoanConfirmationRequest,
+  type IssueGuestConfirmationLinkRequest,
+  type IssueGuestConfirmationLinkResponse,
   type GuestLoanConfirmationListResponse,
   type GuestLoanConfirmationResponse,
   type GuestConfirmationAction,
 } from '@bookswap/shared'
+import { generateToken, hashToken } from '../auth/tokens'
 import { ApiException } from '../common/api.exception'
+import { DevEmailSender } from '../email/dev-email-sender'
 import { recomputeRetainUntil } from '../external-borrowers/retention'
 import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../prisma/prisma.service'
+import { CLEARED_LINK_AND_CHALLENGE, GUEST_LINK_TTL_MS } from './guest-confirmation.rules'
 import { resolveConfirmationTransition } from './guest-loan-confirmation.transitions'
 import {
   asGuestConfirmation,
@@ -83,8 +89,9 @@ interface ConfirmationLookupRow {
 
 /**
  * Stage 10 (10i.1, §0.13). Owner-only запит гостьового підтвердження: створення після фізичної
- * передачі, перегляд, скасування помилкової передачі, запис лише зі слів власника. Публічної
- * відповіді гостя, посилань, токенів, email-коду й сповіщень тут НЕМАЄ (10i.2/10i.3).
+ * передачі, перегляд, скасування помилкової передачі, запис лише зі слів власника; (10i.2) видача й
+ * ротація посилання. ПУБЛІЧНА відповідь гостя — `GuestLoanResponseService`; сповіщень власнику тут
+ * НЕМАЄ (10i.3).
  *
  * Порядок локів (§6.11.2): `ExternalBorrower → Copy → Loan → GuestLoanConfirmation` — той самий, що в
  * `GuestLoanService`/ручному `DELETE`/CLI-чистці. Авторизація (ownerId) вбудована в локувальні запити.
@@ -99,6 +106,8 @@ export class GuestLoanConfirmationService {
     private readonly loanEvents: LoanEventService,
     private readonly guestLoans: GuestLoanService,
     private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
+    private readonly devEmail: DevEmailSender,
   ) {}
 
   /** Owner-only: `GET /guest-loan-confirmations`. */
@@ -265,6 +274,177 @@ export class GuestLoanConfirmationService {
     id: string,
     request: { action: GuestConfirmationAction },
   ): Promise<GuestConfirmationRow> {
+    const { lookup, locked } = await this.lockChain(tx, ownerId, id)
+
+    const transition = resolveConfirmationTransition(locked.status, request.action)
+
+    if (transition === null) {
+      throw new ApiException(
+        API_ERROR_CODES.LOAN_INVALID_TRANSITION,
+        'Дія неможлива в поточному стані запиту підтвердження',
+        HttpStatus.CONFLICT,
+      )
+    }
+
+    const { loan, copy, contactId } = await this.readPendingChain(tx, lookup, locked)
+    const now = new Date()
+    const loanUpdated = await tx.loan.updateMany({
+      where: { id: loan.id, status: 'PENDING_CONFIRMATION' },
+      data: { status: transition.loanTo },
+    })
+
+    assertSingleRow(loanUpdated.count)
+
+    const copyUpdated = await tx.copy.updateMany({
+      where: { id: copy.id, status: 'RESERVED', heldByContactId: contactId },
+      data:
+        transition.copyTo === 'AVAILABLE'
+          ? { status: 'AVAILABLE', currentHolderId: ownerId, heldByContactId: null }
+          : { status: 'LENT_OUT' },
+    })
+
+    assertSingleRow(copyUpdated.count)
+
+    if (transition.rejectsRequestedRivals) {
+      await this.guestLoans.rejectRequestedRivals(tx, copy.id, ownerId, now)
+    }
+
+    // 10i.2: рішення власника гасить посилання й усе, що від нього залежить (виклик, код, доказ) —
+    // після нього відповісти за старим посиланням неможливо.
+    const confirmationUpdated = await tx.guestLoanConfirmation.updateMany({
+      where: { id, status: locked.status },
+      data: { status: transition.confirmationTo, resolvedAt: now, ...CLEARED_LINK_AND_CHALLENGE },
+    })
+
+    assertSingleRow(confirmationUpdated.count)
+
+    await this.loanEvents.record(tx, {
+      loanId: loan.id,
+      type: transition.event,
+      actorId: ownerId,
+    })
+
+    // Перерахунок у ТІЙ САМІЙ транзакції: скасування дає `cancelledAt + 90д`, запис — активна → NULL.
+    await recomputeRetainUntil(tx, contactId)
+
+    return this.readRow(tx, id)
+  }
+
+  /**
+   * Stage 10 (10i.2): `POST /guest-loan-confirmations/:id/link`. Видає ПОТОЧНЕ посилання для запиту, що
+   * чекає відповіді (`OPEN`): нове значення перезаписує геш старого, тож попереднє посилання (і будь-який
+   * незавершений код чи доказ за ним) гасне в тій самій транзакції. Для `DENIED` посилання не видається:
+   * «Не отримував» — одноразова відповідь (§0.13 п. 2).
+   *
+   * `COPY` віддає сирий токен власнику один раз; `EMAIL` надсилає лист на адресу власника й нічого
+   * про неї не зберігає та не повертає (§0.12 п. 1–2). Лист іде ЛИШЕ через `DevEmailSender` (D2) —
+   * `EMAIL_SENDER`-токен, який залежить від `EMAIL_PROVIDER`, тут не використовується.
+   */
+  async issueLink(
+    ownerId: string,
+    id: string,
+    request: IssueGuestConfirmationLinkRequest,
+  ): Promise<IssueGuestConfirmationLinkResponse> {
+    const token = generateToken()
+    const row = await this.prisma.$transaction((tx) => this.rotateLink(tx, ownerId, id, token))
+    // Момент видачі — той, що записано в рядок ПІСЛЯ локів (а не час до очікування).
+    const issuedAt = row.linkIssuedAt?.getTime() ?? Date.now()
+
+    if (request.delivery === 'EMAIL') {
+      try {
+        await this.devEmail.send({
+          to: request.email,
+          subject: 'BookSwap: підтвердіть отримання книжки',
+          body:
+            'Власник просить підтвердити, чи ви отримали від нього книжку.\n\n' +
+            `Відкрийте посилання, вкажіть нікнейм і свою email-адресу, введіть код із листа й дайте ` +
+            `відповідь:\n${this.link(token)}\n\n` +
+            'Посилання дійсне 7 днів. Його можна передати іншій людині — відповідь через посилання ' +
+            'підтверджує лише контроль над адресою, яку вкаже той, хто відповідає. ' +
+            'Якщо ви не очікували цього листа, просто проігноруйте його.',
+          idempotencyKey: `guest-link:${id}:${String(issuedAt)}`,
+          sealed: true,
+        })
+      } catch (error) {
+        // Токен, який ніхто не отримає, одразу гаситься (як у 10g): інакше висів би чинним.
+        await this.prisma.guestLoanConfirmation.updateMany({
+          where: { id, linkTokenHash: hashToken(token) },
+          data: CLEARED_LINK_AND_CHALLENGE,
+        })
+        this.logger.warn(
+          `Лист із посиланням підтвердження ${id} не надіслано: ${error instanceof Error ? error.name : 'помилка'}`,
+        )
+
+        throw new ApiException(
+          API_ERROR_CODES.GUEST_LINK_EMAIL_FAILED,
+          'Не вдалося надіслати лист. Посилання скасовано — видайте нове.',
+          HttpStatus.BAD_GATEWAY,
+        )
+      }
+    }
+
+    this.logger.log(`Запит гостьового підтвердження ${id}: видано посилання (${request.delivery})`)
+
+    // Стан після можливого гасіння (збій листа кинув би вище) — свіжий рядок, не знімок до відправки.
+    const fresh = await this.prisma.guestLoanConfirmation.findUniqueOrThrow({
+      where: { id: row.id },
+      include: WITH_CONFIRMATION_CONTEXT,
+    })
+
+    return {
+      confirmation: toGuestConfirmation(requireRow(fresh)),
+      delivery: request.delivery,
+      url: request.delivery === 'COPY' ? this.link(token) : null,
+    }
+  }
+
+  private async rotateLink(
+    tx: TransactionClient,
+    ownerId: string,
+    id: string,
+    token: string,
+  ): Promise<GuestConfirmationRow> {
+    const { lookup, locked } = await this.lockChain(tx, ownerId, id)
+    // 7 діб рахуються від фактичної видачі — після всіх локів, а не від початку запиту.
+    const now = new Date()
+
+    if (locked.status !== 'OPEN') {
+      throw new ApiException(
+        API_ERROR_CODES.GUEST_LINK_NOT_ISSUABLE,
+        'Посилання можна видати лише для запиту, що чекає відповіді гостя',
+        HttpStatus.CONFLICT,
+      )
+    }
+
+    await this.readPendingChain(tx, lookup, locked)
+
+    const updated = await tx.guestLoanConfirmation.updateMany({
+      where: { id, status: 'OPEN' },
+      data: {
+        ...CLEARED_LINK_AND_CHALLENGE,
+        linkTokenHash: hashToken(token),
+        linkIssuedAt: now,
+        linkExpiresAt: new Date(now.getTime() + GUEST_LINK_TTL_MS),
+      },
+    })
+
+    assertSingleRow(updated.count)
+
+    return this.readRow(tx, id)
+  }
+
+  /**
+   * Порядок локів `ExternalBorrower → Copy → Loan → GuestLoanConfirmation` для дій власника над запитом
+   * (скасування, запис, видача посилання). Статус запиту повертається З ЛОКОВАНОГО рядка.
+   */
+  private async lockChain(
+    tx: TransactionClient,
+    ownerId: string,
+    id: string,
+  ): Promise<{
+    lookup: ConfirmationLookupRow
+    locked: { status: GuestConfirmationRow['status']; externalBorrowerId: string | null }
+  }> {
     // 0. Нелокований пошук лише вирішує, ЯКІ ресурси locати першими; він нічого не авторизує сам, але
     //    авторизація (ownerId) у ньому вже є: чужий/синтетичний рядок не дає нічого й лок не береться.
     const [lookup] = await tx.$queryRaw<ConfirmationLookupRow[]>`
@@ -293,33 +473,33 @@ export class GuestLoanConfirmationService {
       SELECT "id" FROM "Loan" WHERE "id" = ${lookup.loanId} AND "ownerId" = ${ownerId} FOR UPDATE
     `
 
-    const [lockedConfirmation] = await tx.$queryRaw<
+    const [locked] = await tx.$queryRaw<
       { status: GuestConfirmationRow['status']; externalBorrowerId: string | null }[]
     >`
       SELECT "status", "externalBorrowerId" FROM "GuestLoanConfirmation" WHERE "id" = ${id} FOR UPDATE
     `
 
-    if (lockedConfirmation === undefined) throw notFoundConfirmation()
+    if (locked === undefined) throw notFoundConfirmation()
 
-    const transition = resolveConfirmationTransition(lockedConfirmation.status, request.action)
+    return { lookup, locked }
+  }
 
-    if (transition === null) {
-      throw new ApiException(
-        API_ERROR_CODES.LOAN_INVALID_TRANSITION,
-        'Дія неможлива в поточному стані запиту підтвердження',
-        HttpStatus.CONFLICT,
-      )
-    }
-
-    // 5. Перечитування ПІСЛЯ локів: рішення на свіжому стані, а не на знімку до очікування.
+  /**
+   * 5. Перечитування ПІСЛЯ локів: рішення на свіжому стані, а не на знімку до очікування. Структурна
+   * передумова: відкритий запит завжди має `PENDING_CONFIRMATION`/`RESERVED` у контакта. Розбіжність —
+   * зміна в обхід сервісу; жодної мутації, лише 409.
+   */
+  private async readPendingChain(
+    tx: TransactionClient,
+    lookup: ConfirmationLookupRow,
+    locked: { externalBorrowerId: string | null },
+  ) {
     const loan = await tx.loan.findUnique({ where: { id: lookup.loanId } })
     const copy = await tx.copy.findUnique({ where: { id: lookup.copyId } })
-    const contactId = lockedConfirmation.externalBorrowerId
+    const contactId = locked.externalBorrowerId
 
     if (loan === null || copy === null) throw notFoundLoan()
 
-    // Структурна передумова: відкритий запит завжди має `PENDING_CONFIRMATION`/`RESERVED` у контакта.
-    // Розбіжність — зміна в обхід сервісу; жодної мутації, лише 409.
     if (
       loan.status !== 'PENDING_CONFIRMATION' ||
       contactId === null ||
@@ -335,45 +515,12 @@ export class GuestLoanConfirmationService {
       )
     }
 
-    const now = new Date()
-    const loanUpdated = await tx.loan.updateMany({
-      where: { id: loan.id, status: 'PENDING_CONFIRMATION' },
-      data: { status: transition.loanTo },
-    })
+    return { loan, copy, contactId }
+  }
 
-    assertSingleRow(loanUpdated.count)
-
-    const copyUpdated = await tx.copy.updateMany({
-      where: { id: copy.id, status: 'RESERVED', heldByContactId: contactId },
-      data:
-        transition.copyTo === 'AVAILABLE'
-          ? { status: 'AVAILABLE', currentHolderId: ownerId, heldByContactId: null }
-          : { status: 'LENT_OUT' },
-    })
-
-    assertSingleRow(copyUpdated.count)
-
-    if (transition.rejectsRequestedRivals) {
-      await this.guestLoans.rejectRequestedRivals(tx, copy.id, ownerId, now)
-    }
-
-    const confirmationUpdated = await tx.guestLoanConfirmation.updateMany({
-      where: { id, status: lockedConfirmation.status },
-      data: { status: transition.confirmationTo, resolvedAt: now },
-    })
-
-    assertSingleRow(confirmationUpdated.count)
-
-    await this.loanEvents.record(tx, {
-      loanId: loan.id,
-      type: transition.event,
-      actorId: ownerId,
-    })
-
-    // Перерахунок у ТІЙ САМІЙ транзакції: скасування дає `cancelledAt + 90д`, запис — активна → NULL.
-    await recomputeRetainUntil(tx, contactId)
-
-    return this.readRow(tx, id)
+  /** Токен — у фрагменті: він не йде на сервер, у логи проксі й у `Referer` (як у запрошеннях 10g). */
+  private link(token: string): string {
+    return `${this.config.getOrThrow<string>('WEB_ORIGIN')}/guest-loan-confirmation#${encodeURIComponent(token)}`
   }
 
   private async readRow(tx: TransactionClient, id: string): Promise<GuestConfirmationRow> {
@@ -387,7 +534,7 @@ export class GuestLoanConfirmationService {
 }
 
 /** Той самий звужений перелік, що в `GuestLoanService`, плюс `guestLoanConfirmation`. */
-type TransactionClient = Pick<
+export type TransactionClient = Pick<
   PrismaService,
   | 'loan'
   | 'loanEvent'
@@ -402,7 +549,7 @@ type TransactionClient = Pick<
 >
 
 /** Друга лінія захисту: якщо фільтр читача колись розійдеться з мапером — падаємо гучно. */
-function requireRow(row: UnvalidatedGuestConfirmationRow): GuestConfirmationRow {
+export function requireRow(row: UnvalidatedGuestConfirmationRow): GuestConfirmationRow {
   const confirmation = asGuestConfirmation(row)
 
   if (confirmation === null) {
@@ -415,7 +562,7 @@ function requireRow(row: UnvalidatedGuestConfirmationRow): GuestConfirmationRow 
   return confirmation
 }
 
-function notFoundConfirmation(): ApiException {
+export function notFoundConfirmation(): ApiException {
   return new ApiException(
     API_ERROR_CODES.NOT_FOUND,
     'Запит підтвердження не знайдено',

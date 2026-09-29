@@ -5,6 +5,8 @@ import {
   guestLoanConfirmationListResponseSchema,
   guestLoanConfirmationResponseSchema,
   guestLoanConfirmationSchema,
+  issueGuestConfirmationLinkRequestSchema,
+  issueGuestConfirmationLinkResponseSchema,
   updateGuestLoanConfirmationRequestSchema,
 } from './guest-loan-confirmation'
 
@@ -57,6 +59,7 @@ const rawConfirmation = {
     guestEmail: null,
     guestEmailVerifiedAt: null,
   },
+  link: null,
 }
 
 describe('guestLoanConfirmationSchema', () => {
@@ -180,5 +183,67 @@ describe('guestLoanEvidenceOf', () => {
     ['CANCELLED', null],
   ] as const)('%s → %s', (status, evidence) => {
     expect(guestLoanEvidenceOf(status)).toBe(evidence)
+  })
+})
+
+describe('link у guestLoanConfirmationSchema (10i.2)', () => {
+  it('приймає стан посилання без токена й адреси; зайві поля відхиляє', () => {
+    const link = {
+      issuedAt: '2026-09-29T10:00:00.000Z',
+      expiresAt: '2026-10-06T10:00:00.000Z',
+      isExpired: false,
+    }
+
+    expect(guestLoanConfirmationSchema.safeParse({ ...rawConfirmation, link }).success).toBe(true)
+    expect(
+      guestLoanConfirmationSchema.safeParse({
+        ...rawConfirmation,
+        link: { ...link, token: 'secret' },
+      }).success,
+    ).toBe(false)
+    expect(
+      guestLoanConfirmationSchema.safeParse({
+        ...rawConfirmation,
+        link: { ...link, email: 'a@guest.invalid' },
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('issueGuestConfirmationLinkRequestSchema (10i.2)', () => {
+  it('COPY без полів; EMAIL — лише синтетична адреса guest.invalid (D2), нормалізована', () => {
+    expect(issueGuestConfirmationLinkRequestSchema.safeParse({ delivery: 'COPY' }).success).toBe(
+      true,
+    )
+    expect(
+      issueGuestConfirmationLinkRequestSchema.parse({
+        delivery: 'EMAIL',
+        email: '  Marta@Guest.Invalid ',
+      }),
+    ).toEqual({ delivery: 'EMAIL', email: 'marta@guest.invalid' })
+  })
+
+  it.each([
+    { delivery: 'EMAIL' },
+    { delivery: 'EMAIL', email: 'marta@example.com' },
+    { delivery: 'COPY', email: 'marta@guest.invalid' },
+    { delivery: 'SMS' },
+    {},
+  ])('відхиляє %j', (body) => {
+    expect(issueGuestConfirmationLinkRequestSchema.safeParse(body).success).toBe(false)
+  })
+
+  it('відповідь: url лише рядок або null; зайвих полів (адреса доставки) немає', () => {
+    const base = {
+      confirmation: rawConfirmation,
+      delivery: 'EMAIL',
+      url: null,
+    }
+
+    expect(issueGuestConfirmationLinkResponseSchema.safeParse(base).success).toBe(true)
+    expect(
+      issueGuestConfirmationLinkResponseSchema.safeParse({ ...base, email: 'a@guest.invalid' })
+        .success,
+    ).toBe(false)
   })
 })

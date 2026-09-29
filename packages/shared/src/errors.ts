@@ -298,6 +298,23 @@ export const API_ERROR_CODES = {
   INVITE_RATE_LIMITED: 'INVITE_RATE_LIMITED',
   /** Листи-запрошення доступні лише з підтвердженою поштою (HTTP 403). */
   INVITE_EMAIL_UNVERIFIED: 'INVITE_EMAIL_UNVERIFIED',
+  /**
+   * Stage 10 (10i.2): посилання гостьового підтвердження невідоме, погашене, замінене новим, або запит
+   * уже розв'язаний (HTTP 404). Один код на всі випадки: за токеном не можна вгадати, який саме.
+   */
+  GUEST_LINK_INVALID: 'GUEST_LINK_INVALID',
+  /** Stage 10 (10i.2): 7-денний строк посилання минув (HTTP 410); запит лишається відкритим. */
+  GUEST_LINK_EXPIRED: 'GUEST_LINK_EXPIRED',
+  /** Stage 10 (10i.2): код підтвердження email хибний, прострочений чи погашений (HTTP 400). */
+  GUEST_CODE_INVALID: 'GUEST_CODE_INVALID',
+  /** Stage 10 (10i.2): забагато хибних кодів або запитів коду для цього посилання (HTTP 429). */
+  GUEST_CODE_RATE_LIMITED: 'GUEST_CODE_RATE_LIMITED',
+  /** Stage 10 (10i.2): немає чинного доказу контролю email для цієї відповіді (HTTP 403). */
+  GUEST_PROOF_INVALID: 'GUEST_PROOF_INVALID',
+  /** Stage 10 (10i.2): лист із посиланням не надіслано; посилання погашено (HTTP 502). */
+  GUEST_LINK_EMAIL_FAILED: 'GUEST_LINK_EMAIL_FAILED',
+  /** Stage 10 (10i.2): посилання можна видати лише для запиту, що очікує відповіді (HTTP 409). */
+  GUEST_LINK_NOT_ISSUABLE: 'GUEST_LINK_NOT_ISSUABLE',
 } as const
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES]

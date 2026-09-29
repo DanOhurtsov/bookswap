@@ -6,6 +6,8 @@ import { apiErrorSchema, sessionResponseSchema } from '@bookswap/shared'
 import { createTestApp } from './auth.helpers'
 import { registerAccount, url, type Account } from './loan.helpers'
 import { SessionService } from '../src/auth/session.service'
+import { DevEmailSender } from '../src/email/dev-email-sender'
+import { GuestLoanResponseService } from '../src/loans/guest-loan-response.service'
 import { ExternalBorrowersService } from '../src/external-borrowers/external-borrowers.service'
 import { InvitationsService } from '../src/invitations/invitations.service'
 import { GuestLoanConfirmationService } from '../src/loans/guest-loan-confirmation.service'
@@ -204,6 +206,72 @@ describe('Stage 10 (10f.2): контакти при вимкненому пра�
       expect(
         await prisma.guestLoanConfirmation.count({ where: { loan: { ownerId: owner.id } } }),
       ).toBe(0)
+    },
+  )
+
+  /**
+   * Stage 10 (10i.2, GATE1): видача посилання власником і ПУБЛІЧНІ маршрути гостя. Публічні маршрути
+   * не мають сесії, тож `GuestLoansEnabledGuard` — єдине, що стоїть перед ними: `403` до throttler'а,
+   * сервісу, БД і будь-якого листа.
+   */
+  const responseRoutes: [string, 'post', string, object][] = [
+    ['POST', 'post', '/guest-loan-confirmations/any-id/link', { delivery: 'COPY' }],
+    ['POST', 'post', '/guest-loan-responses/resolve', { token: 'x' }],
+    [
+      'POST',
+      'post',
+      '/guest-loan-responses/code',
+      { token: 'x', nickname: 'Н', email: 'g@guest.invalid' },
+    ],
+    [
+      'POST',
+      'post',
+      '/guest-loan-responses/verify',
+      { token: 'x', nickname: 'Н', email: 'g@guest.invalid', code: '123456' },
+    ],
+    [
+      'POST',
+      'post',
+      '/guest-loan-responses/answer',
+      { token: 'x', nickname: 'Н', email: 'g@guest.invalid', proof: 'p', answer: 'RECEIVED' },
+    ],
+  ]
+
+  it.each(responseRoutes)(
+    '%s %s → 403 FEATURE_DISABLED: session/service/БД/лист/throttler не викликаються (і з сесією, і без)',
+    async (_name, method, path, body) => {
+      const validate = jest.spyOn(app.get(SessionService), 'validate')
+      const confirmations = app.get(GuestLoanConfirmationService)
+      const responses = app.get(GuestLoanResponseService)
+      const spies = [
+        jest.spyOn(confirmations, 'issueLink'),
+        jest.spyOn(responses, 'resolve'),
+        jest.spyOn(responses, 'requestCode'),
+        jest.spyOn(responses, 'verifyCode'),
+        jest.spyOn(responses, 'answer'),
+        jest.spyOn(app.get(DevEmailSender), 'send'),
+      ]
+      const dbSpies = [
+        jest.spyOn(prisma.guestLoanConfirmation, 'findUnique'),
+        jest.spyOn(prisma.guestLoanConfirmation, 'findFirst'),
+        jest.spyOn(prisma.guestLoanConfirmation, 'updateMany'),
+        jest.spyOn(prisma, '$transaction'),
+      ]
+
+      throttlerCanActivate.mockClear()
+
+      for (const cookie of [owner.cookie, undefined]) {
+        const base = request(http())[method](url(path))
+        const call = cookie === undefined ? base : base.set('Cookie', cookie)
+        const response = await call.send(body)
+
+        expect(response.status).toBe(403)
+        expect(apiErrorSchema.parse(response.body).code).toBe('FEATURE_DISABLED')
+      }
+
+      expect(validate).not.toHaveBeenCalled()
+      expect(throttlerCanActivate).not.toHaveBeenCalled()
+      for (const spy of [...spies, ...dbSpies]) expect(spy).not.toHaveBeenCalled()
     },
   )
 

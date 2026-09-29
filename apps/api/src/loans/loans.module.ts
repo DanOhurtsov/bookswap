@@ -4,8 +4,11 @@ import { AnalyticsModule } from '../analytics/analytics.module'
 import { AuthModule } from '../auth/auth.module'
 import { GuestLoansEnabledGuard } from '../common/guest-loans-enabled.guard'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { GuestConfirmationSecrets } from './guest-confirmation-secrets'
 import { GuestLoanConfirmationService } from './guest-loan-confirmation.service'
 import { GuestLoanConfirmationsController } from './guest-loan-confirmations.controller'
+import { GuestLoanResponseService } from './guest-loan-response.service'
+import { GuestLoanResponsesController } from './guest-loan-responses.controller'
 import { GuestLoanService } from './guest-loan.service'
 import { GuestLoansController } from './guest-loans.controller'
 import { LoanEventService } from './loan-event.service'
@@ -27,12 +30,19 @@ import { LoansController } from './loans.controller'
  */
 @Module({
   imports: [AuthModule, AccessModule, AnalyticsModule, NotificationsModule],
-  controllers: [GuestLoansController, GuestLoanConfirmationsController, LoansController],
+  controllers: [
+    GuestLoansController,
+    GuestLoanConfirmationsController,
+    GuestLoanResponsesController,
+    LoansController,
+  ],
   providers: [
     LoanService,
     LoanEventService,
     GuestLoanService,
     GuestLoanConfirmationService,
+    GuestLoanResponseService,
+    GuestConfirmationSecrets,
     GuestLoansEnabledGuard,
   ],
   exports: [LoanService],

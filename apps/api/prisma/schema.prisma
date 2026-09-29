@@ -438,9 +438,9 @@ model Copy {
   acquiredAt DateTime?
   createdAt  DateTime   @default(now())
 
-  edition       Edition @relation(fields: [editionId], references: [id])
-  owner         User    @relation("CopyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  currentHolder User?   @relation("CopyHolder", fields: [currentHolderId], references: [id], onDelete: Restrict)
+  edition       Edition           @relation(fields: [editionId], references: [id])
+  owner         User              @relation("CopyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  currentHolder User?             @relation("CopyHolder", fields: [currentHolderId], references: [id], onDelete: Restrict)
   heldByContact ExternalBorrower? @relation("CopyHeldByContact", fields: [heldByContactId], references: [id], onDelete: SetNull)
   loans         Loan[]
 
@@ -500,11 +500,11 @@ model Loan {
   dueAt       DateTime?
   returnedAt  DateTime?
 
-  copy     Copy @relation(fields: [copyId], references: [id], onDelete: Restrict)
-  owner    User @relation("LoanOwner", fields: [ownerId], references: [id])
-  borrower User? @relation("LoanBorrower", fields: [borrowerId], references: [id], onDelete: Restrict)
-  borrowerContact ExternalBorrower? @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id], onDelete: SetNull)
-  events   LoanEvent[]
+  copy              Copy                   @relation(fields: [copyId], references: [id], onDelete: Restrict)
+  owner             User                   @relation("LoanOwner", fields: [ownerId], references: [id])
+  borrower          User?                  @relation("LoanBorrower", fields: [borrowerId], references: [id], onDelete: Restrict)
+  borrowerContact   ExternalBorrower?      @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id], onDelete: SetNull)
+  events            LoanEvent[]
   /// Stage 10 (10i.1): є лише в позик, створених через запит гостьового підтвердження.
   guestConfirmation GuestLoanConfirmation?
 
@@ -561,20 +561,24 @@ enum LoanEventType {
   GUEST_HANDOVER_CANCELLED
   /// Stage 10 (10i.1): власник залишив позику активною як запис лише зі слів власника.
   GUEST_LOAN_OWNER_RECORDED
+  /// Stage 10 (10i.2): гість після доведеного контролю email відповів «Отримав книжку».
+  GUEST_LOAN_RECEIVED
+  /// Stage 10 (10i.2): гість після доведеного контролю email відповів «Не отримував».
+  GUEST_LOAN_DENIED
 }
 
 /// Stage 10 (D1): контакт-гість у межах бібліотеки одного власника. Не `User`, не спільний
 /// каталог. `alias` — єдине PII; email не зберігається (T6). Функцію заблоковано D2
 /// (release blocker): таблиця існує, але 10a її не заповнює.
 model ExternalBorrower {
-  id              String    @id @default(cuid())
-  ownerId         String
-  alias           String
+  id                   String    @id @default(cuid())
+  ownerId              String
+  alias                String
   /// D2: коли власник заявив «я повідомив(-ла) гостя». НЕ згода і НЕ правова підстава.
-  ownerInformedAt DateTime?
+  ownerInformedAt      DateTime?
   /// D3: NULL — є активна позика; інакше момент видалення контакту.
-  retainUntil     DateTime?
-  createdAt       DateTime  @default(now())
+  retainUntil          DateTime?
+  createdAt            DateTime  @default(now())
   /// Stage 10 (10i.1, §0.13): нікнейм, email і час перевірки контролю email, які ПІДТВЕРДИВ гість.
   /// Приватні, лише для власника; alias власника вони не замінюють. Усі три — NULL або всі не-NULL
   /// (CHECK `external_borrower_guest_identity_all_or_none`). Видаляються разом із контактом (D3).
@@ -582,9 +586,9 @@ model ExternalBorrower {
   guestEmail           String?
   guestEmailVerifiedAt DateTime?
 
-  owner         User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  loans         Loan[]  @relation("LoanBorrowerContact")
-  heldCopies    Copy[]  @relation("CopyHeldByContact")
+  owner              User                    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  loans              Loan[]                  @relation("LoanBorrowerContact")
+  heldCopies         Copy[]                  @relation("CopyHeldByContact")
   guestConfirmations GuestLoanConfirmation[]
 
   @@index([ownerId])
@@ -613,6 +617,35 @@ model GuestLoanConfirmation {
   createdAt          DateTime                    @default(now())
   /// NULL, поки статус OPEN чи DENIED; інакше момент завершення (CHECK `guest_loan_confirmation_resolved_at`).
   resolvedAt         DateTime?
+
+  /// Stage 10 (10i.2): ПОТОЧНЕ посилання — лише SHA-256 токена (сирий токен ніде не зберігається).
+  /// Повторна видача перезаписує геш (старе посилання гасне негайно); відповідь/дія власника обнуляє все.
+  /// Триплет `link*` — усе або нічого; посилання можливе лише для статусу OPEN.
+  linkTokenHash String?   @unique
+  linkIssuedAt  DateTime?
+  /// linkIssuedAt + 7 днів (серверний час видачі, Q24).
+  linkExpiresAt DateTime?
+
+  /// Виклик перевірки email: HMAC(підтвердження, адреса гостя, нікнейм) — без відкритих значень.
+  challengeMac        String?
+  /// HMAC одноразового шестизначного коду, прив'язаний до challengeMac; NULL після успіху/вичерпання.
+  codeHash            String?
+  codeExpiresAt       DateTime?
+  /// Незалежний випадковий ідентифікатор КОЖНОЇ видачі коду (не залежить від значення коду): за ним гасять код
+  /// після збою відправки. NULL ⇔ codeHash NULL (CHECK `guest_confirmation_code_nonce`).
+  codeNonce           String?
+  /// Хибні спроби для ПОТОЧНОГО коду (гасне код при вичерпанні).
+  codeAttempts        Int       @default(0)
+  /// Хибні спроби за все життя ПОТОЧНОГО посилання (стеля проти перебору між кодами).
+  codeFailedTotal     Int       @default(0)
+  /// Скільки кодів надіслано у вікні `codeWindowStartedAt` (ліміт на посилання).
+  codeSentCount       Int       @default(0)
+  codeWindowStartedAt DateTime?
+  /// Доказ контролю email: SHA-256 випадкового значення, віддається лише гостю, що ввів правильний код.
+  proofHash           String?
+  proofExpiresAt      DateTime?
+  /// Момент успішної перевірки коду; потрапляє в `ExternalBorrower.guestEmailVerifiedAt` при відповіді.
+  verifiedAt          DateTime?
 
   loan             Loan              @relation(fields: [loanId], references: [id], onDelete: Restrict)
   externalBorrower ExternalBorrower? @relation(fields: [externalBorrowerId], references: [id], onDelete: SetNull)

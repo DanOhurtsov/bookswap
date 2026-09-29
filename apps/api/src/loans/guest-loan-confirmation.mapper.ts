@@ -32,6 +32,9 @@ export type GuestConfirmationRow = {
   status: GuestLoanConfirmationStatus
   createdAt: Date
   resolvedAt: Date | null
+  /** Лише час видачі/строк ПОТОЧНОГО посилання; геш токена мапер не бачить і не віддає. */
+  linkIssuedAt: Date | null
+  linkExpiresAt: Date | null
   loan: Pick<LoanModel, 'id' | 'createdAt' | 'returnedAt' | 'dueAt'> & {
     status: GuestConfirmationLoanStatusValue
     /** `asGuestConfirmation` гарантує `NOT NULL`: запит створюють лише після фізичної передачі. */
@@ -74,6 +77,14 @@ export function toGuestConfirmation(
     evidence: guestLoanEvidenceOf(row.status),
     createdAt: row.createdAt.toISOString(),
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    link:
+      row.linkIssuedAt === null || row.linkExpiresAt === null
+        ? null
+        : {
+            issuedAt: row.linkIssuedAt.toISOString(),
+            expiresAt: row.linkExpiresAt.toISOString(),
+            isExpired: row.linkExpiresAt.getTime() <= now.getTime(),
+          },
     loan: {
       id: loan.id,
       status: loan.status,

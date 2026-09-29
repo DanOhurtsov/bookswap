@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { EmailMessage, EmailSender } from './email-sender'
@@ -6,6 +7,15 @@ import type { EmailMessage, EmailSender } from './email-sender'
 const OUTBOX_LIMIT = 50
 
 const PRODUCTION = 'production'
+
+/** Запечатаний лист (10i.2): адреса — лише як геш, щоб її не було ні в пам'яті, ні в лозі. */
+export interface SealedEmail {
+  subject: string
+  body: string
+}
+
+const addressKey = (email: string): string =>
+  createHash('sha256').update(email.trim().toLowerCase()).digest('hex')
 
 /**
  * Причина, чому цю реалізацію не можна пускати в прод, — не «вона несправжня», а
@@ -68,6 +78,7 @@ export function assertNotProduction(nodeEnv: string | undefined): void {
 export class DevEmailSender implements EmailSender {
   private readonly logger = new Logger(DevEmailSender.name)
   private readonly sent: EmailMessage[] = []
+  private readonly sealed: { key: string; email: SealedEmail }[] = []
 
   constructor(private readonly config: ConfigService) {}
 
@@ -81,6 +92,23 @@ export class DevEmailSender implements EmailSender {
     const refusal = productionRefusal(this.nodeEnv)
 
     if (refusal !== undefined) return Promise.reject(refusal)
+
+    // Stage 10 (10i.2): запечатаний лист — секрет (токен/код) не друкується в лог узагалі, а адреса не
+    // зберігається відкритою. Єдиний спосіб дістати лист — `sealedTo` (тест), а не читання логів.
+    if (message.sealed === true) {
+      this.sealed.push({
+        key: addressKey(message.to),
+        email: { subject: message.subject, body: message.body },
+      })
+
+      if (this.sealed.length > OUTBOX_LIMIT) this.sealed.shift()
+
+      this.logger.log(
+        'Лист (dev, нікуди не відправлено, запечатаний) → [приховано]; тіло приховано',
+      )
+
+      return Promise.resolve()
+    }
 
     // Stage 10 (10g, Q4): гостьове запрошення. Сирий email існує лише всередині цього
     // виклику й ніде його не переживає — ні в БД (не тут узагалі), ні в outbox нижче.
@@ -124,8 +152,20 @@ export class DevEmailSender implements EmailSender {
     return [...this.sent].reverse().find((message) => message.to === email)
   }
 
+  /**
+   * Stage 10 (10i.2): останній запечатаний лист для адреси (синтетичної). Копія, не внутрішній об'єкт.
+   * Тестовий доступ — у проді `send()` відмовляє, тож сховище там порожнє.
+   */
+  sealedTo(email: string): SealedEmail | undefined {
+    const key = addressKey(email)
+    const found = [...this.sealed].reverse().find((entry) => entry.key === key)
+
+    return found === undefined ? undefined : { ...found.email }
+  }
+
   clear(): void {
     this.sent.length = 0
+    this.sealed.length = 0
   }
 
   /**

@@ -143,6 +143,9 @@ export const LOAN_EVENT_TYPE = [
   'GUEST_CONFIRMATION_REQUESTED',
   'GUEST_HANDOVER_CANCELLED',
   'GUEST_LOAN_OWNER_RECORDED',
+  // Stage 10 (10i.2): публічна відповідь гостя після доведеного контролю email. Payload порожній.
+  'GUEST_LOAN_RECEIVED',
+  'GUEST_LOAN_DENIED',
 ] as const
 
 export const loanEventTypeSchema = z.enum(LOAN_EVENT_TYPE)
@@ -192,6 +195,16 @@ export const GUEST_CONFIRMATION_ACTIONS = ['cancel_handover', 'record_owner_stat
 export const guestConfirmationActionSchema = z.enum(GUEST_CONFIRMATION_ACTIONS)
 
 export type GuestConfirmationAction = z.infer<typeof guestConfirmationActionSchema>
+
+/**
+ * Stage 10 (10i.2): відповідь гостя на конкретну позику — «Отримав книжку» / «Не отримував».
+ * Технічні назви, а не затверджені продуктові правила.
+ */
+export const GUEST_RESPONSE_ANSWERS = ['RECEIVED', 'DENIED'] as const
+
+export const guestResponseAnswerSchema = z.enum(GUEST_RESPONSE_ANSWERS)
+
+export type GuestResponseAnswer = z.infer<typeof guestResponseAnswerSchema>
 
 /**
  * Stage 10 (10i.1): джерело доказу гостьової передачі — ВИВОДИТЬСЯ з рядка підтвердження, а не

@@ -88,3 +88,14 @@ export const LIBRARY_IMPORT_PATCH_RATE_LIMIT = fromEnv('LIBRARY_IMPORT_PATCH_RAT
  */
 export const LIBRARY_IMPORT_COMMIT_RATE_LIMIT = fromEnv('LIBRARY_IMPORT_COMMIT_RATE_LIMIT', 10)
 export const LIBRARY_IMPORT_RATE_WINDOW_MS = fromEnv('LIBRARY_IMPORT_RATE_WINDOW_MS', 60_000)
+
+/**
+ * Stage 10 (10i.2): публічні маршрути гостьової відповіді (без сесії, тож ключ — клієнт/IP). Перший рубіж
+ * над обмеженнями в БД (хибні коди, листи на посилання), які й є справжнім захистом від підбору: цей лічильник
+ * в пам'яті процесу не переживає рестарт і не ділиться між інстансами (як і решта, README).
+ * Надсилання коду — окремий, суворіший бакет: кожен виклик — це лист.
+ */
+export const GUEST_RESPONSE_RATE_LIMIT = fromEnv('GUEST_RESPONSE_RATE_LIMIT', 30)
+export const GUEST_RESPONSE_RATE_WINDOW_MS = fromEnv('GUEST_RESPONSE_RATE_WINDOW_MS', 60_000)
+export const GUEST_CODE_SEND_RATE_LIMIT = fromEnv('GUEST_CODE_SEND_RATE_LIMIT', 5)
+export const GUEST_CODE_SEND_RATE_WINDOW_MS = fromEnv('GUEST_CODE_SEND_RATE_WINDOW_MS', 10 * 60_000)
