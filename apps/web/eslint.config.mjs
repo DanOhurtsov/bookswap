@@ -14,6 +14,7 @@ const KNOWN_FEATURES = [
   'features/network',
   'features/contacts',
   'features/guest-loans',
+  'features/reading-status',
 ]
 
 export default [

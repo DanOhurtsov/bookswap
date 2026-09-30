@@ -25,7 +25,7 @@ export function useCopyHistory(copyId: string): Resource<CopyHistoryResponse> {
   return useApiResource(`/copies/${encodeURIComponent(copyId)}/history`, copyHistoryResponseSchema)
 }
 
-/** §8: `GET /works/:id/history` — «хто з моїх це взагалі читав». */
+/** §8: `GET /works/:id/history` — «Хто брав цю книжку» (Stage 10, Q16): передачі, а не прочитання. */
 export function useWorkHistory(workId: string): Resource<WorkHistoryResponse> {
   return useApiResource(`/works/${encodeURIComponent(workId)}/history`, workHistoryResponseSchema)
 }

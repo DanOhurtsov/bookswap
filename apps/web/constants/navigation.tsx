@@ -19,6 +19,7 @@ const NAVBAR_PROFILE_LINKS = [
   { href: '/profile', label: 'Профіль' },
   { href: '/library', label: 'Моя бібліотека' },
   { href: '/wishlist', label: 'Вішлист' },
+  { href: '/reading-list', label: 'Список читання' },
 ]
 
 // exports

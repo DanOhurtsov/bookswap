@@ -10,6 +10,7 @@ import type {
   LoanAction,
   LoanStatus,
   NotificationType,
+  ReadingStatus,
   Visibility,
 } from '@bookswap/shared'
 
@@ -61,6 +62,16 @@ export const LOAN_STATUS_LABELS: Readonly<Record<LoanStatus, string>> = {
   PENDING_CONFIRMATION: 'Очікує підтвердження',
   DECLINED: 'Відхилено позичальником',
 }
+
+/** Stage 10 (10j, R-1): особистий статус читання — думка користувача, а не факт позики. */
+export const READING_STATUS_LABELS: Readonly<Record<ReadingStatus, string>> = {
+  NOT_READ: 'Не читав',
+  READING: 'Читаю',
+  READ: 'Прочитано',
+}
+
+/** Stage 10 (10j, R-5): тег за підтвердженою фактичною передачею твору саме цьому користувачу. */
+export const WAS_BORROWED_LABEL = 'Була позичена'
 
 /** Підписи кнопок §8. Дієслово від першої особи того, хто тисне. */
 export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {

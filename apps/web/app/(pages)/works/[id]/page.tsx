@@ -37,6 +37,7 @@ import {
 import { ApiRequestError, apiRequest, describeError } from '../../../lib/api'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '../../../lib/labels'
 import { HoldersPanel } from '@/features/network/index.client'
+import { ReadingStatusPanel } from '@/features/reading-status/index.client'
 import { useWork, type WorkReloadOutcome } from '../../../lib/use-catalog'
 import { useWorkHistory } from '../../../lib/use-history'
 import { useSession } from '../../../lib/use-session'
@@ -49,9 +50,10 @@ import { validate, type FieldErrors } from '../../../lib/validation'
  * Примірників тут немає — ні своїх, ні друзів. Каталог однаковий для всіх, а хто
  * чим володіє, живе за матрицею §9 у бібліотеках.
  *
- * Знизу — історія твору (§6.6, «хто з моїх це взагалі читав»). Вона відповідає на
- * те саме питання, заради якого §6.5 хотіла позначку «у кого з друзів це є», але
- * чесніше: не «у кого лежить», а «хто справді брав», і без переліку чужих полиць.
+ * Знизу — історія твору (§6.6), розділ «Хто брав цю книжку» (Stage 10, Q16). Вона
+ * відповідає на те саме питання, заради якого §6.5 хотіла позначку «у кого з друзів
+ * це є», але чесніше: не «у кого лежить», а «хто справді брав», і без переліку чужих
+ * полиць. Передача — не прочитання: власний статус читання окремий і приватний (10j).
  */
 export default function WorkPage() {
   const parameters = useParams<{ id: string }>()
@@ -152,6 +154,13 @@ export default function WorkPage() {
 
       <WishlistButton work={work} authors={authors} wishlist={wishlist} />
 
+      {/*
+        Keyed by viewer AND canonical work: a different signed-in user or a merge redirect is a
+        different private resource, so the old status (and any save still in flight) is dropped
+        in the same render instead of lingering until a new GET lands.
+      */}
+      <ReadingStatusPanel key={`${session.user.id}:${work.id}`} workId={work.id} />
+
       {canEditWork && (
         <WorkCorrectionSection
           work={work}
@@ -227,8 +236,12 @@ export default function WorkPage() {
   )
 }
 
+const WORK_HISTORY_HEADING = 'Хто брав цю книжку'
+
 /**
- * §6.6: «хто з моїх це взагалі читав».
+ * §6.6, Stage 10 Q16: «Хто брав цю книжку» — поточні й минулі фактичні передачі (фільтр 10b).
+ * Назва не обіцяє прочитання: історія доводить лише передачу (R-3), а статуси читання друзів
+ * тут не показуються й не показуватимуться (R-8).
  *
  * Специфікація називає це кориснішим за історію примірника — і саме тому воно
  * тут, на сторінці твору: питання «чи варто просити цю книжку» ставлять до того,
@@ -241,7 +254,7 @@ function WorkHistorySection({ workId }: { workId: string }) {
   if (state.status === 'loading') {
     return (
       <section className="friends-section">
-        <h2>Хто з друзів це читав</h2>
+        <h2>{WORK_HISTORY_HEADING}</h2>
         <p className="status status--pending">Завантажую…</p>
       </section>
     )
@@ -250,7 +263,7 @@ function WorkHistorySection({ workId }: { workId: string }) {
   if (state.status === 'error') {
     return (
       <section className="friends-section">
-        <h2>Хто з друзів це читав</h2>
+        <h2>{WORK_HISTORY_HEADING}</h2>
         <FormStatus error={new Error(state.message)} />
       </section>
     )
@@ -258,7 +271,7 @@ function WorkHistorySection({ workId }: { workId: string }) {
 
   return (
     <section className="friends-section">
-      <h2>Хто з друзів це читав</h2>
+      <h2>{WORK_HISTORY_HEADING}</h2>
       {state.data.entries.length === 0 ? (
         <p className="empty">Серед ваших друзів цю книжку ще ніхто не позичав.</p>
       ) : (

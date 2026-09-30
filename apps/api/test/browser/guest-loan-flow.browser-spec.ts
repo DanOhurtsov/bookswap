@@ -1,9 +1,6 @@
 import { WEB_ORIGIN, WEB_PORT } from './browser-env'
 import 'reflect-metadata'
-import { spawn, type ChildProcess } from 'node:child_process'
-import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
-import { resolve } from 'node:path'
+import type { ChildProcess } from 'node:child_process'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core'
 import request from 'supertest'
 import type { INestApplication } from '@nestjs/common'
@@ -14,6 +11,7 @@ import { NotificationDispatcher } from '../../src/notifications/notification-dis
 import { PrismaService } from '../../src/prisma/prisma.service'
 import { createTestApp, sessionCookie, uniqueEmail } from '../auth.helpers'
 import { createShelfCopy } from '../loan.helpers'
+import { startWeb, stopWeb } from './web-server'
 
 /**
  * Stage 10, 10i.3: АВТОМАТИЧНИЙ браузерний e2e повного потоку гостьового підтвердження на синтетичних даних.
@@ -45,27 +43,6 @@ let sender: EmailSender
 let sentMessages: EmailMessage[] = []
 const contexts: BrowserContext[] = []
 
-async function waitForWeb(origin: string, child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 120_000
-
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null)
-      throw new Error(`next dev завершився з кодом ${String(child.exitCode)}`)
-
-    try {
-      const response = await fetch(`${origin}/login`)
-
-      if (response.ok) return
-    } catch {
-      // сервер ще піднімається
-    }
-
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-
-  throw new Error('next dev не став готовим за 120 с')
-}
-
 beforeAll(async () => {
   app = await createTestApp()
   prisma = app.get(PrismaService)
@@ -86,26 +63,7 @@ beforeAll(async () => {
     return original(message)
   })
 
-  const apiPort = ((app.getHttpServer() as Server).address() as AddressInfo).port
-  const webDir = resolve(__dirname, '../../../web')
-
-  // Мінімальне оточення: web не має бачити ні DATABASE_URL, ні решти конфігурації API.
-  web = spawn(resolve(webDir, 'node_modules/.bin/next'), ['dev', '--port', String(WEB_PORT)], {
-    cwd: webDir,
-    env: {
-      PATH: process.env.PATH ?? '',
-      HOME: process.env.HOME ?? '',
-      NODE_ENV: 'development',
-      NEXT_TELEMETRY_DISABLED: '1',
-      NEXT_PUBLIC_API_URL: `http://localhost:${String(apiPort)}`,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,
-  })
-  web.stdout?.resume()
-  web.stderr?.resume()
-
-  await waitForWeb(webOrigin, web)
+  web = await startWeb(app, WEB_PORT, webOrigin)
 
   browser = await chromium.launch()
 }, 240_000)
@@ -115,13 +73,7 @@ afterAll(async () => {
 
   await browser?.close().catch(() => undefined)
 
-  if (web?.pid !== undefined) {
-    try {
-      process.kill(-web.pid, 'SIGTERM')
-    } catch {
-      // уже завершився
-    }
-  }
+  await stopWeb(web)
 
   await app?.close()
 })
