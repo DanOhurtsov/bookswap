@@ -64,6 +64,7 @@ model User {
   friendshipsB        Friendship[]             @relation("FriendB")
   friendshipsBlocked  Friendship[]             @relation("FriendshipBlockedBy")
   wishlist            WishlistItem[]
+  readingStatuses     WorkReadingStatus[]
   notifications       Notification[]
   notificationPrefs   NotificationPreference[]
   productEvents       ProductEvent[]
@@ -268,11 +269,12 @@ model Work {
   mergedInto   Work?   @relation("WorkMerge", fields: [mergedIntoId], references: [id])
   mergedFrom   Work[]  @relation("WorkMerge")
 
-  authors      WorkAuthor[]
-  editions     Edition[]
-  translations Translation[]
-  reviews      Review[]       @relation("ReviewWork")
-  wishlistedBy WishlistItem[]
+  authors         WorkAuthor[]
+  editions        Edition[]
+  translations    Translation[]
+  reviews         Review[]            @relation("ReviewWork")
+  wishlistedBy    WishlistItem[]
+  readingStatuses WorkReadingStatus[]
 
   /// Зворотний бік `Review.archivedByMergeSource` (R5). Іменований зв'язок потрібен
   /// суто тому, що між `Review` і `Work` їх стало два — сам по собі цей список
@@ -740,6 +742,33 @@ model WishlistItem {
   work Work @relation(fields: [workId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workId])
+}
+
+/// Stage 10 (10j, R-1): особистий статус читання. Відсутність рядка = «статус не встановлювали».
+enum ReadingStatus {
+  NOT_READ
+  READING
+  READ
+}
+
+/// Stage 10 (10j, T11, M7): приватний статус читання зареєстрованого користувача щодо `Work`
+/// (R-2). Жодних зв'язків з `Copy`/`Loan`/`ExternalBorrower` — статус ставить лише сам користувач
+/// (R-3). Явний `NOT_READ` = свідоме скидання; його `updatedAt` бере участь у merge (Q19).
+/// `updatedAt` — не `@updatedAt`: його ставить лише `ReadingStatusService` сирим SQL (`clock_timestamp()` після
+/// блокування рядка, тож час іде в порядку фактичних змін); повторний PUT і перенос при merge його не чіпають.
+model WorkReadingStatus {
+  id        String        @id @default(cuid())
+  userId    String
+  workId    String
+  status    ReadingStatus
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  work Work @relation(fields: [workId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, workId])
+  @@index([userId, updatedAt(sort: Desc), id(sort: Desc)])
 }
 
 // ---------------------------------------------------------------------------

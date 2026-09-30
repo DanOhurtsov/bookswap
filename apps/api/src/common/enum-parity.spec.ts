@@ -21,6 +21,8 @@ import {
   OPEN_LOAN_STATUS,
   OWNER_COPY_STATUS,
   PREFERENCE_CHANNEL,
+  READING_LIST_STATUS,
+  READING_STATUS,
   VISIBILITY,
 } from '@bookswap/shared'
 import type {
@@ -40,6 +42,7 @@ import type {
   LoanOrigin as SharedLoanOrigin,
   LoanStatus as SharedLoanStatus,
   NotificationType as SharedNotificationType,
+  ReadingStatus as SharedReadingStatus,
   Visibility as SharedVisibility,
 } from '@bookswap/shared'
 import {
@@ -59,6 +62,7 @@ import {
   LoanOrigin as PrismaLoanOrigin,
   LoanStatus as PrismaLoanStatus,
   NotificationType as PrismaNotificationType,
+  ReadingStatus as PrismaReadingStatus,
   Visibility as PrismaVisibility,
 } from '../generated/prisma/enums'
 import type {
@@ -78,6 +82,7 @@ import type {
   LoanOrigin as PrismaLoanOriginType,
   LoanStatus as PrismaLoanStatusType,
   NotificationType as PrismaNotificationTypeType,
+  ReadingStatus as PrismaReadingStatusType,
   Visibility as PrismaVisibilityType,
 } from '../generated/prisma/enums'
 
@@ -104,6 +109,7 @@ const _guestLoanConfirmationStatusMatches: Equal<
   PrismaGuestLoanConfirmationStatusType
 > = true
 const _notificationTypeMatches: Equal<SharedNotificationType, PrismaNotificationTypeType> = true
+const _readingStatusMatches: Equal<SharedReadingStatus, PrismaReadingStatusType> = true
 const _channelMatches: Equal<SharedChannel, PrismaChannelType> = true
 const _deliveryStatusMatches: Equal<SharedDeliveryStatus, PrismaDeliveryStatusType> = true
 const _catalogEntityTypeMatches: Equal<SharedCatalogEntityType, PrismaCatalogEntityTypeType> = true
@@ -452,5 +458,24 @@ describe('§7.5: негайно vs дайджест ↔ Prisma', () => {
     }
 
     expect(immediate.size + digest.size).toBe(NOTIFICATION_TYPE.length)
+  })
+})
+
+describe('ReadingStatus: shared ↔ Prisma (10j, M7)', () => {
+  it('містить ті самі значення, включно з явним NOT_READ', () => {
+    expect([...READING_STATUS].sort()).toEqual(Object.values(PrismaReadingStatus).sort())
+    expect([...READING_STATUS]).toEqual(['NOT_READ', 'READING', 'READ'])
+  })
+
+  it('типи взаємно присвоювані', () => {
+    expect(_readingStatusMatches).toBe(true)
+  })
+
+  it('статуси списку — рівно ті, що не NOT_READ', () => {
+    expect([...READING_LIST_STATUS].sort()).toEqual(
+      Object.values(PrismaReadingStatus)
+        .filter((status) => status !== 'NOT_READ')
+        .sort(),
+    )
   })
 })

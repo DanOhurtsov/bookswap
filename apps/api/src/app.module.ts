@@ -21,6 +21,7 @@ import { TelegramApiModule } from './telegram/telegram-api.module'
 import { TelegramModule } from './telegram/telegram.module'
 import { UsersModule } from './users/users.module'
 import { ExternalBorrowersModule } from './external-borrowers/external-borrowers.module'
+import { ReadingStatusModule } from './reading-status/reading-status.module'
 import { WishlistModule } from './wishlist/wishlist.module'
 
 /**
@@ -73,6 +74,7 @@ const ROOT_ENV_PATH = resolve(__dirname, '../../../.env')
     LibraryModule,
     LibraryImportModule,
     WishlistModule,
+    ReadingStatusModule,
     ExternalBorrowersModule,
     LoansModule,
     TelegramModule,

@@ -92,6 +92,8 @@ async function main(): Promise<void> {
     out(`  рецензій заархівовано (R5): ${String(summary.reviewsArchived)}`)
     out(`  вішлиста перенесено:        ${String(summary.wishlistItemsMoved)}`)
     out(`  дублів вішлиста прибрано:   ${String(summary.wishlistDuplicatesRemoved)}`)
+    out(`  статусів читання перенесено:${String(summary.readingStatusesMoved)}`)
+    out(`  дублів статусів читання:    ${String(summary.readingStatusDuplicatesRemoved)}`)
     out(`  звʼязків авторів перенесено:${String(summary.authorLinksMoved)}`)
     out(`  дублів звʼязків авторів:    ${String(summary.authorLinksDuplicatesRemoved)}`)
     out(`  вхідних мержів перенято:    ${String(summary.incomingMergesRepointed)}`)

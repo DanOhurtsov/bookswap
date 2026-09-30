@@ -443,3 +443,23 @@ Forward-міграція (M9c/M9d не редагуються): `GuestLoanConfir
 
 **Автоматизований доказ.** `apps/api/test/guest-loan-notifications.e2e-spec.ts` (адресат, рівно одне, атомарність, лише `IN_APP`, приватність), `apps/api/src/common/enum-parity.spec.ts` (Prisma ↔ shared),
 `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` — схема й міграції еквівалентні.
+
+## Крок 10j.1: M7 `20260930090000_stage10_reading_status`
+
+Лише синтетичні дані (D2 відкритий). Крок додає backend особистих статусів читання; web UI — 10j.2. Нумерація M7 — за планом (§6.15 T16); порядок у каталозі міграцій визначає часова мітка.
+
+**M7** — expand: новий enum `ReadingStatus { NOT_READ, READING, READ }` і **порожня** таблиця `WorkReadingStatus` (`userId → User` `CASCADE`, `workId → Work` `RESTRICT`, `UNIQUE (userId, workId)`, індекс
+`(userId, updatedAt DESC, id DESC)` під курсорну пагінацію списку). Жодного наявного рядка не читає й не змінює; **backfill відсутній** — «Прочитано» не виводиться з `Loan` (R-3), явний `NOT_READ`
+з'являється лише після дії користувача. `updatedAt` без `@updatedAt`: його пише код (сирий `UPDATE` при merge не чіпає), тож DB-тригерів чи дефолтів на оновлення немає.
+
+**Порядок розгортання.** backup → знімок кількостей (`SELECT count(*)` по `User`, `Work`, `Loan`) → `pnpm db:deploy` (M7) → деплой API. Код 10j.1 **потребує** M7 (без таблиці маршрути `/me/reading-*` і `MergeService`
+падають). Старий код із M7 сумісний: таблиці не знає. Після розгортання кількості наявних таблиць не змінені, `SELECT count(*) FROM "WorkReadingStatus"` = 0.
+
+**Відкат: лише вперед.** Після появи даних таблицю й enum не видаляти (це особисті дані користувачів); виправлення — нова forward-міграція. До першого запису порожню таблицю технічно можна лишити без шкоди.
+
+**Merge.** `MergeService` (CLI `merge:works`) тепер переносить `WorkReadingStatus` і виводить `статусів читання перенесено` / `дублів статусів читання` (Q19: лишається новіший `updatedAt`, за рівності — цільовий `Work`;
+явний `NOT_READ` бере участь; перенесення `updatedAt` не змінює). Відкату злиття немає й тут.
+
+**Автоматизований доказ.** `apps/api/test/db/stage10-reading-status-migration.db-spec.ts` (M7 на наповненій БД: усі наявні таблиці незмінні побайтово, нова порожня, enum, `UNIQUE`, FK `RESTRICT`/`CASCADE`),
+`apps/api/src/common/enum-parity.spec.ts` (Prisma ↔ shared), `apps/api/test/reading-status*.e2e-spec.ts`,
+`prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code` — схема й міграції еквівалентні.

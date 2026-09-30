@@ -10,6 +10,7 @@ import { copyVisibleTo, holderNamesVisibleTo, type ViewerRole } from '../access/
 import { toEdition, toWork, toWorkAuthors } from '../catalog/catalog.mapper'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
+import { ACTUAL_HANDOVER } from './actual-handover'
 import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
 import {
   byRequestedAt,
@@ -26,12 +27,6 @@ import type { FriendRelation, LoanOrigin, LoanStatus } from '@bookswap/shared'
  * претензія однієї сторони, а не факт. Її бачать лише сторони позики.
  */
 const CLAIM_STATUSES: readonly LoanStatus[] = ['PENDING_CONFIRMATION', 'DECLINED']
-
-/**
- * Stage 10 (10b, Q8): «Хто читав» — лише фактична передача. `LOST` рахується, тільки якщо передача
- * відбулася (`handedAt != null`); решта статусів — це запит, відмова або претензія, а не читання.
- */
-const READ_STATUSES: LoanStatus[] = ['HANDED_OVER', 'RETURNED', 'LOST']
 
 /** Каталожний контекст примірника — рівно те, що читає `history.mapper`. */
 const COPY_CATALOG = {
@@ -149,7 +144,7 @@ export class HistoryService {
         owner: { select: { libraryVisibility: true, showHolderNames: true } },
         edition: { include: { translation: true, work: true } },
         loans: {
-          where: { status: { in: READ_STATUSES }, handedAt: { not: null } },
+          where: ACTUAL_HANDOVER,
           include: WITH_SIDES,
         },
       },

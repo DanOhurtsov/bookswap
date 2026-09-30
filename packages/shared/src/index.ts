@@ -113,6 +113,14 @@ export {
   type FriendRelation,
   type FriendshipStatus,
 } from './domain/friendship'
+export {
+  READING_LIST_STATUS,
+  READING_STATUS,
+  readingListStatusSchema,
+  readingStatusSchema,
+  type ReadingListStatus,
+  type ReadingStatus,
+} from './domain/reading-status'
 export { healthResponseSchema, type HealthResponse } from './contracts/health'
 export {
   PASSWORD_LIMITS,
@@ -654,3 +662,18 @@ export {
   type VerifyGuestCodeRequest,
   type VerifyGuestCodeResponse,
 } from './contracts/guest-loan-response'
+export {
+  READING_LIST_LIMITS,
+  readingListItemSchema,
+  readingListQueryRequestSchema,
+  readingListResponseSchema,
+  readingStatusResponseSchema,
+  setReadingStatusRequestSchema,
+  setReadingStatusResponseSchema,
+  type ReadingListItem,
+  type ReadingListQueryRequest,
+  type ReadingListResponse,
+  type ReadingStatusResponse,
+  type SetReadingStatusRequest,
+  type SetReadingStatusResponse,
+} from './contracts/reading-status'
