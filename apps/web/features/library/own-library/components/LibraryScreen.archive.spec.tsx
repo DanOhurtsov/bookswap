@@ -28,9 +28,11 @@ jest.mock('@/app/lib/use-session', () => ({
   }),
 }))
 
+let searchParams = new URLSearchParams()
+
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParams,
 }))
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
@@ -46,6 +48,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   mockApiRequest.mockReset()
+  searchParams = new URLSearchParams()
 })
 
 const AUTHOR = { id: 'author-1', name: 'Ґреґорі Робертс', role: 'AUTHOR', position: 0 }
@@ -173,5 +176,30 @@ describe('архів у бібліотеці (10c)', () => {
         expect.objectContaining({ method: 'POST' }),
       )
     })
+  })
+})
+
+describe('вхід із результатів додавання (docs/plan/fast-book-add.md, §2.2)', () => {
+  it('?view=archive відкриває архів, де працює наявне відновлення', async () => {
+    searchParams = new URLSearchParams('view=archive')
+    mockApiRequest.mockResolvedValue({ groups: [] })
+
+    render(withQueryClient(<LibraryScreen />))
+
+    await waitFor(() => {
+      expect(mockApiRequest).toHaveBeenCalledWith('/me/library?archived=true', expect.anything())
+    })
+    expect(screen.getByRole('button', { name: 'Архів' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('«Додати книжку» веде в єдиний вхід додавання', async () => {
+    mockApiRequest.mockResolvedValue({ groups: [] })
+
+    render(withQueryClient(<LibraryScreen />))
+
+    expect(await screen.findByRole('link', { name: 'Додати книжку' })).toHaveAttribute(
+      'href',
+      '/catalog/new',
+    )
   })
 })

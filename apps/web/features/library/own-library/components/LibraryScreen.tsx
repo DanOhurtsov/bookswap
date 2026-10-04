@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
@@ -37,6 +37,7 @@ import { validate, type FieldErrors } from '@/app/lib/validation'
 import { invalidateActivation } from '@/features/library/activation/index.client'
 import { CreateGuestLoanForm } from '@/features/guest-loans/index.client'
 import { RecordExistingLoanForm } from './RecordExistingLoanForm'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type LibraryScreenProps = {
   /**
@@ -102,42 +103,37 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-const VIEW_LABELS: Readonly<Record<LibraryView, string>> = {
-  own: 'Усі мої',
-  out: 'Мої не вдома',
-  borrowed: 'Чужі в мене',
-  archive: 'Архів',
-}
+const VIEW_BUTTONS: ReadonlyArray<{ value: LibraryView; label: string }> = [
+  { value: 'own', label: 'Усі мої' },
+  { value: 'out', label: 'Мої не вдома' },
+  { value: 'borrowed', label: 'Чужі в мене' },
+  { value: 'archive', label: 'Архів' },
+]
 
 function LibraryBody({
   checklist,
   guestLoansEnabled,
 }: LibraryScreenProps & { guestLoansEnabled: boolean }) {
-  const [view, setView] = useState<LibraryView>('own')
+  // `?view=archive` — пряме посилання з результатів додавання на вже наявний сценарій відновлення.
+  const initialView = useSearchParams().get('view')
+  const [view, setView] = useState<LibraryView>(initialView === 'archive' ? 'archive' : 'own')
 
   return (
     <Shell>
       {checklist}
 
-      <nav className="actions" aria-label="Вигляд бібліотеки">
-        {(['own', 'out', 'borrowed', 'archive'] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={view === value ? undefined : 'button--ghost'}
-            aria-pressed={view === value}
-            onClick={() => {
-              setView(value)
-            }}
-          >
-            {VIEW_LABELS[value]}
-          </button>
-        ))}
+      <nav className="mb-10">
+        <Tabs value={view} onValueChange={(next) => setView(next as LibraryView)}>
+          <TabsList variant="line">
+            {VIEW_BUTTONS.map((button) => (
+              <TabsTrigger key={button.value} value={button.value}>
+                {button.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </nav>
 
-      {/* Два різні в'ю — два різні компоненти з власними хуками. «Чужі в мене»
-          віддає інший тип примірника й не має жодної мутації, тож спільний стан
-          із фільтрами й `busyKey` їм не потрібен. */}
       {view === 'borrowed' ? (
         <BorrowedView />
       ) : (
