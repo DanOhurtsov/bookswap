@@ -6,7 +6,7 @@ import '@testing-library/jest-dom'
 import NewBookPage from './page'
 
 jest.mock('@/features/catalog/add-book/index.client', () => ({
-  AddBookWizard: () => <p>Client wizard boundary</p>,
+  AddBookScreen: () => <p>Client add-book boundary</p>,
 }))
 
 it('keeps the route server-only, thin, and composed through the client entry', () => {
@@ -16,5 +16,5 @@ it('keeps the route server-only, thin, and composed through the client entry', (
   expect(source.split('\n').length).toBeLessThanOrEqual(50)
 
   render(<NewBookPage />)
-  expect(screen.getByText('Client wizard boundary')).toBeInTheDocument()
+  expect(screen.getByText('Client add-book boundary')).toBeInTheDocument()
 })

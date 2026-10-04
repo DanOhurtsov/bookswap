@@ -7,13 +7,15 @@ import { useState } from 'react'
 /**
  * Cover box size, in the one place that owns it.
  *
- * The image and the placeholder are laid out by the SAME `.lookup-card__cover`
- * rule, so the box is identical whether or not there is a picture. That is the
+ * The image and the placeholder are laid out by the SAME `COVER_BOX_CLASS`,
+ * so the box is identical whether or not there is a picture. That is the
  * point of routing both through one component: a row must not change height,
  * width or alignment because a source happened to know a cover URL.
  */
 const COVER_WIDTH = 72
 const COVER_HEIGHT = 108
+const COVER_BOX_CLASS =
+  'h-[6.75rem] w-[4.5rem] rounded-[0.25rem] bg-[color:var(--field-bg)] object-cover'
 
 type BookCoverProps = {
   /**
@@ -78,15 +80,20 @@ export function BookCover({ url, alt }: BookCoverProps) {
 
   if (src === undefined || src === failedSrc) {
     return (
-      <span className="lookup-card__cover lookup-card__cover--empty" aria-hidden="true">
-        <BookIcon />
+      <span
+        data-slot="book-cover-placeholder"
+        className={`${COVER_BOX_CLASS} grid place-items-center border border-[color:var(--line)] text-[color:var(--bookswap-muted)]`}
+        aria-hidden="true"
+      >
+        <BookIcon className="size-7 stroke-[1.25]" />
       </span>
     )
   }
 
   return (
     <Image
-      className="lookup-card__cover"
+      data-slot="book-cover"
+      className={COVER_BOX_CLASS}
       src={src}
       alt={alt}
       width={COVER_WIDTH}

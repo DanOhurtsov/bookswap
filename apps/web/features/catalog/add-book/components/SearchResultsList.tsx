@@ -78,7 +78,6 @@ export function SearchResultsList<TLocal extends LocalCandidate>({
 
   return (
     <>
-      {local.status === 'loading' && <p className="status status--pending">Шукаю…</p>}
       {local.status === 'error' && <FormStatus error={new Error(local.message)} />}
 
       {rows.length > 0 && (
@@ -103,7 +102,7 @@ export function SearchResultsList<TLocal extends LocalCandidate>({
         </ul>
       )}
 
-      <ExternalSearchStatus state={external} />
+      <ExternalSearchStatus state={external} localLoading={local.status === 'loading'} />
 
       {finished && rows.length === 0 && page > 1 && (
         <p className="empty">

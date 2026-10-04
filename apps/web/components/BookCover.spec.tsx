@@ -11,10 +11,10 @@ const OTHER_COVER = 'https://covers.openlibrary.org/b/id/43-M.jpg'
 /**
  * The placeholder is `aria-hidden`, so it has no accessible name to query by —
  * that is deliberate (it announces nothing a screen reader does not already get
- * from the title). Its class is what both the layout and these tests rely on.
+ * from the title). Its `data-slot` is what these tests rely on.
  */
 function placeholder(container: HTMLElement): HTMLElement | null {
-  return container.querySelector('.lookup-card__cover--empty')
+  return container.querySelector("[data-slot='book-cover-placeholder']")
 }
 
 describe('BookCover', () => {
@@ -22,7 +22,7 @@ describe('BookCover', () => {
     const { container } = render(<BookCover url={COVER} alt={ALT} />)
 
     const image = screen.getByAltText(ALT)
-    expect(image).toHaveClass('lookup-card__cover')
+    expect(image).toHaveAttribute('data-slot', 'book-cover')
     // `unoptimized`, so the URL reaches the browser exactly as the source gave it.
     expect(image).toHaveAttribute('src', COVER)
     expect(placeholder(container)).toBeNull()
@@ -69,9 +69,9 @@ describe('BookCover', () => {
     const { container } = render(<BookCover url={COVER} alt={ALT} />)
     fireEvent.error(screen.getByAltText(ALT))
 
-    // Same class, therefore same width, height and corner radius: a row must
-    // not resize because a cover failed.
-    expect(placeholder(container)).toHaveClass('lookup-card__cover')
+    // Same box classes, therefore same width, height and corner radius: a row
+    // must not resize because a cover failed.
+    expect(placeholder(container)).toHaveClass('h-[6.75rem]', 'w-[4.5rem]', 'rounded-[0.25rem]')
   })
 
   it('does not ask for a failed URL again', () => {

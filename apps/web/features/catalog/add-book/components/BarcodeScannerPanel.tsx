@@ -1,7 +1,10 @@
 'use client'
 
 import { isValidIsbn13, normalizeIsbn13 } from '@bookswap/shared'
+import { ScanBarcodeIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
   isScannerSupported,
   startBarcodeScanner,
@@ -90,49 +93,84 @@ export function BarcodeScannerPanel({ onValidIsbn, loadScannerModules }: Barcode
 
   const isActive = phase.kind === 'scanning' || phase.kind === 'invalid-code'
 
+  const startLabel = phase.kind === 'error' ? 'Спробувати знову' : 'Сканувати штрихкод'
+
   return (
-    <div className="scanner">
-      {/* Обгортка існує лише поки камера активна: інакше вона забирала б висоту
-          порожнім чорним прямокутником. `<video>` при цьому НЕ розмонтовується —
-          `videoRef` мусить бути доступний до першого кліку (R2). */}
-      <div className="scanner__viewport" hidden={!isActive}>
-        <video
-          ref={videoRef}
-          className="scanner__video"
-          aria-label="Перегляд камери для сканування штрих-коду"
-          playsInline
-          muted
-        />
-        {/* Підпис і рамка — одна центрована колонка, тому підпис тримається
-            прямо над рамкою сам, без магічних відступів. Оверлей не перехоплює
-            взаємодію; рамка — суто орієнтир для наведення, і текст ніде не
-            обіцяє, що її зона щось обмежує: ZXing декодує весь кадр. */}
-        <div className="scanner__overlay">
-          {isActive && (
-            <p className="scanner__hint" role="status">
-              {phase.kind === 'invalid-code'
-                ? 'Це не схоже на ISBN-13. Спробуйте ще раз.'
-                : 'Наведіть штрих-код у рамку'}
-            </p>
-          )}
-          <div className="scanner__frame" aria-hidden="true" />
-        </div>
-      </div>
+    <div className="contents">
+      {/* Корінь — `display: contents`: кнопка стає клітинкою ряду пошуку поруч з інпутом, а помилка
+          розтягується під ним на всю ширину. Камера відкривається попапом поверх сторінки. */}
+      <Button
+        type="button"
+        size="icon"
+        className="size-11 cursor-pointer"
+        aria-label={startLabel}
+        title={startLabel}
+        onClick={handleStart}
+      >
+        <ScanBarcodeIcon aria-hidden="true" className="size-4" />
+      </Button>
 
-      {isActive && (
-        <button type="button" onClick={handleCancel}>
-          Скасувати
-        </button>
-      )}
-
-      {(phase.kind === 'idle' || phase.kind === 'error') && (
-        <button type="button" onClick={handleStart}>
-          {phase.kind === 'error' ? 'Спробувати знову' : 'Сканувати штрихкод'}
-        </button>
-      )}
+      <Dialog
+        open={isActive}
+        onOpenChange={(open) => {
+          if (!open) handleCancel()
+        }}
+      >
+        {/* `keepMounted`: `<video>` мусить існувати ще до кліку (R2) — `handleStart` бере `videoRef` синхронно
+            в обробнику кліку, а не з ефекту. Поки попап закритий, він лише прихований. */}
+        <DialogContent keepMounted showCloseButton={false} className="sm:max-w-md">
+          <DialogTitle>Сканування штрихкоду</DialogTitle>
+          <div
+            data-slot="scanner-viewport"
+            className="relative aspect-[4/3] max-h-[38svh] w-full max-w-[min(100%,24rem)] justify-self-stretch overflow-hidden rounded-md border border-[color:var(--line)] bg-black"
+          >
+            <video
+              ref={videoRef}
+              data-slot="scanner-video"
+              className="block size-full object-cover"
+              aria-label="Перегляд камери для сканування штрих-коду"
+              playsInline
+              muted
+            />
+            {/* Підпис і рамка — одна центрована колонка, тому підпис тримається
+                прямо над рамкою сам, без магічних відступів. Оверлей не перехоплює
+                взаємодію; рамка — суто орієнтир для наведення, і текст ніде не
+                обіцяє, що її зона щось обмежує: ZXing декодує весь кадр. */}
+            <div
+              data-slot="scanner-overlay"
+              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2.5 p-3"
+            >
+              {isActive && (
+                <p
+                  data-slot="scanner-hint"
+                  role="status"
+                  className="max-w-full flex-none rounded-[0.4rem] bg-black/70 px-[0.7rem] py-[0.35rem] text-center text-[0.9rem] leading-[1.35] font-semibold text-balance text-white"
+                >
+                  {phase.kind === 'invalid-code'
+                    ? 'Це не схоже на ISBN-13. Спробуйте ще раз.'
+                    : 'Наведіть штрих-код у рамку'}
+                </p>
+              )}
+              <div
+                data-slot="scanner-frame"
+                aria-hidden="true"
+                className="aspect-[5/2] w-[84%] flex-none rounded-[0.35rem] border-2 border-white/95 shadow-[0_0_0_2px_rgb(0_0_0/0.55),inset_0_0_0_2px_rgb(0_0_0/0.55)]"
+              />
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 cursor-pointer"
+            onClick={handleCancel}
+          >
+            Скасувати
+          </Button>
+        </DialogContent>
+      </Dialog>
 
       {phase.kind === 'error' && (
-        <p className="alert alert--error" role="alert">
+        <p className="alert alert--error col-span-full" role="alert">
           {ERROR_MESSAGES[phase.reason]}
         </p>
       )}

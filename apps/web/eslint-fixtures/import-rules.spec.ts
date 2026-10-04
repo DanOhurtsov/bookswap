@@ -190,8 +190,8 @@ describe('no-restricted-imports: feature public-interface boundary (CONVENTIONS.
 
   it('rejects a deep import into this feature from a different feature', () => {
     const code = [
-      "import { AddBookWizard } from '@/features/catalog/add-book/components/AddBookWizard'",
-      'export const usage = AddBookWizard',
+      "import { AddBookScreen } from '@/features/catalog/add-book/components/AddBookScreen'",
+      'export const usage = AddBookScreen',
       '',
     ].join('\n')
 
@@ -206,8 +206,8 @@ describe('no-restricted-imports: feature public-interface boundary (CONVENTIONS.
 
   it('allows any consumer to import through the public client barrel', () => {
     const code = [
-      "import { AddBookWizard } from '@/features/catalog/add-book/index.client'",
-      'export const usage = AddBookWizard',
+      "import { AddBookScreen } from '@/features/catalog/add-book/index.client'",
+      'export const usage = AddBookScreen',
       '',
     ].join('\n')
 
@@ -223,8 +223,8 @@ describe('no-restricted-imports: feature public-interface boundary (CONVENTIONS.
 
 describe('no-restricted-imports: components/ui and lib must not depend on features (CONVENTIONS.md §1.3)', () => {
   const code = [
-    "import { AddBookWizard } from '@/features/catalog/add-book/index.client'",
-    'export const usage = AddBookWizard',
+    "import { AddBookScreen } from '@/features/catalog/add-book/index.client'",
+    'export const usage = AddBookScreen',
     '',
   ].join('\n')
 

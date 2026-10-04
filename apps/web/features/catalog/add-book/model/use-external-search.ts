@@ -5,11 +5,21 @@ import { CATALOG_LIMITS, SEARCH_MAX_PAGE, isValidIsbn13 } from '@bookswap/shared
 import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { askedFor } from '@/app/lib/search-page'
 import { searchExternalCatalogs } from '../api/search-external'
+import type { ExternalSearchResult } from '@bookswap/shared'
 import {
   IDLE_EXTERNAL_SEARCH,
   externalSearchReady,
+  type ExternalHalfResponse,
   type ExternalSearchState,
 } from './external-search-state'
+
+/** Завантажувач однієї сторінки зовнішньої половини списку. */
+export type ExternalLoader<TResult> = (
+  query: string,
+  page: number,
+  pageSize: number,
+  signal: AbortSignal,
+) => Promise<ExternalHalfResponse<TResult>>
 
 /**
  * How many times a page that is still incomplete may be asked for again.
@@ -36,7 +46,7 @@ const MAX_CONTINUATIONS = SEARCH_MAX_PAGE + 1
  * screen would show the previous answer. A stale answer reads as "still
  * searching", never as "found nothing".
  */
-export function useExternalSearch(
+export function useExternalSearch<TResult = ExternalSearchResult>(
   query: string,
   page: number,
   pageSize: number,
@@ -45,7 +55,9 @@ export function useExternalSearch(
    * It is part of the key, so the previous answer stops counting as this one's.
    */
   refresh = 0,
-): ExternalSearchState {
+  /** Звідки брати записи: `/catalog/search/external` (типово) чи зовнішня половина сторінки додавання. */
+  loadPage: ExternalLoader<TResult> = searchExternalCatalogs as unknown as ExternalLoader<TResult>,
+): ExternalSearchState<TResult> {
   const trimmed = query.trim()
 
   // A query that IS an ISBN does not go to external TITLE search. Sending
@@ -53,7 +65,7 @@ export function useExternalSearch(
   // already answers an ISBN exactly.
   const enabled = trimmed.length >= CATALOG_LIMITS.queryMin && !isValidIsbn13(trimmed)
 
-  const [result, setResult] = useState<{ asked: string; state: ExternalSearchState }>({
+  const [result, setResult] = useState<{ asked: string; state: ExternalSearchState<TResult> }>({
     asked: '',
     state: IDLE_EXTERNAL_SEARCH,
   })
@@ -68,7 +80,7 @@ export function useExternalSearch(
     async function load(): Promise<void> {
       try {
         for (let attempt = 0; ; attempt += 1) {
-          const response = await searchExternalCatalogs(trimmed, page, pageSize, controller.signal)
+          const response = await loadPage(trimmed, page, pageSize, controller.signal)
 
           if (controller.signal.aborted) return
 
@@ -103,7 +115,7 @@ export function useExternalSearch(
     return () => {
       controller.abort()
     }
-  }, [trimmed, page, pageSize, asked, enabled])
+  }, [trimmed, page, pageSize, asked, enabled, loadPage])
 
   if (!enabled) return IDLE_EXTERNAL_SEARCH
 

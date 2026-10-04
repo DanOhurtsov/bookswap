@@ -1,17 +1,20 @@
 import type { ReactNode } from 'react'
 import { BookCover } from '@/components/BookCover'
 
-type ResultCardShellProps = {
-  /** Where this record came from: «Наш каталог», «Open Library», «Google Books». */
-  badge: string
+type ResultCardShellBaseProps = {
   title: ReactNode
   coverUrl?: string | undefined
   coverAlt: string
   authors?: ReactNode
-  /** Short facts under the title — language, year. Empty entries are dropped. */
   meta?: (string | undefined)[]
   children?: ReactNode
 }
+
+/** Бейдж показується лише з `showBadge`, а з `showBadge` без тексту бейджа він не має сенсу. */
+type ResultCardShellBadgeProps =
+  { showBadge: true; badge: string } | { showBadge?: false; badge?: string }
+
+type ResultCardShellProps = ResultCardShellBaseProps & ResultCardShellBadgeProps
 
 /**
  * The shared look of one row in the search results.
@@ -31,26 +34,28 @@ type ResultCardShellProps = {
  * the first grid column and re-align every other row in the list around
  * whichever sources happened to know a cover URL.
  */
-export function ResultCardShell({
-  badge,
-  title,
-  coverUrl,
-  coverAlt,
-  authors,
-  meta,
-  children,
-}: ResultCardShellProps) {
+export function ResultCardShell(props: ResultCardShellProps) {
+  const { title, coverUrl, coverAlt, authors, meta, children } = props
   const facts = (meta ?? []).filter((part): part is string => part !== undefined && part !== '')
 
   return (
-    <li className="book lookup-card">
+    <li
+      data-slot="result-card"
+      className="grid grid-cols-[auto_minmax(0,1fr)] gap-[0.85rem] rounded-md border border-(--line) px-4 py-[0.9rem]"
+    >
       <BookCover url={coverUrl} alt={coverAlt} />
 
-      <div className="lookup-card__content">
-        <span className="chip">{badge}</span>
+      <div className="grid min-w-0 content-start justify-items-start gap-1">
+        {props.showBadge === true && (
+          <span className="rounded-[1rem] border border-(--line) px-2 py-[0.05rem] text-[0.8rem] text-(--bookswap-muted)">
+            {props.badge}
+          </span>
+        )}
         {title}
         {authors}
-        {facts.length > 0 && <span className="book__meta">{facts.join(' · ')}</span>}
+        {facts.length > 0 && (
+          <span className="text-[0.85rem] text-(--bookswap-muted)">{facts.join(' · ')}</span>
+        )}
         {children}
       </div>
     </li>

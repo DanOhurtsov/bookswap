@@ -208,17 +208,18 @@ describe('BarcodeScannerPanel', () => {
    * візуальною.
    */
   describe('preview', () => {
-    it('keeps the viewport collapsed until scanning starts, then shows the constrained video', async () => {
+    it('keeps the camera popup hidden until scanning starts, then shows the constrained video', async () => {
       const fake = createFakeModules()
       const user = userEvent.setup()
-      const { container } = render(
+      render(
         <BarcodeScannerPanel
           onValidIsbn={jest.fn()}
           loadScannerModules={jest.fn().mockResolvedValue(fake.modules)}
         />,
       )
 
-      const viewport = container.querySelector('.scanner__viewport')
+      // Попап змонтований наперед (`<video>` потрібен до кліку), але прихований.
+      const viewport = document.querySelector("[data-slot='scanner-viewport']")
       expect(viewport).not.toBeVisible()
 
       await user.click(screen.getByRole('button', { name: 'Сканувати штрихкод' }))
@@ -227,16 +228,43 @@ describe('BarcodeScannerPanel', () => {
       expect(viewport).toBeVisible()
       // Обмеження накладені на бокс, а не на сам потік: `<video>` лишається тим
       // самим елементом, який ZXing уже тримає.
-      expect(viewport?.querySelector('video')).toHaveClass('scanner__video')
+      expect(viewport?.querySelector('video')).toHaveAttribute('data-slot', 'scanner-video')
+    })
+
+    /**
+     * jsdom не вантажить CSS, тож контракт обмежень фіксуємо на класах Tailwind: саме вони тримають `<video>`
+     * в межах контейнера (без них на iPhone він розкладався в intrinsic-розмір потоку).
+     */
+    it('constrains the preview by container width and viewport height, clipping the scaled video', () => {
+      render(<BarcodeScannerPanel onValidIsbn={jest.fn()} loadScannerModules={jest.fn()} />)
+
+      const viewport = document.querySelector("[data-slot='scanner-viewport']")
+
+      expect(viewport).toHaveClass('w-full', 'max-w-[min(100%,24rem)]', 'max-h-[38svh]')
+      expect(viewport).toHaveClass('overflow-hidden')
+      // Масштабується бокс, а не MediaStream: ZXing читає intrinsic-кадр.
+      expect(viewport?.querySelector('video')).toHaveClass('size-full', 'object-cover')
+    })
+
+    it('keeps the overlay purely visual and the hint and frame readable over any video', () => {
+      render(<BarcodeScannerPanel onValidIsbn={jest.fn()} loadScannerModules={jest.fn()} />)
+
+      expect(document.querySelector("[data-slot='scanner-overlay']")).toHaveClass(
+        'pointer-events-none',
+        'flex-col',
+        'justify-center',
+      )
+      expect(document.querySelector("[data-slot='scanner-frame']")).toHaveClass(
+        'aspect-[5/2]',
+        'flex-none',
+      )
     })
 
     it('renders the aiming frame inside the viewport, hidden from assistive tech', () => {
-      const { container } = render(
-        <BarcodeScannerPanel onValidIsbn={jest.fn()} loadScannerModules={jest.fn()} />,
-      )
+      render(<BarcodeScannerPanel onValidIsbn={jest.fn()} loadScannerModules={jest.fn()} />)
 
-      const frame = container.querySelector(
-        '.scanner__viewport > .scanner__overlay > .scanner__frame',
+      const frame = document.querySelector(
+        "[data-slot='scanner-viewport'] > [data-slot='scanner-overlay'] > [data-slot='scanner-frame']",
       )
 
       expect(frame).not.toBeNull()
@@ -247,7 +275,7 @@ describe('BarcodeScannerPanel', () => {
     it('puts the hint inside the viewport, immediately before the frame', async () => {
       const fake = createFakeModules()
       const user = userEvent.setup()
-      const { container } = render(
+      render(
         <BarcodeScannerPanel
           onValidIsbn={jest.fn()}
           loadScannerModules={jest.fn().mockResolvedValue(fake.modules)}
@@ -258,16 +286,16 @@ describe('BarcodeScannerPanel', () => {
       const hint = await screen.findByRole('status')
 
       // Підпис лежить поверх кадру, а не під вікном камери…
-      expect(container.querySelector('.scanner__viewport')).toContainElement(hint)
+      expect(document.querySelector("[data-slot='scanner-viewport']")).toContainElement(hint)
       // …і саме над рамкою: наступний елемент у тому самому оверлеї.
-      expect(hint.nextElementSibling).toHaveClass('scanner__frame')
-      expect(hint.parentElement).toHaveClass('scanner__overlay')
+      expect(hint.nextElementSibling).toHaveAttribute('data-slot', 'scanner-frame')
+      expect(hint.parentElement).toHaveAttribute('data-slot', 'scanner-overlay')
     })
 
     it('hides the hint again once scanning stops, leaving the frame in place', async () => {
       const fake = createFakeModules()
       const user = userEvent.setup()
-      const { container } = render(
+      render(
         <BarcodeScannerPanel
           onValidIsbn={jest.fn()}
           loadScannerModules={jest.fn().mockResolvedValue(fake.modules)}
@@ -280,7 +308,7 @@ describe('BarcodeScannerPanel', () => {
       await user.click(screen.getByRole('button', { name: 'Скасувати' }))
 
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
-      expect(container.querySelector('.scanner__frame')).not.toBeNull()
+      expect(document.querySelector("[data-slot='scanner-frame']")).not.toBeNull()
     })
 
     it('never claims decoding is limited to the frame', async () => {

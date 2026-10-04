@@ -2,6 +2,7 @@ import type {
   ExternalSearchMore,
   ExternalSearchResponse,
   ExternalSearchResult,
+  SpellingSuggestion,
 } from '@bookswap/shared'
 
 /**
@@ -18,13 +19,13 @@ import type {
  * arrives inside a successful answer via `sources`, because the other sources
  * did reply.
  */
-export type ExternalSearchState =
+export type ExternalSearchState<TResult = ExternalSearchResult> =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'failed'; message: string }
   | {
       status: 'ready'
-      results: ExternalSearchResult[]
+      results: TResult[]
       sources: ExternalSearchResponse['sources']
       /** Which page these results are, 1-based. */
       page: number
@@ -41,11 +42,26 @@ export type ExternalSearchState =
        * PARTIAL page and must not be read as the end of the list.
        */
       complete: boolean
+      /** Підказка виправлення написання від зовнішньої половини; див. `visibleSpellingSuggestion`. */
+      spellingSuggestion?: SpellingSuggestion
     }
 
-export const IDLE_EXTERNAL_SEARCH: ExternalSearchState = { status: 'idle' }
+export const IDLE_EXTERNAL_SEARCH: ExternalSearchState<never> = { status: 'idle' }
 
-export function externalSearchReady(response: ExternalSearchResponse): ExternalSearchState {
+/** Відповідь будь-якої зовнішньої половини списку: записи можуть бути й `ExternalSearchResult`, і змішаними елементами. */
+export interface ExternalHalfResponse<TResult> {
+  results: TResult[]
+  sources: ExternalSearchResponse['sources']
+  page: number
+  pageSize: number
+  more: ExternalSearchMore
+  complete: boolean
+  spellingSuggestion?: SpellingSuggestion
+}
+
+export function externalSearchReady<TResult>(
+  response: ExternalHalfResponse<TResult>,
+): ExternalSearchState<TResult> {
   return {
     status: 'ready',
     results: response.results,
@@ -54,6 +70,9 @@ export function externalSearchReady(response: ExternalSearchResponse): ExternalS
     pageSize: response.pageSize,
     more: response.more,
     complete: response.complete,
+    ...(response.spellingSuggestion === undefined
+      ? {}
+      : { spellingSuggestion: response.spellingSuggestion }),
   }
 }
 
@@ -64,7 +83,7 @@ export function externalSearchReady(response: ExternalSearchResponse): ExternalS
  * failed, we know nothing about what lies further — and "we have not looked" must
  * never render as a next page that turns out to be empty, so it reads as `NO`.
  */
-export function externalSearchMore(state: ExternalSearchState): ExternalSearchMore {
+export function externalSearchMore(state: ExternalSearchState<unknown>): ExternalSearchMore {
   return state.status === 'ready' ? state.more : 'NO'
 }
 
@@ -76,7 +95,7 @@ export function externalSearchMore(state: ExternalSearchState): ExternalSearchMo
  * page that is short only because the server is still loading blocks is not the
  * end of the list.
  */
-export function externalSearchSettled(state: ExternalSearchState): boolean {
+export function externalSearchSettled(state: ExternalSearchState<unknown>): boolean {
   if (state.status === 'loading') return false
 
   return state.status !== 'ready' || state.complete
@@ -93,9 +112,35 @@ export function externalSearchSettled(state: ExternalSearchState): boolean {
  * An empty `sources` is NOT this case: it means no source was queried, which is
  * a third thing again (an ISBN query never asks them).
  */
-export function externalSearchBlind(state: ExternalSearchState): boolean {
+export function externalSearchBlind(state: ExternalSearchState<unknown>): boolean {
   if (state.status === 'failed') return true
   if (state.status !== 'ready') return false
 
   return state.sources.length > 0 && state.sources.every((report) => report.status !== 'OK')
+}
+
+/**
+ * Яку підказку виправлення показати під полем — і чи показувати взагалі.
+ *
+ * Локальна половина рішає за нашим каталогом; зовнішня — за каталогом ТА записами джерел разом, тож коли
+ * вона відповіла по суті (`sources` не порожній: джерела справді питали) і завершила сторінку, її слово
+ * остаточне — у тому числі мовчання, яке гасить локальну підказку при суперечності кандидатів. Поки вона
+ * ще чекає, не питалась (ISBN, довгий локальний список) чи відповіла помилкою — лишається локальна.
+ *
+ * Підказка належить тексту, для якого обчислена: показується лише поки нормалізований текст у полі
+ * дорівнює її `forQuery`. Тому зміна чи очищення поля прибирає стару одразу, а запізніла відповідь на
+ * попередній текст нічого не виправляє.
+ */
+export function visibleSpellingSuggestion(
+  draft: string,
+  local: SpellingSuggestion | undefined,
+  external: ExternalSearchState<unknown>,
+  normalize: (text: string) => string,
+): string | undefined {
+  const settled = external.status === 'ready' && external.complete && external.sources.length > 0
+  const suggestion = settled ? external.spellingSuggestion : local
+
+  return suggestion !== undefined && draft !== '' && normalize(suggestion.forQuery) === draft
+    ? suggestion.text
+    : undefined
 }

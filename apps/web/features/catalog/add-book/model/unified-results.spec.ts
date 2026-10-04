@@ -5,6 +5,7 @@ function edition(overrides: Partial<Edition> & { id: string }): Edition {
   return {
     workId: 'work-1',
     translationId: null,
+    textKind: 'ORIGINAL',
     publisher: 'Смолоскип',
     year: 2019,
     isbn13: null,
