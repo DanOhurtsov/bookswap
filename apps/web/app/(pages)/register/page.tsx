@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useState, type FormEvent } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import { PASSWORD_LIMITS, registerRequestSchema, sessionResponseSchema } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
@@ -27,6 +27,13 @@ function RegisterPageForm() {
   const [errors, setErrors] = useState<FieldErrors>({})
   const [failure, setFailure] = useState<unknown>()
   const [pending, setPending] = useState(false)
+  const authenticated = session.state.status === 'authenticated'
+
+  // Someone who is already signed in has no business here — this also covers the
+  // moment right after a successful submit, when `setUser` flips the session.
+  useEffect(() => {
+    if (authenticated) router.replace(safeReturnTo(returnTo))
+  }, [authenticated, returnTo, router])
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
@@ -65,6 +72,9 @@ function RegisterPageForm() {
       setPending(false)
     }
   }
+
+  // Not the form: an authenticated visitor is already being redirected away.
+  if (authenticated) return null
 
   return (
     <main className="page page--narrow">
@@ -122,7 +132,7 @@ function RegisterPageForm() {
       </form>
 
       <p className="form__aside">
-        Уже маєте акаунт? <Link href={`/login${returnToQuery(returnTo)}`}>Увійти</Link>
+        Уже маєте акаунт? <Link href={`/login${returnToQuery(returnTo)}`} className="hover:underline text-(--bookswap-accent)">Увійти</Link>
       </p>
     </main>
   )

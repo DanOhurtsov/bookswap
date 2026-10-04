@@ -5,7 +5,7 @@ const ALLOWED_RETURN_TO = ['/invite'] as const
  * `returnTo` comes from the address bar, so it is an allowlist, not a sanitiser:
  * anything but an exact match falls back to `fallback` (open-redirect safe).
  */
-export function safeReturnTo(value: string | null | undefined, fallback = '/profile'): string {
+export function safeReturnTo(value: string | null | undefined, fallback = '/'): string {
   return ALLOWED_RETURN_TO.find((allowed) => allowed === value) ?? fallback
 }
 

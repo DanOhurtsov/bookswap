@@ -5,7 +5,7 @@ import { NAVBAR_LINK_CONTACTS, NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST } from '@/c
 import { NavBarAvatar } from '@/components/NavBar/NavBarAvatar'
 import { NavBarLogo } from '@/components/NavBar/NavBarLogo'
 import { NavBarNotifications } from '@/components/NavBar/NavBarNotifications'
-import { ThemeSwitcher } from '@/components/ThemeSwitcher'
+import { ThemeToggleButton } from '@/components/ThemeToggle'
 
 const NavContent = ({ state }: { state: SessionState }) => {
   switch (state.status) {
@@ -13,7 +13,7 @@ const NavContent = ({ state }: { state: SessionState }) => {
       return (
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
           <NavSkeleton />
-          <ThemeSwitcher />
+          <ThemeToggleButton />
         </div>
       )
 
@@ -42,7 +42,6 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
         ))}
       </nav>
       <div className="flex items-center gap-2">
-        <ThemeSwitcher />
         <NavBarNotifications />
         <NavBarAvatar user={user} />
       </div>
@@ -63,7 +62,7 @@ const GuestNav = () => {
             </Link>
           ))}
         </nav>
-        <ThemeSwitcher />
+        <ThemeToggleButton />
       </div>
     </div>
   )

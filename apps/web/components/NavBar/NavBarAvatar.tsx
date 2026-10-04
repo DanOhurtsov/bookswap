@@ -1,13 +1,21 @@
+'use client'
+
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import type { Me } from '@bookswap/shared'
+import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
+import { useSession } from '@/app/lib/use-session'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import { ThemeToggleMenuItem } from '@/components/ThemeToggle'
 import { NAVBAR_PROFILE_LINKS } from '@/constants/navigation'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -25,6 +33,32 @@ function getInitials(displayName: string): string {
 }
 
 export const NavBarAvatar = ({ user }: { user: Me }) => {
+  const router = useRouter()
+  const { setGuest } = useSession()
+  const [logoutError, setLogoutError] = useState<string>()
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  async function logout(): Promise<void> {
+    setLogoutError(undefined)
+    setLoggingOut(true)
+
+    try {
+      await apiRequest('/auth/logout', { method: 'POST' })
+    } catch (error) {
+      // A failed logout must not be mistaken for a confirmed one — the user
+      // is still signed in, so the menu stays open and says so instead of
+      // redirecting to `/login` while the cookie is still valid.
+      setLogoutError(error instanceof ApiRequestError ? error.message : describeError(error))
+      setLoggingOut(false)
+      return
+    }
+
+    // Sets `guest` through the shared session context, so every mounted
+    // consumer drops the old identity without waiting on a fresh GET.
+    setGuest()
+    router.replace('/login')
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -47,6 +81,22 @@ export const NavBarAvatar = ({ user }: { user: Me }) => {
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <ThemeToggleMenuItem />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          closeOnClick={false}
+          disabled={loggingOut}
+          onClick={() => void logout()}
+        >
+          Вийти
+        </DropdownMenuItem>
+        {logoutError !== undefined && (
+          <p role="alert" className="px-1.5 py-1 text-xs text-destructive">
+            {logoutError}
+          </p>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

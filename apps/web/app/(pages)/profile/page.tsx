@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
 import {
@@ -26,7 +25,7 @@ const VISIBILITY_LABELS: Record<Visibility, string> = {
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { state, setUser, setGuest } = useSession()
+  const { state, setUser } = useSession()
 
   // Захист сторінки: гостя відправляємо на логін, щойно це стало відомо.
   useEffect(() => {
@@ -60,19 +59,10 @@ export default function ProfilePage() {
     )
   }
 
-  return <ProfileForm user={state.user} onUpdated={setUser} onLoggedOut={setGuest} />
+  return <ProfileForm user={state.user} onUpdated={setUser} />
 }
 
-function ProfileForm({
-  user,
-  onUpdated,
-  onLoggedOut,
-}: {
-  user: Me
-  onUpdated: (user: Me) => void
-  onLoggedOut: () => void
-}) {
-  const router = useRouter()
+function ProfileForm({ user, onUpdated }: { user: Me; onUpdated: (user: Me) => void }) {
   const [fields, setFields] = useState({
     displayName: user.displayName,
     avatarUrl: user.avatarUrl ?? '',
@@ -138,28 +128,6 @@ function ProfileForm({
     } catch (error) {
       setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
     }
-  }
-
-  async function logout(): Promise<void> {
-    setFailure(undefined)
-
-    try {
-      await apiRequest('/auth/logout', { method: 'POST' })
-    } catch (error) {
-      // A failed logout must not be mistaken for a confirmed one — the user
-      // is still signed in, and this page (and everything else reading the
-      // shared session) has to keep saying so, not silently redirect them to
-      // `/login` while their cookie is still valid.
-      setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
-      return
-    }
-
-    // Shared session (§8e-3 follow-up): sets `guest` directly through the
-    // SAME context every other mounted component reads — `NavBar` and
-    // anything else on screen drop the old identity immediately, without
-    // waiting on (or depending on the outcome of) a fresh `/auth/session` GET.
-    onLoggedOut()
-    router.replace('/login')
   }
 
   return (
@@ -256,24 +224,13 @@ function ProfileForm({
               setFields({ ...fields, showHolderNames: event.target.checked })
             }}
           />
-          <label htmlFor="showHolderNames">Показувати друзям, у кого зараз мої книжки</label>
+          <label htmlFor="showHolderNames">Друзі бачитимуть, хто читає мої книжки</label>
         </div>
 
         <button type="submit" disabled={pending}>
           {pending ? 'Зберігаю…' : 'Зберегти'}
         </button>
       </form>
-
-      <p className="form__aside">
-        {/* §6.1 називає підключення Telegram і налаштування сповіщень частиною
-            профілю; сама сторінка окрема, бо матриця §7.6 більша за решту форми. */}
-        <Link href="/notifications/settings">Сповіщення й Telegram</Link> ·{' '}
-        <Link href="/friends">Друзі</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}
-        <button type="button" className="button--link" onClick={() => void logout()}>
-          Вийти
-        </button>{' '}
-        · <Link href="/">На головну</Link>
-      </p>
     </main>
   )
 }
