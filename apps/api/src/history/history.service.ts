@@ -170,7 +170,7 @@ export class HistoryService {
         entries.push({
           entry: toHistoryEntry(loan, showNames, now),
           copyId: copy.id,
-          edition: toEdition(copy.edition, copy.edition.work),
+          edition: toEdition(copy.edition),
         })
       }
     }

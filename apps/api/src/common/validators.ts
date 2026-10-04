@@ -1,5 +1,6 @@
 import { registerDecorator, ValidateIf, type ValidationOptions } from 'class-validator'
 import { isLanguageCode, isValidIsbn13 } from '@bookswap/shared'
+import type { ZodType } from 'zod'
 
 /**
  * Декоратори `class-validator`, побудовані **поверх** предикатів зі `shared`.
@@ -193,6 +194,26 @@ export function EachAuthorIdExcludesNameLatin(options?: ValidationOptions) {
             return authorId === undefined || nameLatin === undefined
           }),
       },
+    })
+  }
+}
+
+/**
+ * Поле, яке цілком описує спільна zod-схема (`packages/shared`).
+ *
+ * Для вкладених дискримінованих форм (`target` швидкого додавання) повторювати правила
+ * вручну в `class-validator` означало б другу копію, що розходиться з першою; тут правило
+ * одне, і DTO лишається runtime-валідованим (§11). Розбіжності з контрактом бути не може:
+ * вирок виносить той самий `safeParse`, що й у клієнтській валідації.
+ */
+export function IsZodSchema(schema: ZodType, options?: ValidationOptions) {
+  return (object: object, propertyName: string): void => {
+    registerDecorator({
+      name: 'isZodSchema',
+      target: object.constructor,
+      propertyName,
+      options: { message: 'Значення не відповідає контракту', ...options },
+      validator: { validate: (value: unknown) => schema.safeParse(value).success },
     })
   }
 }

@@ -44,7 +44,7 @@ async function createEdition(prisma: PrismaService, userId: string): Promise<str
     },
   })
   const edition = await prisma.edition.create({
-    data: { workId: work.id, createdById: userId },
+    data: { workId: work.id, textKind: 'ORIGINAL', lang: 'en', createdById: userId },
   })
 
   return edition.id

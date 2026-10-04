@@ -74,6 +74,7 @@ const edition: Edition = {
   id: 'e-1',
   workId: 'w-1',
   translationId: null,
+  textKind: 'ORIGINAL',
   lang: 'uk',
   translator: null,
   publisher: 'Абабагаламага',
@@ -120,6 +121,7 @@ const holders: WorkHoldersResponse = {
   groups: [
     {
       translationId: null,
+      textKind: 'ORIGINAL',
       language: 'uk',
       translator: null,
       owners: [{ owner, relation: 'FRIEND', availableCopies: 0, copies: [] }],

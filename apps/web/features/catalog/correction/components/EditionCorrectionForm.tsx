@@ -13,6 +13,7 @@ import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
 import { SelectField, TextField } from '@/components/Form/FormFields'
+import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { parseEditionConflict } from '../api/correction-requests'
 import {
@@ -37,12 +38,14 @@ type EditionCorrectionFormProps = {
 function toFormValues(edition: Edition): EditionCorrectionFormValues {
   return {
     translationId: edition.translationId,
+    textKind: edition.textKind,
+    lang: edition.lang,
     publisher: edition.publisher,
     year: edition.year,
     isbn13: edition.isbn13,
     pageCount: edition.pageCount,
     coverUrl: edition.coverUrl,
-    format: edition.format,
+    format: edition.format ?? '',
     expectedRevision: edition.revision,
   }
 }
@@ -64,7 +67,7 @@ export function EditionCorrectionForm({
     register,
     handleSubmit,
     setValue,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, dirtyFields },
   } = useForm<EditionCorrectionFormValues>({
     resolver: zodResolver(editionCorrectionFormSchema),
     defaultValues: toFormValues(edition),
@@ -97,7 +100,19 @@ export function EditionCorrectionForm({
       : undefined
 
   function submit(values: EditionCorrectionFormValues): void {
-    correction.submit(values, { ...edition, ...values })
+    const { format, textKind, lang, ...rest } = values
+
+    // Тип тексту й мова йдуть у запит лише коли їх змінено руками: інакше збереження видавництва могло б
+    // перезаписати тип тексту, виведений зі зміни перекладу, застарілим значенням форми.
+    correction.submit(
+      {
+        ...rest,
+        ...(format === '' ? {} : { format }),
+        ...(dirtyFields.textKind === true ? { textKind } : {}),
+        ...(dirtyFields.lang === true ? { lang } : {}),
+      },
+      { ...edition, ...rest, textKind, lang, format: format === '' ? edition.format : format },
+    )
   }
 
   function retryAfterConflict(): void {
@@ -148,13 +163,48 @@ export function EditionCorrectionForm({
               field.onChange(event.target.value === '' ? null : event.target.value)
             }}
           >
-            <option value="">Мовою оригіналу</option>
+            <option value="">Без привʼязки до перекладу</option>
             {translations.map((translation) => (
               <option key={translation.id} value={translation.id}>
                 {translation.translator} ({translation.lang})
               </option>
             ))}
           </SelectField>
+        )}
+      />
+      <Controller
+        control={control}
+        name="textKind"
+        render={({ field }) => (
+          <SelectField
+            id="correction-edition-text-kind"
+            label="Що відомо про текст видання"
+            hint="Відсутність перекладу не означає, що це оригінал."
+            value={field.value}
+            onChange={(event) => {
+              field.onChange(event.target.value)
+            }}
+          >
+            <option value="UNKNOWN">Невідомо: оригінал чи переклад</option>
+            <option value="ORIGINAL">Оригінал</option>
+            <option value="TRANSLATION">Переклад</option>
+          </SelectField>
+        )}
+      />
+      <Controller
+        control={control}
+        name="lang"
+        render={({ field }) => (
+          <LanguageSelect
+            id="correction-edition-lang"
+            label="Мова видання"
+            hint="Мова цього видання не доводить мови оригіналу."
+            value={field.value ?? ''}
+            emptyLabel="Не вказано"
+            onChange={(value) => {
+              field.onChange(value === '' ? null : value)
+            }}
+          />
         )}
       />
       <TextField
@@ -195,6 +245,7 @@ export function EditionCorrectionForm({
         {...register('coverUrl', { setValueAs: nullableText })}
       />
       <SelectField id="correction-edition-format" label="Палітурка" {...register('format')}>
+        {edition.format === null && <option value="">Не вказано</option>}
         {EDITION_FORMAT.map((value) => (
           <option key={value} value={value}>
             {EDITION_FORMAT_LABELS[value]}

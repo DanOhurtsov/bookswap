@@ -5,6 +5,7 @@ import {
   type CatalogDiscoveryScope,
   type CatalogDiscoveryTranslation,
   type CopyStatus,
+  type EditionTextKind,
   type NetworkCopy,
   type NetworkOwner,
   type PublicUser,
@@ -14,6 +15,7 @@ import { copyVisibleTo, type ViewerRole } from '../../access/visibility'
 import { canRequestCopy, expectedReturnOf } from '../../library/library.mapper'
 import { PrismaService } from '../../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS, toPublicUser } from '../../users/user.mapper'
+import { editionKindWhere, editionLanguageWhere } from '../edition-language'
 
 export interface InventoryFilter {
   scope: CatalogDiscoveryScope
@@ -30,7 +32,10 @@ export interface InventoryCopy {
   owner: PublicUser
   relation: NetworkOwner['relation']
   workId: string
-  language: string
+  /** Що відомо про текст видання; `UNKNOWN` не видається за оригінал. */
+  textKind: EditionTextKind
+  /** Мова видання; `null` — невідома. */
+  language: string | null
   translator: string | null
 }
 
@@ -79,8 +84,9 @@ export class NetworkInventory {
           select: {
             workId: true,
             translationId: true,
-            translation: { select: { lang: true, translator: true } },
-            work: { select: { origLang: true } },
+            textKind: true,
+            lang: true,
+            translation: { select: { translator: true } },
           },
         },
         // Лише відкриті лоани; з них береться тільки дата й «мій» запит — без позичальника.
@@ -126,7 +132,8 @@ export class NetworkInventory {
         owner: toPublicUser(row.owner),
         relation: role === 'OWNER' ? 'SELF' : role === 'FRIEND' ? 'FRIEND' : 'OTHER',
         workId: row.edition.workId,
-        language: translation?.lang ?? row.edition.work.origLang,
+        textKind: row.edition.textKind,
+        language: row.edition.lang,
         translator: translation?.translator ?? null,
       })
     }
@@ -139,17 +146,10 @@ export class NetworkInventory {
 function editionFilter(filter: InventoryFilter) {
   const clauses: object[] = []
 
-  if (filter.language !== undefined) {
-    clauses.push({
-      OR: [
-        { translation: { is: { lang: filter.language } } },
-        { translationId: null, work: { origLang: filter.language } },
-      ],
-    })
-  }
+  if (filter.language !== undefined) clauses.push(editionLanguageWhere(filter.language))
 
-  if (filter.translation === 'ORIGINAL') clauses.push({ translationId: null })
-  if (filter.translation === 'TRANSLATED') clauses.push({ translationId: { not: null } })
+  if (filter.translation === 'ORIGINAL') clauses.push(editionKindWhere('ORIGINAL'))
+  if (filter.translation === 'TRANSLATED') clauses.push(editionKindWhere('TRANSLATED'))
 
   if (filter.translationId !== undefined) clauses.push({ translationId: filter.translationId })
 

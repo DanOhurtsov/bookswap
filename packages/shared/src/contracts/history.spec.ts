@@ -118,6 +118,7 @@ describe('historyCopySchema', () => {
       pageCount: 800,
       coverUrl: null,
       format: 'HARDCOVER',
+      textKind: 'ORIGINAL',
       lang: 'en',
       translator: null,
       revision: 1,

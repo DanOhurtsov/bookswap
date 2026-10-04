@@ -332,7 +332,7 @@ export function groupByEdition<TCopy>(
 
       return [
         {
-          edition: toEdition(first.edition, first.edition.work),
+          edition: toEdition(first.edition),
           work: toWork(first.edition.work),
           authors: toWorkAuthors(first.edition.work.authors),
           copies: ordered.map(project),

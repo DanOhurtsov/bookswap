@@ -29,6 +29,7 @@ const BASE_EDITION = {
   id: 'ed-1',
   workId: 'work-1',
   translationId: null,
+  textKind: 'ORIGINAL',
   publisher: null,
   year: null,
   isbn13: null,

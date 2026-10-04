@@ -2,7 +2,6 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
   EXCLUSIVE_LOAN_STATUS,
-  OPEN_LOAN_STATUS,
   type AddCopyRequest,
   type BorrowedLibraryResponse,
   type CopyResponse,
@@ -21,6 +20,9 @@ import { isForeignKeyViolationOn } from '../common/prisma-errors'
 import { NotificationsService } from '../notifications/notifications.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS, toPublicUser } from '../users/user.mapper'
+import { CopyWriter, toDate } from './copy-writer'
+import { editionLanguageWhere } from '../catalog/edition-language'
+import { WITH_CATALOG } from './library-includes'
 import {
   groupByEdition,
   toBorrowedCopy,
@@ -48,45 +50,6 @@ const LOAN_COPY_FKEY = 'Loan_copyId_fkey'
  */
 const ACTIVE_LOAN_STATUSES: LoanStatus[] = [...EXCLUSIVE_LOAN_STATUS]
 
-/** Незавершені лоани — ті, що впливають на §6.5. Копія масиву: Prisma хоче змінюваний. */
-const OPEN_LOAN_STATUSES: LoanStatus[] = [...OPEN_LOAN_STATUS]
-
-/**
- * Каталожний контекст примірника — саме той набір полів, який читає
- * `library.mapper`. Один опис на всі запити: інакше «чому на одній сторінці є
- * автори, а на іншій немає» стало б регулярним питанням.
- */
-const WITH_CATALOG = {
-  edition: {
-    include: {
-      translation: true,
-      work: { include: { authors: { include: { author: true } } } },
-    },
-  },
-  owner: { select: PUBLIC_USER_FIELDS },
-  currentHolder: { select: PUBLIC_USER_FIELDS },
-  /**
-   * §6.5: стан кнопки «Попросити» не виводиться з `Copy.status` — за §5.1 запит
-   * примірника не змінює, тож `AVAILABLE` не означає «ви ще не просили».
-   *
-   * Термінальні лоани не читаються: вони — історія, і для неї є `/copies/:id/history`.
-   * Проєкція вужча за `WITH_CONTEXT` у `loans/`: тут потрібні лише id, статус і
-   * позичальник, а самі мапери віддають із цього ще менше — і різне за роллю.
-   */
-  loans: {
-    where: { status: { in: OPEN_LOAN_STATUSES } },
-    select: {
-      id: true,
-      status: true,
-      borrowerId: true,
-      // §6.5: «орієнтовна дата повернення, якщо власник її вказав». Назовні з
-      // цього рядка йде тільки вона — див. `expectedReturnOf`.
-      dueAt: true,
-      borrower: { select: PUBLIC_USER_FIELDS },
-    },
-  },
-} as const
-
 /**
  * Особиста бібліотека (§6.4) і бібліотека іншої людини (§6.5).
  *
@@ -103,6 +66,7 @@ export class LibraryService {
     private readonly access: AccessService,
     private readonly normalizer: TextNormalizer,
     private readonly notifications: NotificationsService,
+    private readonly copies: CopyWriter,
   ) {}
 
   /** §8: `GET /me/library?status=&lang=&q=`. */
@@ -211,7 +175,8 @@ export class LibraryService {
    * §8: `POST /me/library { editionId, condition, note, visibility, entryMethod? }`.
    *
    * `currentHolderId = ownerId` — книжка вдома, тобто інваріант §5.3.2 виконано
-   * від народження примірника.
+   * від народження примірника. Видимість, якщо її не задано, визначає сервер із
+   * профілю (`defaultCopyVisibility`), а не завжди `FRIENDS`.
    */
   async addCopy(userId: string, request: AddCopyRequest): Promise<CopyResponse> {
     const edition = await this.prisma.edition.findUnique({
@@ -221,17 +186,10 @@ export class LibraryService {
 
     if (edition === null) throw notFound('Видання не знайдено')
 
-    const copy = await this.prisma.copy.create({
-      data: {
-        editionId: request.editionId,
-        ownerId: userId,
-        currentHolderId: userId,
-        condition: request.condition ?? 'GOOD',
-        note: request.note ?? null,
-        visibility: request.visibility ?? 'FRIENDS',
-        acquiredAt: toDate(request.acquiredAt),
-      },
-      include: WITH_CATALOG,
+    const copy = await this.copies.create(this.prisma, {
+      ownerId: userId,
+      editionId: request.editionId,
+      values: request,
     })
 
     await this.analytics.record({
@@ -460,12 +418,7 @@ export class LibraryService {
     if (filters.status !== undefined) conditions.push({ status: filters.status })
 
     if (filters.lang !== undefined) {
-      conditions.push({
-        OR: [
-          { edition: { translation: { lang: filters.lang } } },
-          { edition: { translationId: null, work: { origLang: filters.lang } } },
-        ],
-      })
+      conditions.push({ edition: editionLanguageWhere(filters.lang) })
     }
 
     if (filters.q !== undefined) {
@@ -485,11 +438,6 @@ export class LibraryService {
 
     return conditions
   }
-}
-
-/** Дата без часу — опівночі UTC, щоб день не «поїхав» на межі часових поясів. */
-function toDate(value: string | null | undefined): Date | null {
-  return value === undefined || value === null ? null : new Date(`${value}T00:00:00.000Z`)
 }
 
 function notFound(message: string): ApiException {

@@ -49,6 +49,8 @@ function copyRow(overrides: Partial<CopyRow> = {}): CopyRow {
       pageCount: 800,
       coverUrl: null,
       format: 'HARDCOVER',
+      textKind: 'TRANSLATION',
+      lang: 'uk',
       revision: 1,
       translation: { lang: 'uk', translator: 'Любов Пилаєва' },
       work: {
@@ -471,14 +473,34 @@ describe('groupByEdition', () => {
     expect(group?.edition.translator).toBe('Любов Пилаєва')
   })
 
-  it('для видання мовою оригіналу мова береться з твору, перекладача немає', () => {
+  it('видання-оригінал: тип і мова — власні поля видання, перекладача немає', () => {
     const original = copyRow({
-      edition: { ...copyRow().edition, translationId: null, translation: null },
+      edition: {
+        ...copyRow().edition,
+        translationId: null,
+        translation: null,
+        textKind: 'ORIGINAL',
+        lang: 'en',
+      },
     })
     const [group] = groupByEdition([original], toOwnCopy)
 
-    expect(group?.edition.lang).toBe('en')
-    expect(group?.edition.translator).toBeNull()
+    expect(group?.edition).toMatchObject({ textKind: 'ORIGINAL', lang: 'en', translator: null })
+  })
+
+  it('невідомий текст і мова не вигадуються з твору', () => {
+    const unknown = copyRow({
+      edition: {
+        ...copyRow().edition,
+        translationId: null,
+        translation: null,
+        textKind: 'UNKNOWN',
+        lang: null,
+      },
+    })
+    const [group] = groupByEdition([unknown], toOwnCopy)
+
+    expect(group?.edition).toMatchObject({ textKind: 'UNKNOWN', lang: null })
   })
 
   it('порожній список — це порожній список, а не помилка', () => {

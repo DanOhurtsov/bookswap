@@ -44,6 +44,7 @@ const candidate: CatalogDiscoveryResult = {
       id: 'edition-1',
       workId: 'work-1',
       translationId: null,
+      textKind: 'ORIGINAL',
       publisher: 'КСД',
       year: 2024,
       isbn13: null,

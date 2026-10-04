@@ -8,6 +8,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { TextAreaField, TextField } from '@/components/Form/FormFields'
+import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { parseWorkConflict, type WorkCorrectionEntity } from '../api/correction-requests'
 import {
@@ -21,7 +22,6 @@ import type { CatalogCorrection } from '../model/use-catalog-correction'
 import { workCorrectionFormSchema, type WorkCorrectionFormValues } from '../model/work-form'
 import { AuthorListEditor } from './AuthorListEditor'
 import { ConflictNotice } from './ConflictNotice'
-import { LanguageField } from './LanguageField'
 import { RefreshNotice } from './RefreshNotice'
 
 type WorkCorrectionFormProps = {
@@ -36,7 +36,7 @@ type WorkCorrectionFormProps = {
 function toFormValues(work: Work, authors: WorkAuthor[]): WorkCorrectionFormValues {
   return {
     title: work.title,
-    origLang: work.origLang,
+    origLang: work.origLang ?? '',
     firstPubYear: work.firstPubYear,
     description: work.description,
     authors: toAuthorFormValues(authors),
@@ -157,7 +157,8 @@ export function WorkCorrectionForm({
 
     const body: WorkPatchRequest = {
       title: values.title,
-      origLang: values.origLang,
+      // Порожня мова — «невідома й не змінюється»: її не надсилаємо.
+      ...(values.origLang === '' ? {} : { origLang: values.origLang }),
       firstPubYear: values.firstPubYear,
       description: values.description,
       expectedRevision: values.expectedRevision,
@@ -168,7 +169,7 @@ export function WorkCorrectionForm({
       work: {
         ...work,
         title: values.title,
-        origLang: values.origLang,
+        origLang: values.origLang === '' ? work.origLang : values.origLang,
         firstPubYear: values.firstPubYear,
         description: values.description,
       },
@@ -238,11 +239,13 @@ export function WorkCorrectionForm({
         control={control}
         name="origLang"
         render={({ field }) => (
-          <LanguageField
+          <LanguageSelect
             id="correction-work-lang"
             label="Мова оригіналу"
-            value={field.value ?? ''}
+            value={field.value}
             error={errors.origLang?.message}
+            // Невідому мову можна лишити невказаною; відому очищувати цією формою не пропонуємо.
+            {...(work.origLang === null ? { emptyLabel: 'Не вказано' } : {})}
             onChange={field.onChange}
           />
         )}

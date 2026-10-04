@@ -126,3 +126,94 @@ export function rankAuthors(
     LIMIT ${limit}
   `
 }
+
+export interface SpellingCandidate {
+  /** Як записано в каталозі: саме це й показується людині. */
+  text: string
+  textNorm: string
+  score: number
+}
+
+/**
+ * Чи є в каталозі звичайний частковий збіг (підрядок назви чи імені автора) — той самий, що вже
+ * шукає `rankWorks`. Автор рахується, лише якщо в нього є незлитий твір: інакше пошук нічого б не
+ * показав, а виправляти було б нічого.
+ */
+export async function hasPartialMatch(client: RawQueryRunner, pattern: string): Promise<boolean> {
+  const rows = await client.$queryRaw<{ found: boolean }[]>`
+    SELECT (
+      EXISTS (
+        SELECT 1 FROM "Work" w
+        WHERE w."mergedIntoId" IS NULL AND w."titleNorm" LIKE ${pattern}::text
+      )
+      OR EXISTS (
+        SELECT 1 FROM "Author" a
+        WHERE a."nameNorm" LIKE ${pattern}::text
+          AND EXISTS (
+            SELECT 1 FROM "WorkAuthor" wa
+            JOIN "Work" w ON w.id = wa."workId"
+            WHERE wa."authorId" = a.id AND w."mergedIntoId" IS NULL
+          )
+      )
+    ) AS found
+  `
+
+  return rows[0]?.found === true
+}
+
+/**
+ * Два найсхожіших РІЗНИХ тексти серед назв творів і імен авторів. Дві сутності з однаковим
+ * нормалізованим текстом — один кандидат, а не двоє: «неоднозначність» означає різні написання, а не
+ * дублікат у каталозі. Оцінка — лише порядок, не імовірність; поріг і запас обирає
+ * `chooseSpellingSuggestion`.
+ */
+export function rankSpellingCandidates(
+  client: RawQueryRunner,
+  term: string,
+): Promise<SpellingCandidate[]> {
+  return client.$queryRaw<SpellingCandidate[]>`
+    SELECT c.text AS text, c."textNorm" AS "textNorm", c.score AS score
+    FROM (
+      SELECT DISTINCT ON (u."textNorm") u.text, u."textNorm", u.score
+      FROM (
+        SELECT w.title AS text, w."titleNorm" AS "textNorm",
+               similarity(w."titleNorm", ${term}::text) AS score
+        FROM "Work" w
+        WHERE w."mergedIntoId" IS NULL AND w."titleNorm" % ${term}::text
+        UNION ALL
+        SELECT a.name AS text, a."nameNorm" AS "textNorm",
+               similarity(a."nameNorm", ${term}::text) AS score
+        FROM "Author" a
+        WHERE a."nameNorm" % ${term}::text
+          AND EXISTS (
+            SELECT 1 FROM "WorkAuthor" wa
+            JOIN "Work" w ON w.id = wa."workId"
+            WHERE wa."authorId" = a.id AND w."mergedIntoId" IS NULL
+          )
+      ) u
+      ORDER BY u."textNorm", u.score DESC, u.text ASC
+    ) c
+    ORDER BY c.score DESC, c."textNorm" ASC
+    LIMIT 2
+  `
+}
+
+/**
+ * Той самий вимір схожості для текстів, яких у нашій БД немає (назви й автори з відповідей зовнішніх
+ * джерел): `bookswap_norm` і `similarity` рахує сама БД, тож оцінка й поріг ті самі, що в
+ * `rankSpellingCandidates`. Це читання без запису: жодних зовнішніх запитів і жодних нових рядків.
+ */
+export function scoreSpellingTexts(
+  client: RawQueryRunner,
+  term: string,
+  texts: readonly string[],
+): Promise<SpellingCandidate[]> {
+  if (texts.length === 0) return Promise.resolve([])
+
+  return client.$queryRaw<SpellingCandidate[]>`
+    SELECT t.text AS text,
+           bookswap_norm(t.text) AS "textNorm",
+           similarity(bookswap_norm(t.text), ${term}::text) AS score
+    FROM unnest(${[...texts]}::text[]) AS t(text)
+  `
+}

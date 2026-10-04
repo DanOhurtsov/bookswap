@@ -38,6 +38,7 @@ const rawConfirmation = {
     pageCount: null,
     coverUrl: null,
     format: 'PAPERBACK',
+    textKind: 'ORIGINAL',
     lang: 'uk',
     translator: null,
     revision: 1,

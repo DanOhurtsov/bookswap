@@ -138,7 +138,7 @@ export function toHistoryCopy(copy: HistoryCopyRow): HistoryCopy {
     id: copy.id,
     status: copy.status,
     condition: copy.condition,
-    edition: toEdition(copy.edition, copy.edition.work),
+    edition: toEdition(copy.edition),
     work: toWork(copy.edition.work),
     authors: toWorkAuthors(copy.edition.work.authors),
   }

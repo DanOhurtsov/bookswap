@@ -1,5 +1,6 @@
 import {
   AUTHOR_ROLE,
+  BOOK_LOOKUP_SOURCES,
   BORROWER_KIND,
   CATALOG_ENTITY_TYPE,
   CHANNEL,
@@ -22,11 +23,13 @@ import {
   OWNER_COPY_STATUS,
   PREFERENCE_CHANNEL,
   READING_LIST_STATUS,
+  QUICK_ADD_TARGET_KIND,
   READING_STATUS,
   VISIBILITY,
 } from '@bookswap/shared'
 import type {
   AuthorRole as SharedAuthorRole,
+  BookLookupSource as SharedBookLookupSource,
   BorrowerKind as SharedBorrowerKind,
   CatalogEntityType as SharedCatalogEntityType,
   Channel as SharedChannel,
@@ -42,6 +45,7 @@ import type {
   LoanOrigin as SharedLoanOrigin,
   LoanStatus as SharedLoanStatus,
   NotificationType as SharedNotificationType,
+  QuickAddTargetKind as SharedQuickAddTargetKind,
   ReadingStatus as SharedReadingStatus,
   Visibility as SharedVisibility,
 } from '@bookswap/shared'
@@ -54,9 +58,11 @@ import {
   CopyStatus as PrismaCopyStatus,
   DeliveryStatus as PrismaDeliveryStatus,
   EditionFormat as PrismaEditionFormat,
+  ExternalBookSource as PrismaExternalBookSource,
   FriendshipStatus as PrismaFriendshipStatus,
   GuestLoanConfirmationStatus as PrismaGuestLoanConfirmationStatus,
   LibraryImportRowStatus as PrismaLibraryImportRowStatus,
+  LibraryAddTargetKind as PrismaLibraryAddTargetKind,
   LibraryImportStatus as PrismaLibraryImportStatus,
   LoanEventType as PrismaLoanEventType,
   LoanOrigin as PrismaLoanOrigin,
@@ -74,9 +80,11 @@ import type {
   CopyStatus as PrismaCopyStatusType,
   DeliveryStatus as PrismaDeliveryStatusType,
   EditionFormat as PrismaEditionFormatType,
+  ExternalBookSource as PrismaExternalBookSourceType,
   FriendshipStatus as PrismaFriendshipStatusType,
   GuestLoanConfirmationStatus as PrismaGuestLoanConfirmationStatusType,
   LibraryImportRowStatus as PrismaLibraryImportRowStatusType,
+  LibraryAddTargetKind as PrismaLibraryAddTargetKindType,
   LibraryImportStatus as PrismaLibraryImportStatusType,
   LoanEventType as PrismaLoanEventTypeType,
   LoanOrigin as PrismaLoanOriginType,
@@ -109,6 +117,9 @@ const _guestLoanConfirmationStatusMatches: Equal<
   PrismaGuestLoanConfirmationStatusType
 > = true
 const _notificationTypeMatches: Equal<SharedNotificationType, PrismaNotificationTypeType> = true
+const _externalBookSourceMatches: Equal<SharedBookLookupSource, PrismaExternalBookSourceType> = true
+const _quickAddTargetKindMatches: Equal<SharedQuickAddTargetKind, PrismaLibraryAddTargetKindType> =
+  true
 const _readingStatusMatches: Equal<SharedReadingStatus, PrismaReadingStatusType> = true
 const _channelMatches: Equal<SharedChannel, PrismaChannelType> = true
 const _deliveryStatusMatches: Equal<SharedDeliveryStatus, PrismaDeliveryStatusType> = true
@@ -119,6 +130,28 @@ const _libraryImportRowStatusMatches: Equal<
   SharedLibraryImportRowStatus,
   PrismaLibraryImportRowStatusType
 > = true
+
+describe('ExternalBookSource: shared `BookLookupSource` ↔ Prisma', () => {
+  it('містить ті самі значення', () => {
+    expect([...BOOK_LOOKUP_SOURCES].sort()).toEqual(Object.values(PrismaExternalBookSource).sort())
+  })
+
+  it('типи взаємно присвоювані', () => {
+    expect(_externalBookSourceMatches).toBe(true)
+  })
+})
+
+describe('QuickAddTargetKind: shared ↔ Prisma `LibraryAddTargetKind`', () => {
+  it('містить ті самі значення', () => {
+    expect([...QUICK_ADD_TARGET_KIND].sort()).toEqual(
+      Object.values(PrismaLibraryAddTargetKind).sort(),
+    )
+  })
+
+  it('типи взаємно присвоювані', () => {
+    expect(_quickAddTargetKindMatches).toBe(true)
+  })
+})
 
 describe('Visibility: shared ↔ Prisma', () => {
   it('містить ті самі значення', () => {

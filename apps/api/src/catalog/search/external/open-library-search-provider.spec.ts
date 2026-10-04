@@ -18,10 +18,15 @@ describe('OpenLibrarySearchProvider', () => {
     jest.restoreAllMocks()
   })
 
-  function jsonResponse(body: unknown, status = 200): Response {
+  function jsonResponse(
+    body: unknown,
+    status = 200,
+    headers: Record<string, string> = {},
+  ): Response {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(headers),
       json: () => Promise.resolve(body),
     } as unknown as Response
   }
@@ -331,5 +336,37 @@ describe('OpenLibrarySearchProvider', () => {
     )
 
     await expect(search(5, 'багряний')).resolves.toHaveLength(1)
+  })
+
+  // --- Кандидати для виправлення написання ----------------------------------
+
+  it('правильна назва, яку ворота відкинули для хибного запиту, лишається кандидатом для підказки, а не результатом', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        docs: [{ key: '/works/OL1W', title: 'Гаррі Поттер', author_name: ['Джоан Роулінг'] }],
+      }),
+    )
+
+    const block = await searchBlock(5, 'гарі потер')
+
+    expect(block.results).toEqual([])
+    expect(block.spellingCandidates).toEqual(['Гаррі Поттер', 'Джоан Роулінг'])
+    // Підказка не додає звернень: це та сама одна відповідь.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(acquired).toBe(1)
+  })
+
+  it('кандидатами стають лише структурно придатні документи', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        docs: [
+          { key: '/works/OL1W', title: 'Гаррі Поттер' },
+          { title: 'Без ключа' },
+          { key: '/works/OL2W' },
+        ],
+      }),
+    )
+
+    expect((await searchBlock(5, 'гарі потер')).spellingCandidates).toEqual(['Гаррі Поттер'])
   })
 })

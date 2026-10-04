@@ -11,12 +11,15 @@ export {
   AUTHOR_ROLE,
   CATALOG_ENTITY_TYPE,
   EDITION_FORMAT,
+  EDITION_TEXT_KIND,
   authorRoleSchema,
   catalogEntityTypeSchema,
   editionFormatSchema,
+  editionTextKindSchema,
   type AuthorRole,
   type CatalogEntityType,
   type EditionFormat,
+  type EditionTextKind,
 } from './domain/catalog'
 export {
   CONDITION,
@@ -350,6 +353,56 @@ export {
   type VisibleLibraryResponse,
 } from './contracts/library'
 export {
+  AUTO_SEARCH_EXTERNAL_MIN_CHARS,
+  AUTO_SEARCH_LOCAL_MIN_CHARS,
+  AUTO_SEARCH_RESULT_LIMIT,
+  addSearchExternalItemSchema,
+  addSearchExternalResponseSchema,
+  type AddSearchExternalItem,
+  type AddSearchExternalResponse,
+} from './contracts/add-search'
+export {
+  addSearchEditionItemSchema,
+  addSearchItemSchema,
+  addSearchOwnershipSchema,
+  addSearchRequestSchema,
+  addSearchResponseSchema,
+  addSearchWorkItemSchema,
+  type AddSearchEditionItem,
+  type AddSearchItem,
+  type AddSearchOwnership,
+  type AddSearchRequest,
+  type AddSearchResponse,
+  type AddSearchWorkItem,
+} from './contracts/add-search'
+export {
+  quickAddManualEditionSchema,
+  quickAddManualTargetSchema,
+  quickAddManualWorkSchema,
+  type QuickAddManualTarget,
+} from './contracts/quick-add'
+export {
+  QUICK_ADD_EXTERNAL_SOURCES,
+  quickAddExternalEditionTargetSchema,
+  quickAddExternalSourceSchema,
+  type QuickAddExternalEditionTarget,
+} from './contracts/quick-add'
+export {
+  QUICK_ADD_TARGET_KIND,
+  quickAddCopySchema,
+  quickAddExistingEditionTargetSchema,
+  quickAddRequestSchema,
+  quickAddResponseSchema,
+  quickAddTargetKindSchema,
+  quickAddTargetSchema,
+  type QuickAddCopy,
+  type QuickAddExistingEditionTarget,
+  type QuickAddRequest,
+  type QuickAddResponse,
+  type QuickAddTarget,
+  type QuickAddTargetKind,
+} from './contracts/quick-add'
+export {
   LIBRARY_IMPORT_AUTHOR_SEPARATOR,
   LIBRARY_IMPORT_COLUMN_VALUE_KEYS,
   LIBRARY_IMPORT_CONTENT_BASE64_MAX,
@@ -535,6 +588,7 @@ export {
   externalSearchResultToLookup,
   externalSearchSourceReportSchema,
   externalSearchSourceStatusSchema,
+  spellingSuggestionSchema,
   type ExternalSearchMore,
   type ExternalSearchRecordKind,
   type ExternalSearchRequest,
@@ -542,6 +596,7 @@ export {
   type ExternalSearchResult,
   type ExternalSearchSourceReport,
   type ExternalSearchSourceStatus,
+  type SpellingSuggestion,
 } from './contracts/external-search'
 export {
   WISHLIST_LIMITS,

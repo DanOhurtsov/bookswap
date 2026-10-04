@@ -33,6 +33,8 @@ function editionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     pageCount: 384,
     coverUrl: null,
     format: 'PAPERBACK',
+    textKind: 'TRANSLATION',
+    lang: 'uk',
     translation: { lang: 'uk', translator: 'Олена Оніщук' },
     revision: 1,
     ...overrides,
@@ -91,23 +93,64 @@ describe('toWorkAuthors', () => {
 
 describe('toEdition', () => {
   it('бере мову й перекладача з перекладу', () => {
-    const edition = toEdition(editionRow(), work)
+    const edition = toEdition(editionRow())
 
     expect(edition.lang).toBe('uk')
     expect(edition.translator).toBe('Олена Оніщук')
   })
 
   it('видання мовою оригіналу: мова з твору, перекладача немає (§4.4)', () => {
-    const edition = toEdition(editionRow({ translationId: null, translation: null }), work)
+    const edition = toEdition(
+      editionRow({ translationId: null, translation: null, textKind: 'ORIGINAL', lang: 'en' }),
+    )
 
     expect(edition.lang).toBe('en')
     expect(edition.translator).toBeNull()
+    expect(edition.textKind).toBe('ORIGINAL')
+  })
+
+  describe('тип тексту й мова — власні поля, а не висновок із перекладу чи твору', () => {
+    it('невідомий текст: translationId = null НЕ робить видання оригіналом, мови немає', () => {
+      const edition = toEdition(
+        editionRow({ translationId: null, translation: null, textKind: 'UNKNOWN', lang: null }),
+      )
+
+      expect(edition).toMatchObject({ textKind: 'UNKNOWN', lang: null, translator: null })
+    })
+
+    it('мова видання не бере мови з твору, коли вона невідома', () => {
+      const edition = toEdition(
+        editionRow({ translationId: null, translation: null, textKind: 'UNKNOWN', lang: 'de' }),
+      )
+
+      expect(edition.lang).toBe('de')
+    })
+
+    it('твір без відомої мови оригіналу: оригінал зберігає введену мову видання', () => {
+      const edition = toEdition(
+        editionRow({ translationId: null, translation: null, textKind: 'ORIGINAL', lang: 'uk' }),
+      )
+
+      expect(edition).toMatchObject({ textKind: 'ORIGINAL', lang: 'uk' })
+    })
+
+    it('переклад без даних про перекладача: мова є, перекладача немає', () => {
+      const edition = toEdition(
+        editionRow({ translationId: null, translation: null, textKind: 'TRANSLATION', lang: 'uk' }),
+      )
+
+      expect(edition).toMatchObject({ textKind: 'TRANSLATION', lang: 'uk', translator: null })
+    })
+
+    it('невідомий формат лишається невідомим', () => {
+      expect(toEdition(editionRow({ format: null })).format).toBeNull()
+    })
   })
 })
 
 describe('byEditionOrder', () => {
   const edition = (overrides: Partial<Edition>): Edition => ({
-    ...toEdition(editionRow(), work),
+    ...toEdition(editionRow()),
     ...overrides,
   })
 
@@ -277,6 +320,8 @@ describe('CatalogRevision snapshots (Stage 8e-2, R9)', () => {
         coverUrl: null,
         format: 'PAPERBACK',
         translationId: null,
+        textKind: 'ORIGINAL',
+        lang: 'en',
       }),
     ).toEqual({
       publisher: 'КСД',
@@ -286,6 +331,8 @@ describe('CatalogRevision snapshots (Stage 8e-2, R9)', () => {
       coverUrl: null,
       format: 'PAPERBACK',
       translationId: null,
+      textKind: 'ORIGINAL',
+      lang: 'en',
     })
   })
 })

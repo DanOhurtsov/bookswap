@@ -181,7 +181,7 @@ export function toLoan(loan: LoanRow, now: Date = new Date()): Loan {
       condition: loan.copy.condition,
       isArchived: loan.copy.archivedAt !== null,
     },
-    edition: toEdition(loan.copy.edition, loan.copy.edition.work),
+    edition: toEdition(loan.copy.edition),
     work: toWork(loan.copy.edition.work),
     authors: toWorkAuthors(loan.copy.edition.work.authors),
     recovery:

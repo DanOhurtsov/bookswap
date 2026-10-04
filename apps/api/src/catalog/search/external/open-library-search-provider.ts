@@ -5,12 +5,15 @@ import { nonEmptyString, stringArray } from '../../lookup/lookup-provider.utils'
 import { iso6391FromMarc } from '../../lookup/marc-language'
 import {
   ExternalSearchProviderError,
+  ExternalSearchProviderRateLimitedError,
+  retryAfterMsFrom,
   type ExternalSearchBlock,
   type ExternalSearchBlockResult,
   type ExternalSearchContext,
   type ExternalSearchProvider,
 } from './external-search-provider'
 import { searchTerms } from './search-terms'
+import { spellingTexts } from './spelling-texts'
 
 const SEARCH_API_ROOT = 'https://openlibrary.org/search.json'
 
@@ -182,6 +185,13 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
       )
     }
 
+    if (response.status === 429) {
+      throw new ExternalSearchProviderRateLimitedError(
+        'Open Library search відповів HTTP 429',
+        retryAfterMsFrom(response.headers.get('retry-after')),
+      )
+    }
+
     if (!response.ok) {
       throw new ExternalSearchProviderError(
         `Open Library search відповів HTTP ${String(response.status)}`,
@@ -200,9 +210,10 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
     // "nothing", not a reason to fail the whole search.
     if (!Array.isArray(documents)) return { results: [], exhausted: true }
 
-    const results = documents
+    const parsed = documents
       .map((document) => this.toResult(document))
       .filter((result): result is ExternalSearchResult => result !== undefined)
+    const results = parsed
       // The gate, even though the query was field-restricted: Solr matches
       // stemmed and transliterated forms, so a document can come back whose
       // title and authors say none of what was asked.
@@ -214,6 +225,8 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
     return {
       results,
       exhausted: streamEnded(payload, offset, block.size, documents.length),
+      // Before the gate: the correct spelling of a misspelled query is what the gate rejects.
+      spellingCandidates: spellingTexts(parsed),
     }
   }
 

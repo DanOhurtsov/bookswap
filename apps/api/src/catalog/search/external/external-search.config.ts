@@ -81,3 +81,39 @@ export function externalSearchBlockSize(): number {
 export function externalSearchMinIntervalMs(): number {
   return fromEnv('CATALOG_EXTERNAL_SEARCH_MIN_INTERVAL_MS', DEFAULT_MIN_INTERVAL_MS)
 }
+
+/**
+ * How many RAW records the ONE query of an auto-suggest reads.
+ *
+ * Suggestions spend a single outbound request, so the block cannot be spread
+ * over several: it is wide enough for the relevance gate to leave a full list of
+ * eight, and no wider because `projection=full` makes every record heavy.
+ */
+export function externalSuggestBlockSize(): number {
+  return fromEnv('CATALOG_EXTERNAL_SUGGEST_BLOCK_SIZE', 16)
+}
+
+/**
+ * A suggestion is admitted only if no call to this source started within this
+ * window. With the shared 1 s interval this caps suggestions at ~30 per minute
+ * per instance and leaves the remaining slots to full search, ISBN-adjacent
+ * work and quick-add.
+ */
+export function externalSuggestMinGapMs(): number {
+  return fromEnv('CATALOG_EXTERNAL_SUGGEST_MIN_GAP_MS', 2_000)
+}
+
+/** Suggestion blocks have their own LRU so prefix queries ("ко", "коб", "кобз") do not evict full searches. */
+export function externalSuggestCacheMaxEntries(): number {
+  return fromEnv('CATALOG_EXTERNAL_SUGGEST_CACHE_MAX_ENTRIES', 300)
+}
+
+/** How long a source is left alone after it answered 429 without a usable `Retry-After`. */
+export function externalRateLimitCooldownMs(): number {
+  return fromEnv('CATALOG_EXTERNAL_RATE_LIMIT_COOLDOWN_MS', 30_000)
+}
+
+/** Upper bound on any cooldown, however large a `Retry-After` the provider sends. */
+export const MAX_RATE_LIMIT_COOLDOWN_MS = 5 * 60_000
+/** Lower bound: "retry in 0 seconds" is not a pause. */
+export const MIN_RATE_LIMIT_COOLDOWN_MS = 1_000

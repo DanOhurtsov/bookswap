@@ -7,6 +7,8 @@ import type {
 import { AnalyticsService } from '../../analytics/analytics.service'
 import { groupByOwner, NetworkInventory, type InventoryCopy } from './network-inventory.service'
 
+const KIND_ORDER = { ORIGINAL: 0, TRANSLATION: 1, UNKNOWN: 2 } as const
+
 /** Значення `translationId`, яким адресується видання мовою оригіналу. */
 export const ORIGINAL_TRANSLATION_ID = 'original'
 
@@ -37,36 +39,46 @@ export class WorkHoldersService {
       scope: 'CIRCLE',
       availability: query.availability,
       workId,
-      translationId:
-        query.translationId === undefined
-          ? undefined
-          : query.translationId === ORIGINAL_TRANSLATION_ID
-            ? null
-            : query.translationId,
+      // `original` — саме видання-оригінал; `UNKNOWN` (текст невідомий) оригіналом не вважається.
+      ...(query.translationId === ORIGINAL_TRANSLATION_ID
+        ? { translation: 'ORIGINAL' as const }
+        : { translationId: query.translationId }),
     })
     const friends = items.filter((item) => item.relation === 'FRIEND')
-    const byTranslation = new Map<string | null, InventoryCopy[]>()
+    // Група — це переклад, а коли зв'язку немає, то тип тексту й мова: оригінал, переклад без даних
+    // про перекладача й видання з невідомим текстом — різні групи.
+    const groupsByKey = new Map<string, InventoryCopy[]>()
 
     for (const item of friends) {
-      const key = item.copy.translationId
-      const list = byTranslation.get(key)
+      const key = item.copy.translationId ?? `${item.textKind}:${item.language ?? ''}`
+      const list = groupsByKey.get(key)
 
-      if (list === undefined) byTranslation.set(key, [item])
+      if (list === undefined) groupsByKey.set(key, [item])
       else list.push(item)
     }
 
-    const groups: WorkHolderGroup[] = [...byTranslation.entries()].map(([translationId, list]) => ({
-      translationId,
-      language: list[0]?.language ?? '',
-      translator: list[0]?.translator ?? null,
-      owners: groupByOwner(list),
-    }))
+    const groups: WorkHolderGroup[] = [...groupsByKey.values()].flatMap((list) => {
+      const [first] = list
 
-    // Оригінал першим, далі за мовою й перекладачем — порядок не залежить від бази.
+      if (first === undefined) return []
+
+      return [
+        {
+          translationId: first.copy.translationId,
+          textKind: first.textKind,
+          language: first.language,
+          translator: first.translator,
+          owners: groupByOwner(list),
+        },
+      ]
+    })
+
+    // Оригінал першим, потім переклади, невідомий текст — наприкінці; далі за мовою й перекладачем —
+    // порядок не залежить від бази.
     groups.sort(
       (left, right) =>
-        Number(right.translationId === null) - Number(left.translationId === null) ||
-        left.language.localeCompare(right.language) ||
+        KIND_ORDER[left.textKind] - KIND_ORDER[right.textKind] ||
+        (left.language ?? '').localeCompare(right.language ?? '') ||
         (left.translator ?? '').localeCompare(right.translator ?? ''),
     )
 

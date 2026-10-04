@@ -40,11 +40,12 @@ describe('workPatchRequestSchema', () => {
     expect(workPatchRequestSchema.safeParse({ ...base, workId: 'w-1' }).success).toBe(false)
   })
 
-  it('title/origLang: optional but not nullable — null is not "omitted"', () => {
+  it('title: optional but not nullable; origLang: nullable — null означає «мова оригіналу невідома»', () => {
     expect(workPatchRequestSchema.safeParse({ ...base, title: 'Нова назва' }).success).toBe(true)
     expect(workPatchRequestSchema.safeParse({ ...base, title: null }).success).toBe(false)
     expect(workPatchRequestSchema.safeParse({ ...base, origLang: 'uk' }).success).toBe(true)
-    expect(workPatchRequestSchema.safeParse({ ...base, origLang: null }).success).toBe(false)
+    expect(workPatchRequestSchema.safeParse({ ...base, origLang: null }).success).toBe(true)
+    expect(workPatchRequestSchema.safeParse({ ...base, origLang: 'zz' }).success).toBe(false)
   })
 
   it('firstPubYear/description: optional AND nullable — null clears the value', () => {
@@ -186,9 +187,22 @@ describe('editionPatchRequestSchema', () => {
     expect(editionPatchRequestSchema.safeParse({ ...base, workId: 'w-1' }).success).toBe(false)
   })
 
-  it("format: optional but NOT nullable, unlike the rest of Edition's fields", () => {
+  it('format: nullable — null означає «формат невідомий»', () => {
     expect(editionPatchRequestSchema.safeParse({ ...base, format: 'POCKET' }).success).toBe(true)
-    expect(editionPatchRequestSchema.safeParse({ ...base, format: null }).success).toBe(false)
+    expect(editionPatchRequestSchema.safeParse({ ...base, format: null }).success).toBe(true)
+    expect(editionPatchRequestSchema.safeParse({ ...base, format: 'GLOSSY' }).success).toBe(false)
+  })
+
+  it('textKind: лише відомі значення й не nullable; lang: код мови або null (невідома)', () => {
+    for (const textKind of ['ORIGINAL', 'TRANSLATION', 'UNKNOWN']) {
+      expect(editionPatchRequestSchema.safeParse({ ...base, textKind }).success).toBe(true)
+    }
+
+    expect(editionPatchRequestSchema.safeParse({ ...base, textKind: 'OTHER' }).success).toBe(false)
+    expect(editionPatchRequestSchema.safeParse({ ...base, textKind: null }).success).toBe(false)
+    expect(editionPatchRequestSchema.safeParse({ ...base, lang: 'uk' }).success).toBe(true)
+    expect(editionPatchRequestSchema.safeParse({ ...base, lang: null }).success).toBe(true)
+    expect(editionPatchRequestSchema.safeParse({ ...base, lang: 'zz' }).success).toBe(false)
   })
 
   it('translationId/publisher/year/isbn13/pageCount/coverUrl: optional AND nullable', () => {
@@ -231,6 +245,7 @@ describe('PATCH response schemas', () => {
           id: 't-1',
           workId: 'w-1',
           translator: 'Хтось',
+          textKind: 'ORIGINAL',
           lang: 'uk',
           sourceLang: 'en',
           year: null,
@@ -255,6 +270,7 @@ describe('PATCH response schemas', () => {
           pageCount: null,
           coverUrl: null,
           format: 'PAPERBACK',
+          textKind: 'ORIGINAL',
           lang: 'en',
           translator: null,
           revision: 2,
@@ -313,6 +329,7 @@ describe('CatalogRevision.before/after snapshot schemas', () => {
   it('translationRevisionSnapshotSchema captures every editable Translation field', () => {
     const snapshot = {
       translator: 'Хтось',
+      textKind: 'ORIGINAL',
       lang: 'uk',
       sourceLang: 'en',
       year: 1985,

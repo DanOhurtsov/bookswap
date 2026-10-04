@@ -16,7 +16,13 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator'
-import { CATALOG_LIMITS, EDITION_FORMAT, type EditionFormat } from '@bookswap/shared'
+import {
+  CATALOG_LIMITS,
+  EDITION_FORMAT,
+  EDITION_TEXT_KIND,
+  type EditionFormat,
+  type EditionTextKind,
+} from '@bookswap/shared'
 import {
   EachAuthorHasOneSource,
   EachAuthorIdExcludesNameLatin,
@@ -51,10 +57,11 @@ export class PatchWorkDto {
   @MaxLength(CATALOG_LIMITS.titleMax)
   title?: string
 
-  @IsOptionalNotNull()
+  /** `null` — мова оригіналу невідома (очищення). */
+  @IsOptional()
   @Transform(normalizeLanguage)
   @IsLanguageCode()
-  origLang?: string
+  origLang?: string | null
 
   @IsOptional()
   @IsInt()
@@ -163,9 +170,19 @@ export class PatchEditionDto {
   @MaxLength(CATALOG_LIMITS.coverUrlMax)
   coverUrl?: string | null
 
-  @IsOptionalNotNull()
+  /** `null` — формат невідомий (очищення). */
+  @IsOptional()
   @IsIn(EDITION_FORMAT, { message: 'Невідомий формат видання' })
-  format?: EditionFormat
+  format?: EditionFormat | null
+
+  @IsOptionalNotNull()
+  @IsIn(EDITION_TEXT_KIND, { message: 'Невідомий тип тексту видання' })
+  textKind?: EditionTextKind
+
+  @IsOptional()
+  @Transform(normalizeLanguage)
+  @IsLanguageCode()
+  lang?: string | null
 
   @IsInt()
   @IsPositive()

@@ -99,3 +99,13 @@ export const GUEST_RESPONSE_RATE_LIMIT = fromEnv('GUEST_RESPONSE_RATE_LIMIT', 30
 export const GUEST_RESPONSE_RATE_WINDOW_MS = fromEnv('GUEST_RESPONSE_RATE_WINDOW_MS', 60_000)
 export const GUEST_CODE_SEND_RATE_LIMIT = fromEnv('GUEST_CODE_SEND_RATE_LIMIT', 5)
 export const GUEST_CODE_SEND_RATE_WINDOW_MS = fromEnv('GUEST_CODE_SEND_RATE_WINDOW_MS', 10 * 60_000)
+
+/**
+ * Швидке додавання книжки (`POST /me/library/quick-add`): 30 на хвилину на клієнта.
+ *
+ * Повтор тієї самої операції (`operationId`) безпечний, але все одно коштує запису в БД, а
+ * зовнішній варіант — і мережевого виклику до провайдера, тож ліміт потрібен. Тридцять —
+ * з запасом для людини, що додає книжки підряд зі сканера (одна книжка на кілька секунд).
+ */
+export const QUICK_ADD_RATE_LIMIT = fromEnv('QUICK_ADD_RATE_LIMIT', 30)
+export const QUICK_ADD_RATE_WINDOW_MS = fromEnv('QUICK_ADD_RATE_WINDOW_MS', 60_000)

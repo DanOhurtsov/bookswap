@@ -62,6 +62,8 @@ export type EditionRow = Pick<
   | 'pageCount'
   | 'coverUrl'
   | 'format'
+  | 'textKind'
+  | 'lang'
   | 'revision'
 > & {
   translation: Pick<TranslationModel, 'lang' | 'translator'> | null
@@ -114,14 +116,13 @@ export function toTranslation(translation: TranslationRow, editionCount: number)
 }
 
 /**
- * `lang` і `translator` — обчислені: `translationId = null` означає видання
- * мовою оригіналу (§4.4), тож мова береться з твору, а перекладача немає.
+ * `textKind` і `lang` — що відомо про текст ЦЬОГО видання, а не висновок із відсутності перекладу
+ * (docs/plan/fast-book-add.md, §4); `translator` береться лише з перекладу.
  *
- * Рахується один раз тут, а не на кожній сторінці, що показує видання: інакше
- * умова «якщо переклад є — беремо з нього» розповзеться по клієнту й одного дня
- * розійдеться сама з собою.
+ * Рахується один раз тут, а не на кожній сторінці, що показує видання: інакше правило
+ * «якщо переклад є — беремо з нього» розповзеться по клієнту й одного дня розійдеться само з собою.
  */
-export function toEdition(edition: EditionRow, work: Pick<WorkModel, 'origLang'>): Edition {
+export function toEdition(edition: EditionRow): Edition {
   return {
     id: edition.id,
     workId: edition.workId,
@@ -132,7 +133,8 @@ export function toEdition(edition: EditionRow, work: Pick<WorkModel, 'origLang'>
     pageCount: edition.pageCount,
     coverUrl: edition.coverUrl,
     format: edition.format,
-    lang: edition.translation?.lang ?? work.origLang,
+    textKind: edition.textKind,
+    lang: edition.lang,
     translator: edition.translation?.translator ?? null,
     revision: edition.revision,
   }
@@ -143,7 +145,10 @@ export function toEdition(edition: EditionRow, work: Pick<WorkModel, 'origLang'>
  * будь-що інше. Видання без року йдуть у кінець, а не на початок: невідомий рік
  * не робить книжку найновішою.
  */
-export function byEditionOrder(one: Edition, other: Edition): number {
+export function byEditionOrder(
+  one: Pick<Edition, 'id' | 'year' | 'publisher'>,
+  other: Pick<Edition, 'id' | 'year' | 'publisher'>,
+): number {
   if (one.year !== other.year) {
     if (one.year === null) return 1
     if (other.year === null) return -1
@@ -216,7 +221,7 @@ export function toViewerCapabilities(
 /** Stage 8e-2, R9: full editable-metadata snapshot for `CatalogRevision.before`/`after`. */
 export function toWorkRevisionSnapshot(work: {
   title: string
-  origLang: string
+  origLang: string | null
   firstPubYear: number | null
   description: string | null
   authors: WorkAuthorRow[]
@@ -264,6 +269,8 @@ export function toEditionRevisionSnapshot(edition: {
   coverUrl: string | null
   format: EditionModel['format']
   translationId: string | null
+  textKind: EditionModel['textKind']
+  lang: string | null
 }): EditionRevisionSnapshot {
   return {
     publisher: edition.publisher,
@@ -273,5 +280,8 @@ export function toEditionRevisionSnapshot(edition: {
     coverUrl: edition.coverUrl,
     format: edition.format,
     translationId: edition.translationId,
+    // Знімок несе збережене, а не виведене: легасі-рядок (R2, до backfill) лишається `null`.
+    textKind: edition.textKind,
+    lang: edition.lang,
   }
 }

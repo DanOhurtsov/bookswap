@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import type { WorkHolderGroup } from '@bookswap/shared'
 import { useWorkHolders } from '../model/use-holders'
 import { NetworkOwnerCopies } from './NetworkCopyActions'
 
@@ -31,12 +32,8 @@ export function HoldersPanel({ workId }: { workId: string }) {
 
       {state.status === 'ready' &&
         state.data.groups.map((group) => (
-          <div key={group.translationId ?? 'original'}>
-            <h3>
-              {group.translationId === null
-                ? `Оригінал (${group.language})`
-                : `${group.language} · ${group.translator ?? 'перекладач невідомий'}`}
-            </h3>
+          <div key={group.translationId ?? `${group.textKind}:${group.language ?? ''}`}>
+            <h3>{holderGroupTitle(group)}</h3>
             <ul className="book__locations">
               {group.owners.map((owner) => (
                 <li key={owner.owner.id}>
@@ -52,4 +49,17 @@ export function HoldersPanel({ workId }: { workId: string }) {
         ))}
     </section>
   )
+}
+
+/**
+ * Заголовок групи: оригінал, переклад чи видання з невідомим текстом. «Немає зв'язку з перекладом» не
+ * видається за «оригінал» — це лише `textKind = ORIGINAL`.
+ */
+function holderGroupTitle(group: WorkHolderGroup): string {
+  const language = group.language === null ? '' : ` (${group.language})`
+
+  if (group.textKind === 'ORIGINAL') return `Оригінал${language}`
+  if (group.textKind === 'UNKNOWN') return `Оригінал чи переклад — невідомо${language}`
+
+  return `${group.language ?? 'мова невідома'} · ${group.translator ?? 'перекладач невідомий'}`
 }

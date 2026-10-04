@@ -45,5 +45,7 @@ import { ProviderRateLimiter } from './provider-rate-limiter'
       ) => [openLibrary, googleBooks],
     },
   ],
+  // Сторінка додавання (`LibraryModule`) ділить спільний список за власною довжиною локальної частини.
+  exports: [ExternalSearchService],
 })
 export class ExternalSearchModule {}

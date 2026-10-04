@@ -89,6 +89,7 @@ function edition(publisher: string, revision = 1): Edition {
     id: 'edition-1',
     workId: 'work-1',
     translationId: 'translation-1',
+    textKind: 'TRANSLATION',
     publisher,
     year: null,
     isbn13: null,

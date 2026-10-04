@@ -61,13 +61,13 @@ describe('PatchWorkDto ↔ workPatchRequestSchema', () => {
     ])
   })
 
-  it('title/origLang: опційні, але null заборонений — це не «омітед»', () => {
+  it('title: опційний, але null заборонений; origLang: null — «мова оригіналу невідома»', () => {
     expectAgreement(PatchWorkDto, workPatchRequestSchema, [
       { name: 'title валідний', payload: { ...base, title: 'Нова назва' }, valid: true },
       { name: 'title null', payload: { ...base, title: null }, valid: false },
       { name: 'title порожній', payload: { ...base, title: '   ' }, valid: false },
       { name: 'origLang валідний', payload: { ...base, origLang: 'uk' }, valid: true },
-      { name: 'origLang null', payload: { ...base, origLang: null }, valid: false },
+      { name: 'origLang null', payload: { ...base, origLang: null }, valid: true },
       { name: 'origLang невідомий', payload: { ...base, origLang: 'zz' }, valid: false },
     ])
   })
@@ -254,11 +254,28 @@ describe('PatchEditionDto ↔ editionPatchRequestSchema', () => {
     ])
   })
 
-  it('format: опційний, але НЕ nullable — тут і є ризик, який ловить цей тест', () => {
+  it('format: опційний і nullable — null означає «формат невідомий»', () => {
     expectAgreement(PatchEditionDto, editionPatchRequestSchema, [
       { name: 'format валідний', payload: { ...base, format: 'POCKET' }, valid: true },
-      { name: 'format null', payload: { ...base, format: null }, valid: false },
+      { name: 'format null', payload: { ...base, format: null }, valid: true },
       { name: 'format невідомий', payload: { ...base, format: 'SCROLL' }, valid: false },
+    ])
+  })
+
+  it('textKind: лише відомі значення, не nullable; lang: код мови або null', () => {
+    expectAgreement(PatchEditionDto, editionPatchRequestSchema, [
+      { name: 'textKind ORIGINAL', payload: { ...base, textKind: 'ORIGINAL' }, valid: true },
+      { name: 'textKind UNKNOWN', payload: { ...base, textKind: 'UNKNOWN' }, valid: true },
+      { name: 'textKind невідомий', payload: { ...base, textKind: 'OTHER' }, valid: false },
+      { name: 'textKind null', payload: { ...base, textKind: null }, valid: false },
+      { name: 'lang валідна', payload: { ...base, lang: 'uk' }, valid: true },
+      {
+        name: 'lang верхній регістр нормалізується',
+        payload: { ...base, lang: 'UK' },
+        valid: true,
+      },
+      { name: 'lang null', payload: { ...base, lang: null }, valid: true },
+      { name: 'lang невідома', payload: { ...base, lang: 'zz' }, valid: false },
     ])
   })
 

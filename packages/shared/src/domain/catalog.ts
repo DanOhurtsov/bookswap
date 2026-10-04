@@ -21,6 +21,18 @@ export const editionFormatSchema = z.enum(EDITION_FORMAT)
 export type EditionFormat = z.infer<typeof editionFormatSchema>
 
 /**
+ * Що відомо про текст видання (docs/plan/fast-book-add.md, §4): оригінал, переклад чи невідомо.
+ *
+ * `translationId = null` ЛИШЕ означає «немає зв'язку з конкретним `Translation`» — оригіналом видання
+ * його не робить. Мова видання (`Edition.lang`) теж окремий факт: вона не доводить мови оригіналу.
+ */
+export const EDITION_TEXT_KIND = ['ORIGINAL', 'TRANSLATION', 'UNKNOWN'] as const
+
+export const editionTextKindSchema = z.enum(EDITION_TEXT_KIND)
+
+export type EditionTextKind = z.infer<typeof editionTextKindSchema>
+
+/**
  * Stage 8e-1, R9: which catalog entity a `CatalogRevision` audit row describes.
  * Mirrors the Prisma enum `CatalogEntityType` — parity checked the same way as
  * the enums above (`apps/api/src/common/enum-parity.spec.ts`).

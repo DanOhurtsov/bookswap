@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import type { AuthorRole } from '../../generated/prisma/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import { applyEditionTextUpdates } from '../edition-language-cascade'
+import { planMergeLanguage } from '../edition-language'
 import { WORK_MERGE_ERROR_CODES, WorkMergeError } from './merge-errors'
 
 /** Скільки чого переїхало — це те, що CLI показує оператору. */
@@ -18,6 +20,8 @@ export interface MergeSummary {
   authorLinksMoved: number
   authorLinksDuplicatesRemoved: number
   incomingMergesRepointed: number
+  /** Видання-оригінали, яким злиття заповнило невідому мову мовою оригіналу цілі. */
+  editionLanguagesSet: number
 }
 
 /**
@@ -51,6 +55,13 @@ export class MergeService {
     return this.prisma.$transaction(async (tx) => {
       await this.lockWorks(tx, sourceWorkId, targetWorkId)
       await this.assertMergeable(tx, sourceWorkId, targetWorkId)
+
+      // ДО переносу: поки видання ще на вихідному творі, їхня мова виводиться з нього.
+      const editionLanguagesSet = await this.reconcileEditionLanguages(
+        tx,
+        sourceWorkId,
+        targetWorkId,
+      )
 
       // Конфлікти розв'язуються ДО переносу: інакше перенос рецензій нижче
       // вдариться в `one_active_review_per_work_user` і покладе транзакцію
@@ -106,8 +117,61 @@ export class MergeService {
         authorLinksMoved: authorLinks.moved,
         authorLinksDuplicatesRemoved: authorLinks.duplicatesRemoved,
         incomingMergesRepointed: repointed.count,
+        editionLanguagesSet,
       }
     })
+  }
+
+  /**
+   * Мова видань-оригіналів при злитті (`planMergeLanguage`): мову видання злиття не змінює й не губить.
+   *
+   * - мова оригіналу цілі невідома — мова видання лишається як є (вона власна, а не виведена з твору);
+   * - мова оригіналу цілі відома, а в видання невідома — заповнюється мовою цілі;
+   * - збіг — без змін;
+   * - різні ВІДОМІ мови — злиття відхиляється повністю (`WORK_MERGE_LANGUAGE_CONFLICT`).
+   *
+   * Переклади й видання з невідомим типом тексту переносяться без змін. Мову оригіналу самого твору
+   * злиття не змінює ніколи. Кожна зміна — з аудитом (`actorId = null`: зробив оператор через CLI).
+   */
+  private async reconcileEditionLanguages(
+    tx: TransactionClient,
+    sourceWorkId: string,
+    targetWorkId: string,
+  ): Promise<number> {
+    const target = await tx.work.findUniqueOrThrow({
+      where: { id: targetWorkId },
+      select: { origLang: true },
+    })
+    const editions = await tx.edition.findMany({
+      where: { workId: sourceWorkId },
+      select: { id: true, textKind: true, lang: true },
+      orderBy: { id: 'asc' },
+    })
+    const updates: { id: string; lang: string | null }[] = []
+    const conflicts: string[] = []
+
+    for (const edition of editions) {
+      const plan = planMergeLanguage(
+        { id: edition.id, kind: edition.textKind, lang: edition.lang },
+        target.origLang,
+      )
+
+      if (plan.action === 'CONFLICT') conflicts.push(edition.id)
+      else if (plan.action === 'SET' && plan.lang !== edition.lang) {
+        updates.push({ id: edition.id, lang: plan.lang })
+      }
+    }
+
+    if (conflicts.length > 0) {
+      throw new WorkMergeError(
+        WORK_MERGE_ERROR_CODES.WORK_MERGE_LANGUAGE_CONFLICT,
+        `Видання вихідного твору мають відому мову, відмінну від мови оригіналу цільового твору (${target.origLang ?? 'невідома'}): ${conflicts.join(', ')}`,
+      )
+    }
+
+    await applyEditionTextUpdates(tx, updates, null)
+
+    return updates.length
   }
 
   /**
@@ -361,6 +425,7 @@ type TransactionClient = Pick<
   | 'wishlistItem'
   | 'workReadingStatus'
   | 'workAuthor'
+  | 'catalogRevision'
   | '$queryRaw'
   | '$executeRaw'
 >

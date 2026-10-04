@@ -54,26 +54,27 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
 
-  copiesOwned         Copy[]                   @relation("CopyOwner")
-  copiesHeld          Copy[]                   @relation("CopyHolder")
-  loansAsBorrower     Loan[]                   @relation("LoanBorrower")
-  loansAsOwner        Loan[]                   @relation("LoanOwner")
-  reviews             Review[]
-  translationRatings  TranslationRating[]
-  friendshipsA        Friendship[]             @relation("FriendA")
-  friendshipsB        Friendship[]             @relation("FriendB")
-  friendshipsBlocked  Friendship[]             @relation("FriendshipBlockedBy")
-  wishlist            WishlistItem[]
-  readingStatuses     WorkReadingStatus[]
-  notifications       Notification[]
-  notificationPrefs   NotificationPreference[]
-  productEvents       ProductEvent[]
-  catalogRevisions    CatalogRevision[]
-  libraryImports      LibraryImport[]
-  invitationsSent     Invitation[]
-  invitationsAccepted InvitationAcceptance[]
-  externalBorrowers   ExternalBorrower[]
-  loanEvents          LoanEvent[]
+  copiesOwned          Copy[]                   @relation("CopyOwner")
+  copiesHeld           Copy[]                   @relation("CopyHolder")
+  loansAsBorrower      Loan[]                   @relation("LoanBorrower")
+  loansAsOwner         Loan[]                   @relation("LoanOwner")
+  reviews              Review[]
+  translationRatings   TranslationRating[]
+  friendshipsA         Friendship[]             @relation("FriendA")
+  friendshipsB         Friendship[]             @relation("FriendB")
+  friendshipsBlocked   Friendship[]             @relation("FriendshipBlockedBy")
+  wishlist             WishlistItem[]
+  readingStatuses      WorkReadingStatus[]
+  notifications        Notification[]
+  notificationPrefs    NotificationPreference[]
+  productEvents        ProductEvent[]
+  catalogRevisions     CatalogRevision[]
+  libraryImports       LibraryImport[]
+  libraryAddOperations LibraryAddOperation[]
+  invitationsSent      Invitation[]
+  invitationsAccepted  InvitationAcceptance[]
+  externalBorrowers    ExternalBorrower[]
+  loanEvents           LoanEvent[]
 
   @@index([displayName])
 }
@@ -252,8 +253,8 @@ model Work {
   title        String
   /// lower + unaccent, для пошуку
   titleNorm    String
-  /// ISO 639-1
-  origLang     String
+  /// ISO 639-1. `NULL` — мова оригіналу невідома (зовнішній чи ручний запис без неї); її не вигадують.
+  origLang     String?
   firstPubYear Int?
   description  String?
   createdById  String
@@ -328,18 +329,24 @@ model Translation {
 }
 
 model Edition {
-  id            String        @id @default(cuid())
+  id            String         @id @default(cuid())
   workId        String
-  /// null = мовою оригіналу
+  /// Зв'язок з конкретним перекладом. `NULL` НЕ означає «оригінал»: що відомо про текст, каже `textKind`.
   translationId String?
   publisher     String?
   year          Int?
-  isbn13        String?       @unique
+  isbn13        String?        @unique
   pageCount     Int?
   coverUrl      String?
-  format        EditionFormat @default(PAPERBACK)
+  /// `NULL` — формат невідомий: «м'яку палітурку» ніхто не вгадує (docs/plan/fast-book-add.md, §4).
+  format        EditionFormat?
   createdById   String
-  createdAt     DateTime      @default(now())
+  createdAt     DateTime       @default(now())
+
+  /// Що відомо про текст видання. Обов'язкове: легасі-рядки отримали значення зі старої семантики (backfill C2).
+  textKind EditionTextKind
+  /// Мова ЦЬОГО видання (ISO 639-1); `NULL` — невідома. Не доводить мови оригіналу.
+  lang     String?
 
   /// Stage 8e-1, R9: see `Work.revision`.
   revision Int @default(1)
@@ -348,14 +355,48 @@ model Edition {
   translation Translation? @relation(fields: [translationId], references: [id])
   copies      Copy[]
 
+  /// Точні зовнішні ідентифікатори цього видання (docs/plan/fast-book-add.md, §5.3).
+  externalReferences EditionExternalReference[]
+
   @@index([workId])
   @@index([translationId])
+}
+
+/// Звідки взято видання: підтверджене джерелом зіставлення «зовнішній запис → наше видання». Це локальна довідка,
+/// а не залежність: життєздатність книжки від провайдера не залежить. Дозволяє показати той самий стан кнопки для
+/// різних представлень видання й не звертатися до мережі, коли видання вже відоме.
+///
+/// Запис створюється лише з відповіді самого джерела (не зі слів клієнта) і ніколи не переприв'язується.
+model EditionExternalReference {
+  id         String             @id @default(cuid())
+  source     ExternalBookSource
+  externalId String
+  editionId  String
+  createdAt  DateTime           @default(now())
+
+  edition Edition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
+  @@unique([source, externalId])
+  @@index([editionId])
+}
+
+enum ExternalBookSource {
+  OPEN_LIBRARY
+  GOOGLE_BOOKS
+  ISBNDB
 }
 
 enum EditionFormat {
   HARDCOVER
   PAPERBACK
   POCKET
+}
+
+/// Швидке додавання (docs/plan/fast-book-add.md, §4): що відомо про текст видання.
+enum EditionTextKind {
+  ORIGINAL
+  TRANSLATION
+  UNKNOWN
 }
 
 enum CatalogEntityType {
@@ -446,10 +487,47 @@ model Copy {
   heldByContact ExternalBorrower? @relation("CopyHeldByContact", fields: [heldByContactId], references: [id], onDelete: SetNull)
   loans         Loan[]
 
+  addOperations LibraryAddOperation[]
+
   @@index([ownerId, status])
   @@index([currentHolderId])
   @@index([heldByContactId])
   @@index([editionId])
+}
+
+/// Швидке додавання (docs/plan/fast-book-add.md, §5): що саме робить `POST /me/library/quick-add`.
+enum LibraryAddTargetKind {
+  EXISTING_EDITION
+  EXTERNAL_EDITION
+  MANUAL
+}
+
+/// Серверна ідемпотентність швидкого додавання: один рядок на (користувач, `operationId`).
+///
+/// Рядок і `Copy` створюються в одній транзакції, тож повтор того самого запиту повертає вже створений
+/// примірник, а не додає новий фізичний том. `requestHash` — sha256 нормалізованого запиту без
+/// `operationId`: той самий ключ з іншим вмістом — конфлікт. Приватна нотатка тут НЕ зберігається в
+/// явному вигляді (лише всередині хешу).
+///
+/// `copyId` — `SetNull`: видалений примірник лишає запис про виконану операцію, а його повтор не
+/// відновлює `Copy` (`LIBRARY_ADD_RESULT_REMOVED`). `editionId` — звичайний скаляр без FK, як
+/// `CatalogRevision.entityId`: каталожний рядок не повинен блокувати чи каскадувати цей журнал.
+model LibraryAddOperation {
+  id          String               @id @default(cuid())
+  userId      String
+  operationId String
+  requestHash String
+  targetKind  LibraryAddTargetKind
+  editionId   String
+  copyId      String?
+  createdAt   DateTime             @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  copy Copy? @relation(fields: [copyId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, operationId])
+  @@index([copyId])
+  @@index([targetKind, createdAt])
 }
 
 enum CopyStatus {

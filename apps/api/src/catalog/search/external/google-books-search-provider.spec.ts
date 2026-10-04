@@ -1,5 +1,8 @@
 import type { ExternalSearchContext } from './external-search-provider'
-import { ExternalSearchProviderError } from './external-search-provider'
+import {
+  ExternalSearchProviderError,
+  ExternalSearchProviderRateLimitedError,
+} from './external-search-provider'
 import { GoogleBooksSearchProvider } from './google-books-search-provider'
 
 describe('GoogleBooksSearchProvider', () => {
@@ -23,10 +26,15 @@ describe('GoogleBooksSearchProvider', () => {
     jest.restoreAllMocks()
   })
 
-  function jsonResponse(body: unknown, status = 200): Response {
+  function jsonResponse(
+    body: unknown,
+    status = 200,
+    headers: Record<string, string> = {},
+  ): Response {
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(headers),
       json: () => Promise.resolve(body),
     } as unknown as Response
   }
@@ -553,5 +561,85 @@ describe('GoogleBooksSearchProvider', () => {
     fetchMock.mockResolvedValue(jsonResponse({}, 429))
 
     await expect(search()).rejects.toBeInstanceOf(ExternalSearchProviderError)
+  })
+
+  it('maxQueries: 1 — рівно один запит, і це запит за назвою', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ items: [volume('v', { title: 'Тигролови', authors: ['Іван Багряний'] })] }),
+    )
+
+    const block = await provider.search(
+      'Тигролови Багряний',
+      { index: 0, size: 16, maxQueries: 1 },
+      context(),
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(acquired).toBe(1)
+    expect(sentQuery(0)).toBe('intitle:"Тигролови" intitle:"Багряний"')
+    expect(block.results).toHaveLength(1)
+  })
+
+  it('без maxQueries план лишається повним: назва й автор-запити', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ totalItems: 0 }))
+
+    await provider.search('Тигролови Багряний', { index: 0, size: 5 }, context())
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('HTTP 429 з Retry-After у секундах несе цю паузу', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 429, { 'Retry-After': '42' }))
+
+    await expect(search()).rejects.toMatchObject({
+      name: 'ExternalSearchProviderRateLimitedError',
+      retryAfterMs: 42_000,
+    })
+  })
+
+  it('HTTP 429 без придатного Retry-After не вигадує паузу', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 429, { 'Retry-After': 'soon' }))
+
+    const failure = await search().catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(ExternalSearchProviderRateLimitedError)
+    expect((failure as ExternalSearchProviderRateLimitedError).retryAfterMs).toBeUndefined()
+  })
+
+  it('після 429 решта плану не питається: це були б ще звернення в обмеження', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 429, { 'Retry-After': '5' }))
+
+    await search('Тигролови Багряний').catch(() => undefined)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('правильна назва, яку ворота відкинули для хибного запиту, лишається кандидатом для підказки, а не результатом', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        items: [
+          volume('v1', { title: 'Гаррі Поттер', authors: ['Джоан Роулінг'] }),
+          volume('v2', { title: 'Гаррі Поттер', authors: ['Джоан Роулінг'] }),
+        ],
+      }),
+    )
+
+    const block = await searchBlock('гарі потер')
+
+    expect(block.results).toEqual([])
+    // Однакові тексти різних видань не повторюються.
+    expect(block.spellingCandidates).toEqual(['Гаррі Поттер', 'Джоан Роулінг'])
+    // Кількість звернень — як і без підказки: по одному на запит плану.
+    expect(acquired).toBe(fetchMock.mock.calls.length)
+  })
+
+  it('том без назви кандидатом не стає', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        items: [volume('v1', { authors: ['Хтось'] }), volume('v2', { title: 'Кобзар' })],
+      }),
+    )
+
+    expect((await searchBlock('кобзар')).spellingCandidates).toEqual(['Кобзар'])
   })
 })

@@ -47,6 +47,7 @@ const rawLoan = {
     pageCount: 800,
     coverUrl: null,
     format: 'HARDCOVER',
+    textKind: 'ORIGINAL',
     lang: 'uk',
     translator: 'Любов Пилаєва',
     revision: 1,

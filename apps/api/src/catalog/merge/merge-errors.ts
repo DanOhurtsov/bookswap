@@ -28,6 +28,13 @@ export const WORK_MERGE_ERROR_CODES = {
    * бачить у цілі A вже проставлений `mergedIntoId`.
    */
   WORK_MERGE_TARGET_ALREADY_MERGED: 'WORK_MERGE_TARGET_ALREADY_MERGED',
+  /**
+   * Видання-оригінал вихідного твору має ВІДОМУ мову, відмінну від мови оригіналу цільового твору
+   * (docs/plan/fast-book-add.md, ред. 2, §1). Перенос мовчки змінив би мову видання, а мову
+   * цілі міняти злиттям не можна — тому злиття відхиляється й нічого не змінює. Виправіть мову видання
+   * (PATCH видання) або мову оригіналу одного з творів і повторіть.
+   */
+  WORK_MERGE_LANGUAGE_CONFLICT: 'WORK_MERGE_LANGUAGE_CONFLICT',
 } as const
 
 export type WorkMergeErrorCode =

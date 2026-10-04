@@ -83,6 +83,35 @@ export const API_ERROR_CODES = {
    */
   COPY_STATUS_LOCKED: 'COPY_STATUS_LOCKED',
   /**
+   * Швидке додавання (HTTP 409): той самий `operationId` уже використано з ІНШИМ вмістом запиту.
+   * Ключ ідентифікує одну дію користувача; нова дія (зокрема «ще один примірник») — новий ключ.
+   */
+  /**
+   * Мова видання суперечить зв'язаному перекладу, мові оригіналу твору чи іншим виданням (HTTP 409).
+   * Нічого не змінено: введена мова не відкидається мовчки, суперечність пояснюється явно.
+   * `details.editionIds` — видання, яких вона стосується (коли їх кілька, наприклад при зміні мови
+   * оригіналу твору).
+   */
+  EDITION_LANGUAGE_CONFLICT: 'EDITION_LANGUAGE_CONFLICT',
+  /**
+   * Тип тексту видання (`textKind`) не узгоджений зі зв'язком з перекладом (HTTP 422):
+   * `details.reason` — `KIND_REQUIRES_UNLINK` (з перекладу в оригінал лише разом із
+   * `translationId: null`) або `UNLINK_NEEDS_KIND` (мова оригіналу твору невідома — вкажіть тип явно).
+   */
+  EDITION_TEXT_KIND_CONFLICT: 'EDITION_TEXT_KIND_CONFLICT',
+  /**
+   * Швидке додавання зовнішнього видання (HTTP 409): ISBN і зовнішнє посилання указують на РІЗНІ видання
+   * (або посилання вже належить іншому виданню). Примірник не створено, посилання не переприв'язано.
+   * `details: { isbnEditionId?, referenceEditionId? }`.
+   */
+  EXTERNAL_IDENTITY_CONFLICT: 'EXTERNAL_IDENTITY_CONFLICT',
+  LIBRARY_ADD_OPERATION_CONFLICT: 'LIBRARY_ADD_OPERATION_CONFLICT',
+  /**
+   * Швидке додавання (HTTP 409): операцію з цим ключем уже виконано, але створений нею примірник
+   * видалено. Повтор НЕ відновлює примірник — нове додавання потребує нового `operationId`.
+   */
+  LIBRARY_ADD_RESULT_REMOVED: 'LIBRARY_ADD_RESULT_REMOVED',
+  /**
    * The addressed `Work` was merged into another one (§6.3, R4).
    *
    * One code, two statuses. Reads answer 301 with a `Location` header, as §6.3

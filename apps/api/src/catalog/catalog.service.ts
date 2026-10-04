@@ -24,8 +24,15 @@ import {
 } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
 import { isUniqueViolation } from '../common/prisma-errors'
+import type { Prisma } from '../generated/prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { CanonicalWorkService, workMergedConflict } from './canonical/canonical-work.service'
+import {
+  lockEditionInWork,
+  lockTranslationInWork,
+  lockWork,
+  retryWhenWorkMoved,
+} from './catalog-locks'
 import {
   byEditionOrder,
   toEdition,
@@ -37,8 +44,20 @@ import {
   toWorkAuthors,
   toWorkRevisionSnapshot,
 } from './catalog.mapper'
+import { planWorkOriginalLangChange, resolveEditionText } from './edition-language'
+import { editionLanguageConflict, textOrThrow } from './edition-language-errors'
+import { applyEditionTextUpdates } from './edition-language-cascade'
 import { LocalMatches } from './search/local-matches.service'
 import { TextNormalizer } from './text-normalizer'
+
+/** Що потрібно, щоб створити твір: назва; мова оригіналу, рік, опис і автори можуть бути невідомими. */
+export interface NewWorkInput {
+  title: string
+  origLang?: string | null
+  firstPubYear?: number | null
+  description?: string | null
+  authors?: { authorId?: string; name?: string; nameLatin?: string | null; role?: AuthorRole }[]
+}
 
 /** Проєкції, які повторюються в кількох запитах. Один опис — одна форма даних. */
 const WITH_AUTHORS = {
@@ -138,7 +157,7 @@ export class CatalogService {
       translations: sortTranslations(work.translations).map((translation) =>
         toTranslation(translation, editionsPerTranslation.get(translation.id) ?? 0),
       ),
-      editions: work.editions.map((edition) => toEdition(edition, work)).sort(byEditionOrder),
+      editions: work.editions.map((edition) => toEdition(edition)).sort(byEditionOrder),
       viewerCapabilities: toViewerCapabilities(userId, work),
     }
   }
@@ -174,7 +193,7 @@ export class CatalogService {
     })
 
     return {
-      edition: toEdition(edition, edition.work),
+      edition: toEdition(edition),
       work: toWork(edition.work),
       authors: toWorkAuthors(edition.work.authors),
       translation:
@@ -191,73 +210,82 @@ export class CatalogService {
    * (§6.3), а зрощені автори втрачають межу назавжди.
    */
   async createWork(userId: string, request: CreateWorkRequest): Promise<WorkDetailResponse> {
-    const newNames = request.authors.flatMap((author) =>
-      author.name === undefined ? [] : [author.name],
-    )
-
-    const workId = await this.prisma.$transaction(async (tx) => {
-      const [titleNorm, ...nameNorms] = await this.normalizer.normalizeMany(
-        [request.title, ...newNames],
-        tx,
-      )
-
-      if (titleNorm === undefined) throw new Error('Нормалізація назви не повернула значення')
-
-      await this.assertAuthorsExist(request.authors, tx)
-
-      const work = await tx.work.create({
-        data: {
-          title: request.title,
-          titleNorm,
-          origLang: request.origLang,
-          firstPubYear: request.firstPubYear ?? null,
-          description: request.description ?? null,
-          createdById: userId,
-        },
-      })
-
-      let nextName = 0
-      const links: { authorId: string; role: AuthorRole }[] = []
-
-      for (const author of request.authors) {
-        const role = author.role ?? 'AUTHOR'
-
-        if (author.authorId !== undefined) {
-          links.push({ authorId: author.authorId, role })
-          continue
-        }
-
-        const nameNorm = nameNorms[nextName]
-
-        nextName += 1
-
-        if (author.name === undefined || nameNorm === undefined) {
-          throw new Error('Нормалізація імені автора не повернула значення')
-        }
-
-        const created = await tx.author.create({
-          data: { name: author.name, nameNorm, nameLatin: author.nameLatin ?? null },
-        })
-
-        links.push({ authorId: created.id, role })
-      }
-
-      // R10a: `position` йде за порядком елементів запиту, і дедуп мусить
-      // статися ДО нумерації — інакше пропущена (бо дублікат) пара лишає дірку
-      // в послідовності `0, 1, 2, …`. Раніше на це покладався `skipDuplicates`
-      // у БД: та сама людина в тій самій ролі двічі — помилка заповнення форми,
-      // не привід відхилити весь твір, — але робити це на рівні БД більше не
-      // можна, бо позиція вже призначена рядку, який туди не потрапить.
-      const deduped = dedupeAuthorLinks(links)
-
-      await tx.workAuthor.createMany({
-        data: deduped.map((link, position) => ({ workId: work.id, ...link, position })),
-      })
-
-      return work.id
-    })
+    const workId = await this.prisma.$transaction((tx) => this.createWorkIn(tx, userId, request))
 
     return this.getWork(userId, workId)
+  }
+
+  /**
+   * Ядро створення твору — для виклику всередині чужої транзакції (швидке додавання вручну створює твір,
+   * видання й примірник РАЗОМ). Мова оригіналу й автори можуть бути невідомими (`null`/порожньо): створення
+   * через `POST /works` їх, як і раніше, вимагає, але ядро нічого не вигадує.
+   */
+  async createWorkIn(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    request: NewWorkInput,
+  ): Promise<string> {
+    const authors = request.authors ?? []
+    const newNames = authors.flatMap((author) => (author.name === undefined ? [] : [author.name]))
+    const [titleNorm, ...nameNorms] = await this.normalizer.normalizeMany(
+      [request.title, ...newNames],
+      tx,
+    )
+
+    if (titleNorm === undefined) throw new Error('Нормалізація назви не повернула значення')
+
+    await this.assertAuthorsExist(authors, tx)
+
+    const work = await tx.work.create({
+      data: {
+        title: request.title,
+        titleNorm,
+        origLang: request.origLang ?? null,
+        firstPubYear: request.firstPubYear ?? null,
+        description: request.description ?? null,
+        createdById: userId,
+      },
+    })
+
+    let nextName = 0
+    const links: { authorId: string; role: AuthorRole }[] = []
+
+    for (const author of authors) {
+      const role = author.role ?? 'AUTHOR'
+
+      if (author.authorId !== undefined) {
+        links.push({ authorId: author.authorId, role })
+        continue
+      }
+
+      const nameNorm = nameNorms[nextName]
+
+      nextName += 1
+
+      if (author.name === undefined || nameNorm === undefined) {
+        throw new Error('Нормалізація імені автора не повернула значення')
+      }
+
+      const created = await tx.author.create({
+        data: { name: author.name, nameNorm, nameLatin: author.nameLatin ?? null },
+      })
+
+      links.push({ authorId: created.id, role })
+    }
+
+    // R10a: `position` йде за порядком елементів запиту, і дедуп мусить
+    // статися ДО нумерації — інакше пропущена (бо дублікат) пара лишає дірку
+    // в послідовності `0, 1, 2, …`. Раніше на це покладався `skipDuplicates`
+    // у БД: та сама людина в тій самій ролі двічі — помилка заповнення форми,
+    // не привід відхилити весь твір, — але робити це на рівні БД більше не
+    // можна, бо позиція вже призначена рядку, який туди не потрапить.
+    const deduped = dedupeAuthorLinks(links)
+
+    await tx.workAuthor.createMany({
+      data: deduped.map((link, position) => ({ workId: work.id, ...link, position })),
+    })
+
+    return work.id
   }
 
   async createTranslation(
@@ -289,60 +317,84 @@ export class CatalogService {
     workId: string,
     request: CreateEditionRequest,
   ): Promise<EditionResponse> {
-    const work = await this.prisma.work.findUnique({
-      where: { id: workId },
-      select: { id: true, origLang: true, mergedIntoId: true },
-    })
-
-    if (work === null) throw notFound('Твір не знайдено')
-
-    // Stage 7h: `mergedIntoId` is read here rather than through
-    // `CanonicalWorkService.assertCanonical` only to avoid a second lookup —
-    // `origLang` is needed anyway. The rule and its reasoning live there.
-    if (work.mergedIntoId !== null) {
-      throw workMergedConflict({
-        workId: work.mergedIntoId,
-        requestedWorkId: workId,
-        moved: true,
-      })
-    }
-
-    const translationId = request.translationId ?? null
-
-    if (translationId !== null) {
-      const translation = await this.prisma.translation.findUnique({
-        where: { id: translationId },
-        select: { workId: true },
-      })
-
-      // Переклад чужого твору — не «не знайдено», а неможлива комбінація:
-      // `Edition` посилається і на твір, і на переклад, і вони мусять збігатися.
-      if (translation === null || translation.workId !== workId) {
-        throw new ApiException(
-          API_ERROR_CODES.VALIDATION_ERROR,
-          'Переклад не належить цьому твору',
-          HttpStatus.BAD_REQUEST,
-        )
-      }
-    }
-
     try {
-      const edition = await this.prisma.edition.create({
-        data: {
-          workId,
-          translationId,
-          publisher: request.publisher ?? null,
-          year: request.year ?? null,
-          isbn13: request.isbn13 ?? null,
-          pageCount: request.pageCount ?? null,
-          coverUrl: request.coverUrl ?? null,
-          format: request.format ?? 'PAPERBACK',
-          createdById: userId,
-        },
-        include: { translation: true },
-      })
+      return await this.prisma.$transaction(async (tx) => {
+        // Work → Translation → Edition (`catalog-locks.ts`): мова нового видання узгоджується з твором,
+        // який не може змінитися між перевіркою й записом.
+        await lockWork(tx, workId)
 
-      return { edition: toEdition(edition, work) }
+        const work = await tx.work.findUnique({
+          where: { id: workId },
+          select: { id: true, origLang: true, mergedIntoId: true },
+        })
+
+        if (work === null) throw notFound('Твір не знайдено')
+
+        // Stage 7h: `mergedIntoId` is read here rather than through
+        // `CanonicalWorkService.assertCanonical` only to avoid a second lookup —
+        // `origLang` is needed anyway. The rule and its reasoning live there.
+        if (work.mergedIntoId !== null) {
+          throw workMergedConflict({
+            workId: work.mergedIntoId,
+            requestedWorkId: workId,
+            moved: true,
+          })
+        }
+
+        const translationId = request.translationId ?? null
+        let targetTranslation: { lang: string } | undefined
+
+        if (translationId !== null) {
+          const translation = await tx.translation.findUnique({
+            where: { id: translationId },
+            select: { workId: true, lang: true },
+          })
+
+          // Переклад чужого твору — не «не знайдено», а неможлива комбінація:
+          // `Edition` посилається і на твір, і на переклад, і вони мусять збігатися.
+          if (translation === null || translation.workId !== workId) {
+            throw new ApiException(
+              API_ERROR_CODES.VALIDATION_ERROR,
+              'Переклад не належить цьому твору',
+              HttpStatus.BAD_REQUEST,
+            )
+          }
+
+          targetTranslation = { lang: translation.lang }
+        }
+
+        // Стара семантика цього ендпоінта: є переклад — це переклад, немає — оригінал. Тип тексту й мова
+        // записуються ЯВНО, а не виводяться читачем із `translationId = null`.
+        const text = textOrThrow(
+          resolveEditionText(
+            undefined,
+            { translationId, textKind: translationId === null ? 'ORIGINAL' : 'TRANSLATION' },
+            {
+              workOrigLang: work.origLang,
+              ...(targetTranslation === undefined ? {} : { targetTranslation }),
+            },
+          ),
+        )
+
+        const edition = await tx.edition.create({
+          data: {
+            workId,
+            translationId,
+            publisher: request.publisher ?? null,
+            year: request.year ?? null,
+            isbn13: request.isbn13 ?? null,
+            pageCount: request.pageCount ?? null,
+            coverUrl: request.coverUrl ?? null,
+            format: request.format ?? null,
+            textKind: text.textKind,
+            lang: text.lang,
+            createdById: userId,
+          },
+          include: { translation: true },
+        })
+
+        return { edition: toEdition(edition) }
+      })
     } catch (error) {
       if (isUniqueViolation(error) && request.isbn13 !== undefined && request.isbn13 !== null) {
         throw await this.isbnTaken(request.isbn13)
@@ -432,6 +484,12 @@ export class CatalogService {
       const titleNorm =
         request.title === undefined ? undefined : await this.normalizer.normalize(request.title, tx)
 
+      // Зміна мови оригіналу веде видання-оригінали за собою (I3). Суперечність — явна помилка й відкат
+      // УСІЄЇ операції, включно з самим твором: тому перевірка йде ДО його запису, під тим самим локом.
+      if (request.origLang !== undefined && request.origLang !== before.origLang) {
+        await this.cascadeOriginalLang(tx, userId, workId, before.origLang, request.origLang)
+      }
+
       await tx.work.update({
         where: { id: workId },
         data: {
@@ -516,6 +574,42 @@ export class CatalogService {
   }
 
   /**
+   * `Work.origLang` змінюється з `oldLang` на `newLang`: видання-оригінали ведуться за новою мовою,
+   * якщо вони її мали чи не мали жодної; відома ІНША мова — конфлікт (див. `planWorkOriginalLangChange`).
+   */
+  private async cascadeOriginalLang(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    userId: string,
+    workId: string,
+    oldLang: string | null,
+    newLang: string | null,
+  ): Promise<void> {
+    const editions = await tx.edition.findMany({
+      where: { workId },
+      select: { id: true, textKind: true, lang: true },
+      orderBy: { id: 'asc' },
+    })
+    const plan = planWorkOriginalLangChange(
+      editions.map((edition) => ({ id: edition.id, kind: edition.textKind, lang: edition.lang })),
+      oldLang,
+      newLang,
+    )
+
+    if (!plan.ok) {
+      throw editionLanguageConflict(
+        `Мову оригіналу не змінено: видання мають іншу відому мову, ніж ${newLang ?? 'нова'}`,
+        plan.conflictEditionIds,
+      )
+    }
+
+    await applyEditionTextUpdates(
+      tx,
+      plan.updates.map((update) => ({ id: update.id, lang: update.lang })),
+      userId,
+    )
+  }
+
+  /**
    * Stage 8e-2, R8/R9: same locked-read shape as {@link patchWork} (without
    * the author list) — `before`, the ownership check, and the
    * `expectedRevision` check all come from the ONE read taken under `FOR
@@ -530,8 +624,21 @@ export class CatalogService {
     translationId: string,
     request: TranslationPatchRequest,
   ): Promise<TranslationPatchResponse> {
+    // Переклад міг переїхати до іншого твору (злиття) між читанням і блокуванням: тоді транзакція завершується,
+    // а повторює її нова — не блокуючи другого `Work` під уже захопленими блокуваннями.
+    return retryWhenWorkMoved(() => this.patchTranslationOnce(userId, translationId, request))
+  }
+
+  private patchTranslationOnce(
+    userId: string,
+    translationId: string,
+    request: TranslationPatchRequest,
+  ): Promise<TranslationPatchResponse> {
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "Translation" WHERE "id" = ${translationId} FOR UPDATE`
+      // Work → Translation: той самий порядок, що в злитті й PATCH твору (`catalog-locks.ts`).
+      if ((await lockTranslationInWork(tx, translationId)) === null) {
+        throw notFound('Переклад не знайдено')
+      }
 
       const before = await tx.translation.findUnique({
         where: { id: translationId },
@@ -561,6 +668,20 @@ export class CatalogService {
           'Переклад змінено раніше — оновіть дані й спробуйте ще раз',
           HttpStatus.CONFLICT,
           { translation: toTranslation(before, editionCount) },
+        )
+      }
+
+      // Мова перекладу — мова всіх виданих за ним видань (I2): каскад у тій самій транзакції, з аудитом.
+      if (request.lang !== undefined && request.lang !== before.lang) {
+        const linked = await tx.edition.findMany({
+          where: { translationId, OR: [{ lang: null }, { lang: { not: request.lang } }] },
+          select: { id: true },
+        })
+
+        await applyEditionTextUpdates(
+          tx,
+          linked.map((edition) => ({ id: edition.id, lang: request.lang ?? null })),
+          userId,
         )
       }
 
@@ -613,77 +734,7 @@ export class CatalogService {
     request: EditionPatchRequest,
   ): Promise<EditionPatchResponse> {
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "Edition" WHERE "id" = ${editionId} FOR UPDATE`
-
-        const before = await tx.edition.findUnique({
-          where: { id: editionId },
-          include: {
-            work: { select: { id: true, origLang: true } },
-            copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
-            translation: true,
-          },
-        })
-
-        if (before === null) throw notFound('Видання не знайдено')
-
-        const canEdit = before.createdById === userId || before.copies.length > 0
-
-        if (!canEdit) throw forbidden()
-
-        if (request.translationId !== undefined && request.translationId !== null) {
-          const translation = await tx.translation.findUnique({
-            where: { id: request.translationId },
-            select: { workId: true },
-          })
-
-          if (translation === null || translation.workId !== before.workId) {
-            throw new ApiException(
-              API_ERROR_CODES.VALIDATION_ERROR,
-              'Переклад не належить цьому твору',
-              HttpStatus.BAD_REQUEST,
-            )
-          }
-        }
-
-        if (before.revision !== request.expectedRevision) {
-          throw new ApiException(
-            API_ERROR_CODES.CATALOG_REVISION_CONFLICT,
-            'Видання змінено раніше — оновіть дані й спробуйте ще раз',
-            HttpStatus.CONFLICT,
-            { edition: toEdition(before, before.work) },
-          )
-        }
-
-        const after = await tx.edition.update({
-          where: { id: editionId },
-          data: {
-            translationId: request.translationId,
-            publisher: request.publisher,
-            year: request.year,
-            isbn13: request.isbn13,
-            pageCount: request.pageCount,
-            coverUrl: request.coverUrl,
-            format: request.format,
-            revision: { increment: 1 },
-          },
-          include: { translation: true },
-        })
-
-        await tx.catalogRevision.create({
-          data: {
-            entityType: 'EDITION',
-            entityId: editionId,
-            actorId: userId,
-            before: toEditionRevisionSnapshot(before),
-            after: toEditionRevisionSnapshot(after),
-            fromRevision: before.revision,
-            toRevision: after.revision,
-          },
-        })
-
-        return { edition: toEdition(after, before.work) }
-      })
+      return await retryWhenWorkMoved(() => this.patchEditionOnce(userId, editionId, request))
     } catch (error) {
       if (isUniqueViolation(error) && request.isbn13 !== undefined && request.isbn13 !== null) {
         throw await this.isbnTaken(request.isbn13)
@@ -691,6 +742,125 @@ export class CatalogService {
 
       throw error
     }
+  }
+
+  private patchEditionOnce(
+    userId: string,
+    editionId: string,
+    request: EditionPatchRequest,
+  ): Promise<EditionPatchResponse> {
+    return this.prisma.$transaction(async (tx) => {
+      // Work → Edition (`catalog-locks.ts`): мова видання узгоджується з твором і перекладом, які не
+      // можуть змінитися між перевіркою й записом.
+      if ((await lockEditionInWork(tx, editionId)) === null) throw notFound('Видання не знайдено')
+
+      const before = await tx.edition.findUnique({
+        where: { id: editionId },
+        include: {
+          work: { select: { id: true, origLang: true } },
+          copies: { where: { ownerId: userId, archivedAt: null }, select: { id: true } },
+          translation: true,
+        },
+      })
+
+      if (before === null) throw notFound('Видання не знайдено')
+
+      const canEdit = before.createdById === userId || before.copies.length > 0
+
+      if (!canEdit) throw forbidden()
+
+      // Переклад, з яким видання буде пов'язане ПІСЛЯ зміни: новий (якщо його задано) або поточний.
+      let targetTranslation: { lang: string } | undefined =
+        request.translationId === undefined && before.translation !== null
+          ? { lang: before.translation.lang }
+          : undefined
+
+      if (request.translationId !== undefined && request.translationId !== null) {
+        const translation = await tx.translation.findUnique({
+          where: { id: request.translationId },
+          select: { workId: true, lang: true },
+        })
+
+        if (translation === null || translation.workId !== before.workId) {
+          throw new ApiException(
+            API_ERROR_CODES.VALIDATION_ERROR,
+            'Переклад не належить цьому твору',
+            HttpStatus.BAD_REQUEST,
+          )
+        }
+
+        targetTranslation = { lang: translation.lang }
+      }
+
+      if (before.revision !== request.expectedRevision) {
+        throw new ApiException(
+          API_ERROR_CODES.CATALOG_REVISION_CONFLICT,
+          'Видання змінено раніше — оновіть дані й спробуйте ще раз',
+          HttpStatus.CONFLICT,
+          { edition: toEdition(before) },
+        )
+      }
+
+      // Зміна зв'язку з перекладом веде за собою тип тексту й мову (I1/I2) — правила в `edition-language.ts`.
+      // Поля, яких запит не торкається, не змінюються, а легасі-рядок (R2) матеріалізується лише тут.
+      const changesText =
+        request.translationId !== undefined ||
+        request.textKind !== undefined ||
+        request.lang !== undefined
+      const text = !changesText
+        ? undefined
+        : textOrThrow(
+            resolveEditionText(
+              {
+                textKind: before.textKind,
+                lang: before.lang,
+                translationId: before.translationId,
+              },
+              {
+                ...(request.translationId === undefined
+                  ? {}
+                  : { translationId: request.translationId }),
+                ...(request.textKind === undefined ? {} : { textKind: request.textKind }),
+                ...(request.lang === undefined ? {} : { lang: request.lang }),
+              },
+              {
+                workOrigLang: before.work.origLang,
+                ...(targetTranslation === undefined ? {} : { targetTranslation }),
+                currentTranslation: before.translation,
+              },
+            ),
+          )
+
+      const after = await tx.edition.update({
+        where: { id: editionId },
+        data: {
+          translationId: request.translationId,
+          ...(text === undefined ? {} : { textKind: text.textKind, lang: text.lang }),
+          publisher: request.publisher,
+          year: request.year,
+          isbn13: request.isbn13,
+          pageCount: request.pageCount,
+          coverUrl: request.coverUrl,
+          format: request.format,
+          revision: { increment: 1 },
+        },
+        include: { translation: true },
+      })
+
+      await tx.catalogRevision.create({
+        data: {
+          entityType: 'EDITION',
+          entityId: editionId,
+          actorId: userId,
+          before: toEditionRevisionSnapshot(before),
+          after: toEditionRevisionSnapshot(after),
+          fromRevision: before.revision,
+          toRevision: after.revision,
+        },
+      })
+
+      return { edition: toEdition(after) }
+    })
   }
 
   /**
@@ -728,7 +898,7 @@ export class CatalogService {
         {
           work: toWork(work),
           authors: toWorkAuthors(work.authors),
-          editions: work.editions.map((edition) => toEdition(edition, work)).sort(byEditionOrder),
+          editions: work.editions.map((edition) => toEdition(edition)).sort(byEditionOrder),
           matchedOn: matchedOn(id),
         },
       ]

@@ -97,6 +97,7 @@ async function main(): Promise<void> {
     out(`  звʼязків авторів перенесено:${String(summary.authorLinksMoved)}`)
     out(`  дублів звʼязків авторів:    ${String(summary.authorLinksDuplicatesRemoved)}`)
     out(`  вхідних мержів перенято:    ${String(summary.incomingMergesRepointed)}`)
+    out(`  мов видань зафіксовано:     ${String(summary.editionLanguagesSet)}`)
   } catch (error) {
     process.exitCode = 1
 

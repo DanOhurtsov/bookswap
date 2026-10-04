@@ -87,7 +87,7 @@ export class SearchCandidatesService {
           translations: work.translations.map((translation) =>
             toTranslation(translation, editionsPerTranslation.get(translation.id) ?? 0),
           ),
-          editions: work.editions.map((edition) => toEdition(edition, work)).sort(byEditionOrder),
+          editions: work.editions.map((edition) => toEdition(edition)).sort(byEditionOrder),
         },
       ]
     })

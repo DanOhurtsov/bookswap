@@ -48,6 +48,8 @@ function loanRow(overrides: Partial<LoanRow> = {}): LoanRow {
         pageCount: 800,
         coverUrl: null,
         format: 'HARDCOVER',
+        textKind: 'TRANSLATION',
+        lang: 'uk',
         revision: 1,
         translation: { lang: 'uk', translator: 'Любов Пилаєва' },
         work: {

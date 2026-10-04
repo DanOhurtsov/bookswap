@@ -1,4 +1,5 @@
 import type { ExternalSearchResult } from '@bookswap/shared'
+import { spellingTexts } from '../../src/catalog/search/external/spelling-texts'
 import type {
   ExternalSearchBlock,
   ExternalSearchBlockResult,
@@ -7,7 +8,7 @@ import type {
 } from '../../src/catalog/search/external/external-search-provider'
 
 type Behaviour =
-  | { kind: 'results'; results: ExternalSearchResult[] }
+  | { kind: 'results'; results: ExternalSearchResult[]; rejected: ExternalSearchResult[] }
   | { kind: 'stream'; records: ExternalSearchResult[] }
   | { kind: 'error'; message: string }
   | { kind: 'hang' }
@@ -17,6 +18,8 @@ export interface FakeBlockRequest {
   query: string
   index: number
   size: number
+  /** Set only by an auto-suggest: the server's own cap on outbound queries for this block. */
+  maxQueries?: number
 }
 
 /**
@@ -30,16 +33,22 @@ export interface FakeBlockRequest {
  * hold a fast one.
  */
 export class FakeExternalSearchProvider implements ExternalSearchProvider {
-  private behaviour: Behaviour = { kind: 'results', results: [] }
+  private behaviour: Behaviour = { kind: 'results', results: [], rejected: [] }
 
   /** Every block this source was asked for, in order. */
   readonly blocks: FakeBlockRequest[] = []
 
   constructor(readonly source: ExternalSearchProvider['source']) {}
 
-  /** The same answer for every block — deliberately ignores paging. */
-  returns(results: ExternalSearchResult[]): void {
-    this.behaviour = { kind: 'results', results }
+  /**
+   * The same answer for every block — deliberately ignores paging.
+   *
+   * `rejected` are records a real provider would have parsed but its relevance gate dropped: they are
+   * not in `results`, yet their titles and authors still reach `spellingCandidates`, exactly as in
+   * the real providers.
+   */
+  returns(results: ExternalSearchResult[], rejected: ExternalSearchResult[] = []): void {
+    this.behaviour = { kind: 'results', results, rejected }
   }
 
   /**
@@ -59,7 +68,7 @@ export class FakeExternalSearchProvider implements ExternalSearchProvider {
   }
 
   clear(): void {
-    this.behaviour = { kind: 'results', results: [] }
+    this.behaviour = { kind: 'results', results: [], rejected: [] }
     this.blocks.length = 0
   }
 
@@ -73,7 +82,12 @@ export class FakeExternalSearchProvider implements ExternalSearchProvider {
     block: ExternalSearchBlock,
     context: ExternalSearchContext,
   ): Promise<ExternalSearchBlockResult> {
-    this.blocks.push({ query, index: block.index, size: block.size })
+    this.blocks.push({
+      query,
+      index: block.index,
+      size: block.size,
+      ...(block.maxQueries === undefined ? {} : { maxQueries: block.maxQueries }),
+    })
 
     // A real provider takes a rate-limit slot before every call, and the e2e
     // suite asserts on `RATE_LIMITED`; a fake that skipped this would make the
@@ -96,12 +110,24 @@ export class FakeExternalSearchProvider implements ExternalSearchProvider {
       const from = block.index * block.size
       const slice = this.behaviour.records.slice(from, from + block.size)
 
-      return { results: slice, exhausted: from + slice.length >= this.behaviour.records.length }
+      return {
+        results: slice,
+        exhausted: from + slice.length >= this.behaviour.records.length,
+        spellingCandidates: spellingTexts(slice),
+      }
     }
 
     // `exhausted` on the first block: a source that answers the same thing
     // whatever it is asked has nothing deeper to give, and saying otherwise
     // would make every test pay for a second block it does not want.
-    return { results: block.index === 0 ? this.behaviour.results : [], exhausted: true }
+    const first = block.index === 0
+
+    return {
+      results: first ? this.behaviour.results : [],
+      exhausted: true,
+      spellingCandidates: first
+        ? spellingTexts([...this.behaviour.results, ...this.behaviour.rejected])
+        : [],
+    }
   }
 }

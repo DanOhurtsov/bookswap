@@ -7,13 +7,17 @@ import {
 } from '@bookswap/shared'
 import { PrismaService } from '../../prisma/prisma.service'
 import {
+  hasPartialMatch,
   pinSimilarityThreshold,
   rankAuthors,
+  rankSpellingCandidates,
   rankWorks,
+  scoreSpellingTexts,
   type RankedAuthor,
   type RankedWork,
 } from '../catalog.search'
 import { escapeLikePattern } from '../search-text'
+import { chooseSpellingSuggestion } from '../spelling-suggestion'
 import { TextNormalizer } from '../text-normalizer'
 
 /** Наші збіги запиту — те, з чого складається локальна частина спільного списку. */
@@ -83,6 +87,38 @@ export class LocalMatches {
         : []
 
       return { works, authors, byIsbn: false }
+    })
+  }
+
+  /**
+   * Підказка виправлення написання: наявна назва твору чи імʼя автора, якщо запит схожий на неї, але не
+   * збігається ні повністю, ні частково. ISBN підказки не має: це ідентифікатор, а не написання.
+   *
+   * Кандидати — з нашого каталогу ТА (`outside`) з відповідей зовнішніх джерел, які сервіс уже має на
+   * руках. Рішення одне на всіх: кандидат із джерела не «обходить» наш частковий збіг, а суперечливі
+   * кандидати з двох боків гасять підказку так само, як з одного. Лише читання нашої БД — жодних
+   * зовнішніх запитів: тексти джерел тільки оцінюються тією самою `similarity`.
+   */
+  async spellingSuggestion(
+    query: string,
+    outside: readonly string[] = [],
+  ): Promise<string | undefined> {
+    if (isValidIsbn13(query)) return undefined
+
+    const term = await this.normalizer.normalize(query)
+    const pattern = `%${escapeLikePattern(term)}%`
+
+    return this.prisma.$transaction(async (tx) => {
+      await pinSimilarityThreshold(tx)
+
+      const [partial, own, external] = await Promise.all([
+        hasPartialMatch(tx, pattern),
+        rankSpellingCandidates(tx, term),
+        scoreSpellingTexts(tx, term, outside),
+      ])
+
+      // Наші — першими: за рівної оцінки лишається наша форма запису.
+      return chooseSpellingSuggestion(term, partial, [...own, ...external])
     })
   }
 

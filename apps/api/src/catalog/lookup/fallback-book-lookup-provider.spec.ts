@@ -13,51 +13,97 @@ describe('FallbackBookLookupProvider', () => {
     }
   }
 
+  function hanging(): jest.Mocked<BookLookupProvider> {
+    return {
+      lookup: jest.fn(
+        (_isbn: string, _signal: AbortSignal) =>
+          new Promise<BookLookupResult | undefined>(() => undefined),
+      ),
+    }
+  }
+
   function provider(
     openLibrary: BookLookupProvider,
     googleBooks: BookLookupProvider,
-    isbnDb: BookLookupProvider,
     workExternalId?: string,
   ): FallbackBookLookupProvider {
     const openLibraryWithWorkLookup = {
       ...openLibrary,
       lookupWork: jest.fn().mockResolvedValue(workExternalId),
-      // The single-ISBN cascade never batches; the stub only satisfies the class type.
+      // The single-ISBN lookup never batches; the stub only satisfies the class type.
       lookupMany: jest.fn().mockResolvedValue(new Map()),
     }
 
-    return new FallbackBookLookupProvider(openLibraryWithWorkLookup, googleBooks, isbnDb)
+    return new FallbackBookLookupProvider(openLibraryWithWorkLookup, googleBooks)
   }
 
-  it('повертає перший знайдений точний запис із джерелом і зупиняє каскад', async () => {
-    const openLibrary = fake({ title: 'Open result' })
-    const googleBooks = fake({ title: 'Google result' })
-    const isbnDb = fake({ title: 'ISBNdb result' })
+  function lookup(fallback: FallbackBookLookupProvider): Promise<BookLookupResult | undefined> {
+    return fallback.lookup(ISBN, new AbortController().signal)
+  }
 
-    await expect(
-      provider(openLibrary, googleBooks, isbnDb).lookup(ISBN, new AbortController().signal),
-    ).resolves.toEqual({ title: 'Open result', source: 'OPEN_LIBRARY' })
-    expect(googleBooks.lookup.mock.calls).toHaveLength(0)
-    expect(isbnDb.lookup.mock.calls).toHaveLength(0)
+  it('питає обидва джерела одразу, не чекаючи відповіді першого', async () => {
+    process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS = '20'
+
+    const openLibrary = hanging()
+    const googleBooks = fake({ title: 'Google result' })
+
+    try {
+      await lookup(provider(openLibrary, googleBooks))
+    } finally {
+      delete process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS
+    }
+
+    expect(openLibrary.lookup.mock.calls).toHaveLength(1)
+    expect(googleBooks.lookup.mock.calls).toHaveLength(1)
   })
 
-  it('після not found переходить до наступного провайдера', async () => {
-    await expect(
-      provider(fake(undefined), fake({ title: 'Google result' }), fake(undefined)).lookup(
-        ISBN,
-        new AbortController().signal,
+  it('об’єднує записи: основа — Open Library, прогалини заповнює Google Books', async () => {
+    const result = await lookup(
+      provider(
+        fake({ title: 'Open title', authors: ['Open Author'], externalId: 'OL1M' }),
+        fake({
+          title: 'Google title',
+          authors: ['Google Author'],
+          publisher: 'Google Publisher',
+          coverUrl: 'https://example.com/cover.jpg',
+          externalId: 'google-id',
+        }),
       ),
+    )
+
+    expect(result).toEqual({
+      title: 'Open title',
+      authors: ['Open Author'],
+      publisher: 'Google Publisher',
+      coverUrl: 'https://example.com/cover.jpg',
+      source: 'OPEN_LIBRARY',
+      externalId: 'OL1M',
+    })
+  })
+
+  it('не позичає externalId іншого джерела', async () => {
+    const result = await lookup(
+      provider(fake({ title: 'Open title' }), fake({ title: 'Google', externalId: 'google-id' })),
+    )
+
+    expect(result).toEqual({ title: 'Open title', source: 'OPEN_LIBRARY' })
+  })
+
+  it('якщо знає лише Google Books, повертає його запис із джерелом', async () => {
+    await expect(
+      lookup(provider(fake(undefined), fake({ title: 'Google result' }))),
     ).resolves.toEqual({ title: 'Google result', source: 'GOOGLE_BOOKS' })
   })
 
   it('додає лише сильний Open Library Work match як довідковий external id', async () => {
     await expect(
-      provider(
-        fake(undefined),
-        fake({ title: "Hallowe'en Party", authors: ['Agatha Christie'] }),
-        fake(undefined),
-        'OL471832W',
-      ).lookup(ISBN, new AbortController().signal),
+      lookup(
+        provider(
+          fake(undefined),
+          fake({ title: "Hallowe'en Party", authors: ['Agatha Christie'] }),
+          'OL471832W',
+        ),
+      ),
     ).resolves.toEqual({
       title: "Hallowe'en Party",
       authors: ['Agatha Christie'],
@@ -67,57 +113,66 @@ describe('FallbackBookLookupProvider', () => {
   })
 
   it('зберігає Work ID з exact-ISBN відповіді без повторного work search', async () => {
-    const openLibrary = fake({
-      title: 'Influence, New and Expanded',
-      authors: ['Robert B Cialdini PhD'],
-      workExternalId: 'OL24348752W',
-    })
-    const openLibraryWithWorkLookup = {
-      ...openLibrary,
-      lookupWork: jest.fn(),
+    const lookupWork = jest.fn()
+    const openLibrary = {
+      ...fake({
+        title: 'Influence, New and Expanded',
+        authors: ['Robert B Cialdini PhD'],
+        workExternalId: 'OL24348752W',
+      }),
+      lookupWork,
       lookupMany: jest.fn().mockResolvedValue(new Map()),
     }
-    const fallback = new FallbackBookLookupProvider(
-      openLibraryWithWorkLookup,
-      fake(undefined),
-      fake(undefined),
-    )
 
-    await expect(fallback.lookup(ISBN, new AbortController().signal)).resolves.toEqual({
+    await expect(
+      lookup(new FallbackBookLookupProvider(openLibrary, fake(undefined))),
+    ).resolves.toEqual({
       title: 'Influence, New and Expanded',
       authors: ['Robert B Cialdini PhD'],
       source: 'OPEN_LIBRARY',
       workExternalId: 'OL24348752W',
     })
-    expect(openLibraryWithWorkLookup.lookupWork).not.toHaveBeenCalled()
+    expect(lookupWork.mock.calls).toHaveLength(0)
   })
 
-  it('помилка одного провайдера не заважає успіху наступного', async () => {
+  it('помилка одного джерела не заважає відповіді іншого', async () => {
     await expect(
-      provider(
-        fake(new BookLookupProviderError('Open Library down')),
-        fake({ title: 'Google result' }),
-        fake(undefined),
-      ).lookup(ISBN, new AbortController().signal),
-    ).resolves.toEqual({ title: 'Google result', source: 'GOOGLE_BOOKS' })
+      lookup(
+        provider(fake(new BookLookupProviderError('Open Library down')), fake({ title: 'Google' })),
+      ),
+    ).resolves.toEqual({ title: 'Google', source: 'GOOGLE_BOOKS' })
+  })
+
+  it('повільне джерело не віднімає відповідь, яку вже маємо', async () => {
+    process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS = '20'
+
+    try {
+      await expect(lookup(provider(fake({ title: 'Open result' }), hanging()))).resolves.toEqual({
+        title: 'Open result',
+        source: 'OPEN_LIBRARY',
+      })
+    } finally {
+      delete process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS
+    }
   })
 
   it('усі clean misses повертають undefined', async () => {
-    await expect(
-      provider(fake(undefined), fake(undefined), fake(undefined)).lookup(
-        ISBN,
-        new AbortController().signal,
-      ),
-    ).resolves.toBeUndefined()
+    await expect(lookup(provider(fake(undefined), fake(undefined)))).resolves.toBeUndefined()
   })
 
-  it('без результату не приховує помилки провайдерів', async () => {
+  it('без результату не приховує помилки джерел', async () => {
     await expect(
-      provider(
-        fake(new BookLookupProviderError('Open Library down')),
-        fake(undefined),
-        fake(undefined),
-      ).lookup(ISBN, new AbortController().signal),
+      lookup(provider(fake(new BookLookupProviderError('Open Library down')), fake(undefined))),
     ).rejects.toThrow('Open Library')
+  })
+
+  it('таймаут джерела без жодного результату — помилка, а не «не знайдено»', async () => {
+    process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS = '20'
+
+    try {
+      await expect(lookup(provider(fake(undefined), hanging()))).rejects.toThrow('Google Books')
+    } finally {
+      delete process.env.CATALOG_EXTERNAL_SEARCH_TIMEOUT_MS
+    }
   })
 })

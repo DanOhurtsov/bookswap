@@ -7,6 +7,7 @@ import {
   AuthorRole,
   Condition,
   EditionFormat,
+  EditionTextKind,
   FriendshipStatus,
 } from '../src/generated/prisma/enums'
 
@@ -225,12 +226,14 @@ export async function seed(prisma: PrismaClient): Promise<void> {
   }
 
   // --- Видання (§4.4) -------------------------------------------------------
-  // «Місто» лишається без перекладу: translationId = null означає мову оригіналу.
+  // «Місто» лишається без перекладу: це видання мовою оригіналу (textKind = ORIGINAL, lang = мова твору).
   const editions = [
     {
       id: 'seed-edition-shantaram-ksd',
       workId: 'seed-work-shantaram',
       translationId: 'seed-translation-shantaram-uk',
+      textKind: EditionTextKind.TRANSLATION,
+      lang: 'uk',
       publisher: 'Клуб сімейного дозвілля',
       year: 2019,
       isbn13: '9786171262737',
@@ -242,6 +245,8 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       id: 'seed-edition-hobbit-veselka',
       workId: 'seed-work-hobbit',
       translationId: 'seed-translation-hobbit-mokrovolsky',
+      textKind: EditionTextKind.TRANSLATION,
+      lang: 'uk',
       publisher: 'Веселка',
       year: 1985,
       pageCount: 304,
@@ -252,6 +257,8 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       id: 'seed-edition-hobbit-astrolabe',
       workId: 'seed-work-hobbit',
       translationId: 'seed-translation-hobbit-oniryshkevych',
+      textKind: EditionTextKind.TRANSLATION,
+      lang: 'uk',
       publisher: 'Астролябія',
       year: 2021,
       isbn13: '9786176642411',
@@ -263,6 +270,8 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       id: 'seed-edition-misto-znannia',
       workId: 'seed-work-misto',
       translationId: null,
+      textKind: EditionTextKind.ORIGINAL,
+      lang: 'uk',
       publisher: 'Знання',
       year: 2016,
       isbn13: '9786170703606',

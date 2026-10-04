@@ -31,6 +31,7 @@ const rawGuestLoan = {
     pageCount: 800,
     coverUrl: null,
     format: 'PAPERBACK',
+    textKind: 'ORIGINAL',
     lang: 'uk',
     translator: null,
     revision: 1,
