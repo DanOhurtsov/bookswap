@@ -13,13 +13,11 @@ type LookupAddCardProps = {
   onRetry: () => void
 }
 
-/** Видання, знайдене за точним ISBN у зовнішньому джерелі, якого ще немає в нашому каталозі. */
 export function LookupAddCard({ isbn, lookup, slot, onAdd, onRetry }: LookupAddCardProps) {
   const source = lookup.source === undefined ? 'Зовнішнє джерело' : SOURCE_LABELS[lookup.source]
 
   return (
     <ResultCardShell
-      // badge={source}
       coverUrl={lookup.coverUrl}
       coverAlt={`Обкладинка «${lookup.title}»`}
       title={<span className="book__title">{lookup.title}</span>}

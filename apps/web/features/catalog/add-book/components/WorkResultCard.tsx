@@ -10,7 +10,6 @@ import { ResultCardShell } from './ResultCardShell'
 export function WorkResultCard({ item }: { item: AddSearchWorkItem }) {
   return (
     <ResultCardShell
-      badge="Наш каталог"
       coverAlt={`Обкладинка «${item.work.title}»`}
       title={<span className="book__title">{item.work.title}</span>}
       authors={

@@ -23,7 +23,6 @@ export function ExternalEditionCard({ result, slot, onAdd, onRetry }: ExternalEd
 
   return (
     <ResultCardShell
-      badge={sources}
       coverUrl={result.coverUrl}
       coverAlt={`Обкладинка «${result.title}»`}
       title={<span className="book__title">{result.title}</span>}

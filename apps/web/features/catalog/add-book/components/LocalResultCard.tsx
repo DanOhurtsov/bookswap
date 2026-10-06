@@ -58,7 +58,6 @@ export function LocalResultCard({
 
   return (
     <ResultCardShell
-      badge="Наш каталог"
       coverUrl={coverOf(candidate)}
       coverAlt={`Обкладинка «${candidate.work.title}»`}
       title={

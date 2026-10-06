@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import type { ExternalSearchResult } from '@bookswap/shared'
-import { SOURCE_LABELS } from './ExternalResultCard'
 import { ResultCardShell } from './ResultCardShell'
 
 /**
@@ -27,7 +26,6 @@ function refineHref(result: ExternalSearchResult): string {
 export function ExternalWorkCard({ result }: { result: ExternalSearchResult }) {
   return (
     <ResultCardShell
-      badge={result.sources.map((source) => SOURCE_LABELS[source]).join(' · ')}
       coverUrl={result.coverUrl}
       coverAlt={`Обкладинка «${result.title}»`}
       title={<span className="book__title">{result.title}</span>}

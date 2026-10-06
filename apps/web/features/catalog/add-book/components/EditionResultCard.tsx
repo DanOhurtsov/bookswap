@@ -34,7 +34,6 @@ export function EditionResultCard({ item, slot, onAdd, onRetry }: EditionResultC
 
   return (
     <ResultCardShell
-      badge="Наш каталог"
       coverUrl={edition.coverUrl ?? undefined}
       coverAlt={`Обкладинка «${work.title}»`}
       title={<span className="book__title">{work.title}</span>}

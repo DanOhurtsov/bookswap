@@ -10,30 +10,11 @@ type ResultCardShellBaseProps = {
   children?: ReactNode
 }
 
-/** Бейдж показується лише з `showBadge`, а з `showBadge` без тексту бейджа він не має сенсу. */
 type ResultCardShellBadgeProps =
   { showBadge: true; badge: string } | { showBadge?: false; badge?: string }
 
 type ResultCardShellProps = ResultCardShellBaseProps & ResultCardShellBadgeProps
 
-/**
- * The shared look of one row in the search results.
- *
- * Local and external candidates render through the same shell on purpose. They
- * are shown in ONE list, and a list whose rows are built differently reads as
- * two lists that happen to be adjacent — the person then has to work out which
- * comparison is even valid. Cover, title, authors and the short meta line
- * therefore sit in the same places regardless of origin; only the actions below
- * differ, because only the actions really do.
- *
- * Empty fields are omitted rather than filled with a dash or "unknown" (§6.3
- * item 7). A source that said nothing about the year leaves no line.
- *
- * The cover is the one exception, and deliberately so: `BookCover` always
- * renders a box, a picture or a placeholder. An omitted cover would collapse
- * the first grid column and re-align every other row in the list around
- * whichever sources happened to know a cover URL.
- */
 export function ResultCardShell(props: ResultCardShellProps) {
   const { title, coverUrl, coverAlt, authors, meta, children } = props
   const facts = (meta ?? []).filter((part): part is string => part !== undefined && part !== '')
