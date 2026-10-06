@@ -745,7 +745,7 @@ describe('зовнішня половина: перше додавання (QA2,
 
     const card = cardAt(0)
 
-    expect(within(card).getByText('Google Books')).toBeInTheDocument()
+    expect(within(card).getByText('Джерело: Google Books')).toBeInTheDocument()
     expect(within(card).getByText(/Видавець/)).toBeInTheDocument()
     expect(within(card).getByText(/українська/)).toBeInTheDocument()
 
@@ -804,7 +804,7 @@ describe('зовнішня половина: перше додавання (QA2,
 
     await screen.findByText('Зовнішня vol-2')
 
-    expect(within(cardAt(0)).getByText('Наш каталог')).toBeInTheDocument()
+    expect(within(cardAt(0)).getByText('Джерело: каталог BookSwap')).toBeInTheDocument()
     expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
     expect(
       within(cardAt(1)).getByRole('button', { name: 'Додати до бібліотеки' }),
