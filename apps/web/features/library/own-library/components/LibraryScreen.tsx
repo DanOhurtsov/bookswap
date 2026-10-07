@@ -141,7 +141,7 @@ function LibraryBody({
       )}
 
       <p className="form__aside">
-        <Link href="/catalog">Додати книжку</Link> ·{' '}
+        <Link href="/catalog/new">Додати книжку</Link> ·{' '}
         <Link href="/library/imports">Імпорт із CSV</Link> · <Link href="/loans">Позичання</Link> ·{' '}
         {/* Stage 10 (10f.3): гостьові маршрути існують лише за серверним features.guestLoans —
             той самий прапор, що ховає й самі сторінки, тож посилання не веде в нікуди. */}
