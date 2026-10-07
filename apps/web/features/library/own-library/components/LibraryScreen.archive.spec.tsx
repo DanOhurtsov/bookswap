@@ -8,6 +8,7 @@ import { ApiRequestError } from '@/app/lib/api'
 import { createTestQueryClient, withQueryClient } from '@/app/lib/test-query-client'
 import { ACTIVATION_QUERY_KEY } from '@/features/library/activation/index.client'
 import { LibraryScreen } from './LibraryScreen'
+import { setAddress, watchHistory } from '../own-library.test-helpers'
 
 /**
  * Stage 10, 10c: «Архівувати» на активному примірнику і «Відновити» в архіві. Архів — окремий
@@ -28,11 +29,11 @@ jest.mock('@/app/lib/use-session', () => ({
   }),
 }))
 
-let searchParams = new URLSearchParams()
-
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
-  useSearchParams: () => searchParams,
+  useSearchParams: jest.requireActual<typeof import('../own-library.test-helpers')>(
+    '../own-library.test-helpers',
+  ).useAddressSearchParams,
 }))
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
@@ -46,9 +47,16 @@ beforeAll(() => {
   }
 })
 
+let unwatchHistory: () => void = () => undefined
+
 beforeEach(() => {
   mockApiRequest.mockReset()
-  searchParams = new URLSearchParams()
+  unwatchHistory = watchHistory()
+  setAddress()
+})
+
+afterEach(() => {
+  unwatchHistory()
 })
 
 const AUTHOR = { id: 'author-1', name: 'Ґреґорі Робертс', role: 'AUTHOR', position: 0 }
@@ -110,7 +118,8 @@ describe('архів у бібліотеці (10c)', () => {
     )
 
     render(withQueryClient(<LibraryScreen />, client))
-    await userEvent.click(await screen.findByRole('button', { name: 'Архівувати' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Дії з примірником/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Архівувати' }))
 
     await waitFor(() => {
       expect(mockApiRequest).toHaveBeenCalledWith(
@@ -145,7 +154,8 @@ describe('архів у бібліотеці (10c)', () => {
     )
 
     render(withQueryClient(<LibraryScreen />, client))
-    await userEvent.click(await screen.findByRole('button', { name: 'Архівувати' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Дії з примірником/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Архівувати' }))
 
     expect(await screen.findByText(/він зараз у позичанні/)).toBeInTheDocument()
     expect(invalidate).not.toHaveBeenCalled()
@@ -162,11 +172,13 @@ describe('архів у бібліотеці (10c)', () => {
     render(withQueryClient(<LibraryScreen />, client))
     await userEvent.click(await screen.findByRole('tab', { name: 'Архів' }))
 
-    const restore = await screen.findByRole('button', { name: 'Відновити' })
+    await userEvent.click(await screen.findByRole('button', { name: /^Дії з примірником/ }))
+
+    const restore = await screen.findByRole('menuitem', { name: 'Відновити' })
 
     expect(mockApiRequest).toHaveBeenCalledWith('/me/library?archived=true', expect.anything())
-    expect(screen.queryByRole('button', { name: 'Архівувати' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Редагувати' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Архівувати' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Редагувати' })).not.toBeInTheDocument()
 
     await userEvent.click(restore)
 
@@ -181,7 +193,7 @@ describe('архів у бібліотеці (10c)', () => {
 
 describe('вхід із результатів додавання (docs/plan/fast-book-add.md, §2.2)', () => {
   it('?view=archive відкриває архів, де працює наявне відновлення', async () => {
-    searchParams = new URLSearchParams('view=archive')
+    setAddress('?view=archive')
     mockApiRequest.mockResolvedValue({ groups: [] })
 
     render(withQueryClient(<LibraryScreen />))

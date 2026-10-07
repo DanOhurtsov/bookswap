@@ -184,11 +184,10 @@ describe('видалення власного примірника', () => {
   async function deleteCopy(client: QueryClient): Promise<void> {
     render(withQueryClient(<LibraryScreen />, client))
 
-    // Two buttons carry this name: the one on the copy row, and the confirm
-    // inside the always-mounted `<dialog>`. The row's comes first in the DOM.
-    const [rowButton] = await screen.findAllByRole('button', { name: 'Видалити' })
-
-    await userEvent.click(rowButton as HTMLElement)
+    // The delete is an item of the copy's menu; the confirm button of the same name is inside the
+    // `<dialog>` that item opens.
+    await userEvent.click(await screen.findByRole('button', { name: /^Дії з примірником/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Видалити' }))
 
     const confirm = within(await screen.findByRole('alertdialog')).getByRole('button', {
       name: 'Видалити',
