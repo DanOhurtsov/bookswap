@@ -16,7 +16,7 @@ const NAVBAR_LINKS_GUEST = [
 const NAVBAR_PROFILE_LINKS = [
   { href: '/profile', label: 'Профіль' },
   // { href: '/wishlist', label: 'Вішлист' },
-  // { href: '/reading-list', label: 'Список читання' },
+  { href: '/reading-list', label: 'Список читання' },
 ]
 
 // exports
