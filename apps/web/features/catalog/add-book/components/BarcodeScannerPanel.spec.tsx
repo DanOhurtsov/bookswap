@@ -251,13 +251,34 @@ describe('BarcodeScannerPanel', () => {
 
       expect(document.querySelector("[data-slot='scanner-overlay']")).toHaveClass(
         'pointer-events-none',
+        'absolute',
+        'inset-0',
         'flex-col',
         'justify-center',
       )
+      // Світла рамка на темній тіні читається і над світлим, і над темним відео.
       expect(document.querySelector("[data-slot='scanner-frame']")).toHaveClass(
         'aspect-[5/2]',
         'flex-none',
+        'border-2',
+        'border-white/95',
+        'shadow-[0_0_0_2px_rgb(0_0_0/0.55),inset_0_0_0_2px_rgb(0_0_0/0.55)]',
       )
+    })
+
+    it('gives the hint its own contrast, so it reads over a light frame as well as a dark one', async () => {
+      const fake = createFakeModules()
+      const user = userEvent.setup()
+      render(
+        <BarcodeScannerPanel
+          onValidIsbn={jest.fn()}
+          loadScannerModules={jest.fn().mockResolvedValue(fake.modules)}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Сканувати штрихкод' }))
+
+      expect(await screen.findByRole('status')).toHaveClass('text-white', 'bg-black/70')
     })
 
     it('renders the aiming frame inside the viewport, hidden from assistive tech', () => {
