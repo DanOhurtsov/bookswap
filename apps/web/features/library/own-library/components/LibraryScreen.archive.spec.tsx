@@ -160,7 +160,7 @@ describe('архів у бібліотеці (10c)', () => {
     })
 
     render(withQueryClient(<LibraryScreen />, client))
-    await userEvent.click(await screen.findByRole('button', { name: 'Архів' }))
+    await userEvent.click(await screen.findByRole('tab', { name: 'Архів' }))
 
     const restore = await screen.findByRole('button', { name: 'Відновити' })
 
@@ -189,7 +189,7 @@ describe('вхід із результатів додавання (docs/plan/fas
     await waitFor(() => {
       expect(mockApiRequest).toHaveBeenCalledWith('/me/library?archived=true', expect.anything())
     })
-    expect(screen.getByRole('button', { name: 'Архів' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tab', { name: 'Архів' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('«Додати книжку» веде в єдиний вхід додавання', async () => {
