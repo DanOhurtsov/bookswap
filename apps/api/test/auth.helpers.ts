@@ -107,11 +107,19 @@ export async function createTestApp({
 
 let counter = 0
 
+/**
+ * Every test file gets its own module registry, so `counter` restarts from zero for each of them
+ * while the pid is shared by all the files one process runs. Two files that register the same
+ * prefix (`notif-owner`) with the same counter would produce the same address and fail with a 409.
+ * A random tag, different for every file, keeps such addresses apart.
+ */
+const fileTag = Math.random().toString(36).slice(2, 8)
+
 /** Унікальна адреса на кожен виклик: e2e-файли ділять одну тестову базу. */
 export function uniqueEmail(prefix = 'user'): string {
   counter += 1
 
-  return `${prefix}-${String(counter)}-${String(process.pid)}@example.com`
+  return `${prefix}-${String(counter)}-${String(process.pid)}-${fileTag}@example.com`
 }
 
 export const VALID_PASSWORD = 'dovhyj-parol-2026'
