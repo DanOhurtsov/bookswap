@@ -11,6 +11,7 @@ const KNOWN_FEATURES = [
   'features/library/csv-import',
   'features/library/activation',
   'features/library/own-library',
+  'features/library/own-book',
   'features/network',
   'features/contacts',
   'features/guest-loans',
