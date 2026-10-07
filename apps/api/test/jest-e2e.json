@@ -3,7 +3,7 @@
   "rootDir": ".",
   "testRegex": ".*\\.e2e-spec\\.ts$",
   "globalSetup": "<rootDir>/db/global-setup.ts",
-  "setupFiles": ["<rootDir>/db/use-test-database.ts"],
+  "setupFiles": ["<rootDir>/db/use-test-database.ts", "<rootDir>/db/isolate-local-telegram.ts"],
   "setupFilesAfterEnv": ["<rootDir>/e2e-setup.ts"],
   // 15 секунд, а не типові 5. Це НЕ спосіб сховати зависання: кожен тест, який
   // справді чогось чекає (локи, гейти, оренда доставки), передає власний явний

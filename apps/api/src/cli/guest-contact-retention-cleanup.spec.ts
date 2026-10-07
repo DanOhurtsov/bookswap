@@ -9,6 +9,18 @@ import {
 import type { RetentionCleanupSummary } from '../external-borrowers/guest-contact-retention-cleanup.service'
 
 /**
+ * This spec drives `executeCleanupRun` with injected stages and never starts Nest. The real CLI
+ * module evaluates `ConfigModule.forRoot({ validate })` on import, which reads the developer's own
+ * root `.env`: a half-filled Telegram block there would fail this unit spec at import time. The
+ * module is replaced so the result does not depend on any local variable; the real wiring (and the
+ * validation it runs) is covered by `guest-contact-retention-cleanup-cli.db-spec.ts` against the
+ * built command.
+ */
+jest.mock('./guest-contact-retention-cli.module', () => ({
+  GuestContactRetentionCliModule: class GuestContactRetentionCliModuleStub {},
+}))
+
+/**
  * Stage 10 (10h): shutdown policy затверджена PO — `app.close()` під бюджетом 5000 мс; таймаут
  * чи відхилення закриття завжди дає `exit 1` через примусове завершення, ніколи `exit 0`; успіх
  * друкується лише ПІСЛЯ підтвердженого закриття; жоден шлях (контекст/`run()`/закриття) не

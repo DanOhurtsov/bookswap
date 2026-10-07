@@ -3,7 +3,7 @@
   "rootDir": ".",
   "testRegex": ".*\\.db-spec\\.ts$",
   "globalSetup": "<rootDir>/db/global-setup.ts",
-  "setupFiles": ["<rootDir>/db/use-test-database.ts"],
+  "setupFiles": ["<rootDir>/db/use-test-database.ts", "<rootDir>/db/isolate-local-telegram.ts"],
   "maxWorkers": 1,
   "workerIdleMemoryLimit": "512MB",
   "transform": {

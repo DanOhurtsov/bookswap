@@ -20,6 +20,19 @@ const execFileAsync = promisify(execFile)
  */
 const CLI_PATH = resolve(__dirname, '../../dist/cli/guest-contact-retention-cleanup.js')
 
+/**
+ * The child process reads the root `.env` itself and validates it exactly as production does, so a
+ * half-filled Telegram block there would make the command exit 1 for a reason this spec is not
+ * about. A complete throwaway block (never used by this CLI: it loads no Telegram module) keeps the
+ * result independent of whatever the developer has locally, without weakening the validation.
+ */
+const CHILD_ENV = {
+  ...process.env,
+  TELEGRAM_BOT_TOKEN: '123456:AAThrowawayToken',
+  TELEGRAM_BOT_USERNAME: 'bookswap_test_bot',
+  TELEGRAM_WEBHOOK_SECRET: 'test-webhook-secret-0123456789',
+}
+
 describe('CLI guest-contact-retention-cleanup — зібрана команда проти реальної БД', () => {
   let prisma: PrismaClient
 
@@ -86,7 +99,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
 
     const { stdout, stderr } = await execFileAsync('node', [CLI_PATH], {
       env: {
-        ...process.env,
+        ...CHILD_ENV,
         DATABASE_URL: testDatabaseUrl(),
         DIRECT_DATABASE_URL: testDatabaseUrl(),
       },
@@ -112,7 +125,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
 
     await execFileAsync('node', [CLI_PATH], {
       env: {
-        ...process.env,
+        ...CHILD_ENV,
         DATABASE_URL: testDatabaseUrl(),
         DIRECT_DATABASE_URL: testDatabaseUrl(),
       },
@@ -127,7 +140,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
   it('RET6: два одночасні запуски зібраної CLI — жодного процесу не падає, контакт стирається рівно один раз', async () => {
     const { contactId } = await guestContactWithReturnedLoan(91)
     const env = {
-      ...process.env,
+      ...CHILD_ENV,
       DATABASE_URL: testDatabaseUrl(),
       DIRECT_DATABASE_URL: testDatabaseUrl(),
     }
@@ -144,7 +157,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
 
   it('RET6: повторний запуск того самого дня — безпечний no-op, exit 0', async () => {
     const env = {
-      ...process.env,
+      ...CHILD_ENV,
       DATABASE_URL: testDatabaseUrl(),
       DIRECT_DATABASE_URL: testDatabaseUrl(),
     }
@@ -160,7 +173,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
   it('exit ненульовий і не висить при недоступній БД — жодних напівстертих даних', async () => {
     const { contactId } = await guestContactWithReturnedLoan(91)
     const badEnv = {
-      ...process.env,
+      ...CHILD_ENV,
       DATABASE_URL: 'postgresql://invalid:invalid@127.0.0.1:1/does-not-exist',
       DIRECT_DATABASE_URL: 'postgresql://invalid:invalid@127.0.0.1:1/does-not-exist',
     }
@@ -210,7 +223,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
     // (`ExceptionsZone`) МОВЧКИ, до того, як `executeCleanupRun` взагалі побачить помилку —
     // спостережено вручну під час діагностики цього шляху; цей тест ловить регресію.
     const badEnv = {
-      ...process.env,
+      ...CHILD_ENV,
       DATABASE_URL: 'not-a-valid-url',
       DIRECT_DATABASE_URL: 'not-a-valid-url',
     }
@@ -258,7 +271,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
     await prisma.externalBorrower.update({ where: { id: contact.id }, data: { retainUntil: null } })
 
     const env = {
-      ...process.env,
+      ...CHILD_ENV,
       DATABASE_URL: testDatabaseUrl(),
       DIRECT_DATABASE_URL: testDatabaseUrl(),
     }
