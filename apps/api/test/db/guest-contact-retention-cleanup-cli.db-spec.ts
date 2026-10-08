@@ -178,13 +178,10 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
       DIRECT_DATABASE_URL: 'postgresql://invalid:invalid@127.0.0.1:1/does-not-exist',
     }
 
-    // Недосяжна БД падає не миттєво: Prisma сама відмовляється чекати на транзакцію довше за
-    // ~30с («Unable to start a transaction in the given time») — а `app.close()` після цього
-    // спостережено таким, що на непідключеному пулі НЕ повертається взагалі (спільний
-    // `PrismaService`, не власна поведінка цього CLI). Саме тому в
-    // `guest-contact-retention-cleanup.ts` закриття обмежене бюджетом (`CLOSE_BUDGET_MS`,
-    // затверджена PO shutdown policy) і процес примусово завершується через `io.forceExit` —
-    // інакше цей самий тест ловив би не «чистий» `exit 1`, а SIGTERM від `execFile`.
+    // Depending on the environment, the disconnected pool may close immediately or exhaust
+    // the CLI shutdown budget. Both paths must exit 1 before execFile kills the process.
+    // The timeout diagnostic and forced exit are covered deterministically by
+    // executeCleanupRun in guest-contact-retention-cleanup.spec.ts.
     let failure: { code: number; stdout: string; stderr: string } | undefined
 
     try {
@@ -195,7 +192,7 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
 
     expect(failure).toBeDefined()
     expect(failure?.code).toBe(1)
-    expect(failure?.stdout ?? '').toBe('') // успіх НЕ друкується — закриття не підтверджене
+    expect(failure?.stdout ?? '').toBe('') // Failed cleanup must never print success.
 
     // Runbook обіцяє відсутність PII/SQL у виводі — тут прямо перевіряємо, що збій друкує лише
     // клас помилки (`describeFailure`, `guest-contact-retention-cleanup.ts`), а не сирий
@@ -204,7 +201,6 @@ describe('CLI guest-contact-retention-cleanup — зібрана команда 
     const stderr = failure?.stderr ?? ''
 
     expect(stderr).toMatch(/Тип помилки: /)
-    expect(stderr).toMatch(/Закриття ресурсів не завершилося за \d+ мс — примусове завершення/)
     expect(stderr).not.toContain('invalid:invalid')
     expect(stderr).not.toContain('does-not-exist')
     expect(stderr.toUpperCase()).not.toContain('SELECT')
