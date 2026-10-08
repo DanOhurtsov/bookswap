@@ -83,6 +83,12 @@ jobs:
           pnpm db:seed
           pnpm db:seed
 
+      # guest-contact-retention-cleanup-cli.db-spec runs the BUILT command (apps/api/dist/cli/...). turbo's
+      # test:db builds the api's dependencies but not the api itself; gate.sh builds before test:db, so
+      # this job has to as well, with turbo so that @bookswap/shared is built first.
+      - name: Зібрати API (db-spec запускає зібрану CLI)
+        run: pnpm turbo run build --filter=@bookswap/api
+
       - name: Тести constraint'ів і e2e
         run: pnpm test:db
 
