@@ -355,10 +355,29 @@ function emptyMessage(view: LibraryView): string {
   return 'Полиця порожня. Знайдіть книжку в каталозі — і додайте примірник.'
 }
 
-function GroupHeader({ group }: { group: LibraryGroup | BorrowedLibraryGroup }) {
+/**
+ * Where an own card leads: the owner's page of the group's first copy (the order the API gives),
+ * `/library/:copyId`. It is the id of the `Copy`, never of the edition or the work: an owner can hold
+ * several copies of one book.
+ */
+function ownCopyHref(group: LibraryGroup): string {
+  const [first] = group.copies
+
+  // A group always has a copy; the fallback only satisfies the type.
+  return first === undefined ? '/library' : `/library/${encodeURIComponent(first.id)}`
+}
+
+function GroupHeader({
+  group,
+  href,
+}: {
+  group: LibraryGroup | BorrowedLibraryGroup
+  /** Where the title leads. */
+  href: string
+}) {
   return (
     <>
-      <Link className="book__title" href={`/works/${group.work.id}`}>
+      <Link className="book__title" href={href}>
         {group.work.title}
         {group.counts.total > 1 && ` ×${String(group.counts.total)}`}
       </Link>
@@ -376,7 +395,7 @@ function GroupHeader({ group }: { group: LibraryGroup | BorrowedLibraryGroup }) 
 function BorrowedGroupCard({ group }: { group: BorrowedLibraryGroup }) {
   return (
     <li className="book">
-      <GroupHeader group={group} />
+      <GroupHeader group={group} href={`/works/${group.work.id}`} />
       <ul className="copies">
         {group.copies.map((copy) => (
           <li className="copy" key={copy.id}>
@@ -425,7 +444,7 @@ function OwnGroupCard({
 }) {
   return (
     <li className="book">
-      <GroupHeader group={group} />
+      <GroupHeader group={group} href={ownCopyHref(group)} />
       <ul className="copies">
         {group.copies.map((copy) =>
           archived ? (

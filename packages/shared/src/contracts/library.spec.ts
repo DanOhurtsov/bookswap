@@ -3,6 +3,7 @@ import {
   addCopyRequestSchema,
   borrowedCopySchema,
   libraryQueryRequestSchema,
+  ownBookResponseSchema,
   ownCopySchema,
   updateCopyRequestSchema,
   visibleCopySchema,
@@ -220,5 +221,56 @@ describe('проєкції примірника', () => {
         visibleCopySchema.safeParse({ ...rawCopy, myActiveLoan: { id: 'loan-2', status } }).success,
       ).toBe(false)
     }
+  })
+})
+
+describe('ownBookResponseSchema', () => {
+  const edition = {
+    id: 'edition-1',
+    workId: 'work-1',
+    translationId: null,
+    publisher: null,
+    year: null,
+    isbn13: null,
+    pageCount: null,
+    coverUrl: null,
+    format: 'PAPERBACK',
+    textKind: 'ORIGINAL',
+    lang: 'en',
+    translator: null,
+    revision: 1,
+  }
+  const work = {
+    id: 'work-1',
+    title: 'Шантарам',
+    origLang: 'en',
+    firstPubYear: null,
+    description: null,
+    createdAt: '2026-03-01T10:00:00.000Z',
+    revision: 1,
+  }
+  const author = {
+    id: 'author-1',
+    name: 'Грегорі Робертс',
+    nameLatin: null,
+    role: 'AUTHOR',
+    position: 0,
+  }
+
+  it('несе нотатку власника разом із каталожним контекстом примірника', () => {
+    const parsed = ownBookResponseSchema.parse({
+      copy: rawCopy,
+      edition,
+      work,
+      authors: [author],
+    })
+
+    expect(parsed.copy.note).toBe('кавова пляма на 200-й')
+    expect(parsed.work.id).toBe('work-1')
+    expect(parsed.authors).toHaveLength(1)
+  })
+
+  it('не приймає відповідь без примірника: сторінка адресує саме його', () => {
+    expect(ownBookResponseSchema.safeParse({ edition, work, authors: [] }).success).toBe(false)
   })
 })

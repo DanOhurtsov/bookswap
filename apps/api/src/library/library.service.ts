@@ -7,6 +7,7 @@ import {
   type CopyResponse,
   type LibraryQueryRequest,
   type LibraryResponse,
+  type OwnBookResponse,
   type UpdateCopyRequest,
   type VisibleLibraryResponse,
 } from '@bookswap/shared'
@@ -22,6 +23,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS, toPublicUser } from '../users/user.mapper'
 import { CopyWriter, toDate } from './copy-writer'
 import { editionLanguageWhere } from '../catalog/edition-language'
+import { toEdition, toWork, toWorkAuthors } from '../catalog/catalog.mapper'
 import { WITH_CATALOG } from './library-includes'
 import {
   groupByEdition,
@@ -79,6 +81,29 @@ export class LibraryService {
     })
 
     return { groups: groupByEdition(copies, toOwnCopy) }
+  }
+
+  /**
+   * Сторінка власної книги: один примірник із нотаткою й каталожним контекстом.
+   *
+   * Чужий і неіснуючий примірник відповідають однаково — 404: маршрут адресує `/me/library`, і
+   * чужий id у ньому просто не існує (так само в `updateCopy`). Архівний примірник віддається:
+   * власник відкриває його й керує ним, як і активним.
+   */
+  async getOwn(userId: string, copyId: string): Promise<OwnBookResponse> {
+    const copy = await this.prisma.copy.findUnique({
+      where: { id: copyId },
+      include: WITH_CATALOG,
+    })
+
+    if (copy === null || copy.ownerId !== userId) throw notFound('Примірника не знайдено')
+
+    return {
+      copy: toOwnCopy(copy),
+      edition: toEdition(copy.edition),
+      work: toWork(copy.edition.work),
+      authors: toWorkAuthors(copy.edition.work.authors),
+    }
   }
 
   /** §6.4, в'ю «Мої книжки не вдома»: `currentHolderId ≠ ownerId`. */
