@@ -6,6 +6,7 @@ import '@testing-library/jest-dom'
 import type { BorrowedLibraryResponse, LibraryResponse } from '@bookswap/shared'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import { LibraryScreen } from './LibraryScreen'
+import { setAddress, watchHistory } from '../own-library.test-helpers'
 
 /**
  * Where a book on the shelf leads. The owner's own copies open the owner's page of the copy
@@ -28,7 +29,9 @@ jest.mock('@/app/lib/use-session', () => ({
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: jest.requireActual<typeof import('../own-library.test-helpers')>(
+    '../own-library.test-helpers',
+  ).useAddressSearchParams,
 }))
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
@@ -106,8 +109,16 @@ function serve(routes: Record<string, unknown>): void {
   })
 }
 
+let unwatchHistory: () => void = () => undefined
+
 beforeEach(() => {
   mockApiRequest.mockReset()
+  unwatchHistory = watchHistory()
+  setAddress()
+})
+
+afterEach(() => {
+  unwatchHistory()
 })
 
 describe('куди веде книга на полиці', () => {
