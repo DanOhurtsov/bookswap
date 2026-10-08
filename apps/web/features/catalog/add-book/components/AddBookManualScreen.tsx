@@ -5,11 +5,10 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { apiRequest } from '@/app/lib/api'
 import { describeAddBookError } from '@/app/lib/catalog-errors'
-import { readSearchAddress, searchHref } from '@/app/lib/search-page'
 import { useKeyedRequest } from '@/app/lib/use-keyed-request'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { manualInitialFrom } from '../model/manual-form'
-import { ADD_BOOK_PATH } from '../model/search-address-urls'
+import { backToSearchHref } from '../model/search-address-urls'
 import type { QuickAddApi } from '../model/use-quick-add'
 import { ManualAddForm } from './ManualAddForm'
 import { ledeClass, pageClass, pendingStatusClass } from './screen-styles'
@@ -31,7 +30,6 @@ export function AddBookManualScreen({
   onAddAnother,
 }: AddBookManualScreenProps) {
   const parameters = useSearchParams()
-  const address = readSearchAddress(parameters)
   const presetWork = useKeyedRequest(
     presetWorkId !== null ? `work:${presetWorkId}` : undefined,
     (signal) =>
@@ -51,16 +49,7 @@ export function AddBookManualScreen({
         Обов’язкова лише назва. Решту можна не знати — її можна уточнити пізніше.
       </p>
       <p>
-        <Link
-          href={searchHref(
-            ADD_BOOK_PATH,
-            parameters,
-            { q: address.q, page: 1, pageSize: address.pageSize },
-            ['mode', 'workId', 'title', 'isbn', 'author', 'firstPubYear'],
-          )}
-        >
-          ← До пошуку
-        </Link>
+        <Link href={backToSearchHref(parameters)}>← До пошуку</Link>
       </p>
 
       {presetWork.status === 'error' && (

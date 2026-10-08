@@ -863,7 +863,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
 
     expect(link).toHaveAttribute(
       'href',
-      '/catalog/new?mode=manual&title=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80',
+      '/catalog/new?mode=manual&title=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80',
     )
   })
 
@@ -874,7 +874,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
 
     expect(await screen.findByRole('link', { name: 'Додати вручну' })).toHaveAttribute(
       'href',
-      `/catalog/new?mode=manual&isbn=${MANUAL_ISBN}`,
+      `/catalog/new?mode=manual&isbn=${MANUAL_ISBN}&q=${MANUAL_ISBN}`,
     )
   })
 
@@ -1137,7 +1137,7 @@ describe('твір без видання та запис про твір: «Ут
 
     expect(await screen.findByRole('link', { name: 'Уточнити видання' })).toHaveAttribute(
       'href',
-      '/catalog/new?mode=manual&workId=w-9',
+      `/catalog/new?mode=manual&workId=w-9&${new URLSearchParams({ q: 'абстрактний' }).toString()}`,
     )
   })
 
@@ -1169,6 +1169,138 @@ describe('твір без видання та запис про твір: «Ут
     expect(parameters.getAll('author')).toEqual(['Автор Один', 'Автор Два'])
     expect(parameters.get('firstPubYear')).toBe('1937')
     expect(parameters.has('isbn')).toBe(false)
+    expect(parameters.get('q')).toBe('твір')
+  })
+})
+
+describe('«← До пошуку» повертає до того самого пошуку (BS-126)', () => {
+  const INPUT = 'Назва, автор або ISBN'
+  const ISBN = '9783161484100'
+
+  function hrefOf(name: string | RegExp): string {
+    return screen.getByRole('link', { name }).getAttribute('href') ?? ''
+  }
+
+  function searchRequests(): string[] {
+    return mockApiRequest.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith('/me/library/add-search?'))
+  }
+
+  it('текстовий запит: поле, сторінка й розмір відновлюються, редагування назви запиту не міняє', async () => {
+    searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=20')
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Кобзар')
+    act(() => {
+      navigate(hrefOf('Додати вручну'))
+    })
+
+    const title = await screen.findByLabelText('Назва')
+
+    expect(title).toHaveValue('кобзар')
+    await user.clear(title)
+    await user.type(title, 'Інша назва')
+
+    mockApiRequest.mockClear()
+    act(() => {
+      navigate(hrefOf('← До пошуку'))
+    })
+
+    expect(await screen.findByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByLabelText(INPUT)).toHaveValue('кобзар')
+    expect(searchRequests()).toEqual([
+      '/me/library/add-search?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=20',
+    ])
+  })
+
+  it('ISBN: повертає до пошуку за ISBN, а не до порожнього поля', async () => {
+    searchParams = new URLSearchParams(`q=${ISBN}`)
+    lookupHandler = () => Promise.reject(new Error('немає'))
+    renderScreen()
+    await screen.findByText('Кобзар')
+    act(() => {
+      navigate(hrefOf('Додати вручну'))
+    })
+
+    expect(await screen.findByLabelText('ISBN-13')).toHaveValue(ISBN)
+
+    mockApiRequest.mockClear()
+    act(() => {
+      navigate(hrefOf('← До пошуку'))
+    })
+
+    expect(await screen.findByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByLabelText(INPUT)).toHaveValue(ISBN)
+    expect(searchRequests()).toEqual([`/me/library/add-search?q=${ISBN}&page=1&pageSize=10`])
+  })
+
+  it('«Уточнити видання» теж несе пошук туди й назад', async () => {
+    const work = { ...WORK, id: 'w-9', title: 'Абстрактний твір' }
+    const searching = mockApiRequest.getMockImplementation()
+
+    searchParams = new URLSearchParams('q=абстрактний')
+    items = [{ kind: 'WORK', key: 'work:w-9', work, authors: [], matchedOn: 'TITLE' }]
+    mockApiRequest.mockImplementation((path: string, options?: unknown) =>
+      path === '/works/w-9'
+        ? Promise.resolve({ work, authors: [], translations: [], editions: [] })
+        : searching?.(path, options),
+    )
+    renderScreen()
+    await screen.findByRole('link', { name: 'Уточнити видання' })
+    act(() => {
+      navigate(hrefOf('Уточнити видання'))
+    })
+    await screen.findByRole('heading', { name: 'Додати книжку вручну' })
+
+    expect(hrefOf('← До пошуку')).toBe(
+      `/catalog/new?${new URLSearchParams({ q: 'абстрактний' }).toString()}`,
+    )
+  })
+
+  it('після перезавантаження форми повернення бере пошук з адреси', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=кобзар&q=кобзар&page=3&pageSize=20')
+    renderScreen()
+
+    expect(await screen.findByLabelText('Назва')).toHaveValue('кобзар')
+    expect(hrefOf('← До пошуку')).toBe(
+      `/catalog/new?${new URLSearchParams({ q: 'кобзар', page: '3', pageSize: '20' }).toString()}`,
+    )
+  })
+
+  it('з автопідказок повертає до підказок того самого тексту', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Кобз&q=Кобз&auto=1')
+    renderScreen()
+    await screen.findByLabelText('Назва')
+
+    act(() => {
+      navigate(hrefOf('← До пошуку'))
+    })
+
+    expect(await screen.findByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByLabelText(INPUT)).toHaveValue('Кобз')
+    expect(
+      mockApiRequest.mock.calls.some(([path]) =>
+        String(path).startsWith('/me/library/add-search/suggest?'),
+      ),
+    ).toBe(true)
+  })
+
+  it('пряме відкриття форми: повернення до порожнього пошуку без запитів', async () => {
+    searchParams = new URLSearchParams('mode=manual')
+    renderScreen()
+    await screen.findByLabelText('Назва')
+
+    expect(hrefOf('← До пошуку')).toBe('/catalog/new?q=')
+
+    act(() => {
+      navigate(hrefOf('← До пошуку'))
+    })
+
+    expect(await screen.findByLabelText(INPUT)).toHaveValue('')
+    expect(searchRequests()).toEqual([])
   })
 })
 

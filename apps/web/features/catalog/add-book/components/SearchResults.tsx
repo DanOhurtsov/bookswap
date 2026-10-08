@@ -107,7 +107,7 @@ export function SearchResults({
         <ul className={booksClass}>
           {items.map((item) =>
             item.kind === 'WORK' ? (
-              <WorkResultCard key={item.key} item={item} />
+              <WorkResultCard key={item.key} item={item} parameters={parameters} />
             ) : (
               <EditionRow key={item.key} item={item} quick={quick} entryMethod={entryMethod} />
             ),
@@ -122,7 +122,9 @@ export function SearchResults({
             const target = externalTarget(item.result)
 
             if (target === undefined)
-              return <ExternalWorkCard key={item.key} result={item.result} />
+              return (
+                <ExternalWorkCard key={item.key} result={item.result} parameters={parameters} />
+              )
 
             return (
               <ExternalEditionCard

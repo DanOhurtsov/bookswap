@@ -1,13 +1,20 @@
 import Link from 'next/link'
 import type { AddSearchWorkItem } from '@bookswap/shared'
+import { manualFormHref } from '../model/search-address-urls'
 import { ResultCardShell } from './ResultCardShell'
+
+type WorkResultCardProps = {
+  item: AddSearchWorkItem
+  /** The search address: the manual form keeps its context for the way back. */
+  parameters: URLSearchParams
+}
 
 /**
  * Твір, у якого ще немає жодного видання в нашому каталозі. Це абстрактний результат, а не конкретна
  * книжка: тут немає кнопки «Додати до бібліотеки», бо немає чого додавати, а обкладинка, ISBN чи
  * переклад не вигадуються.
  */
-export function WorkResultCard({ item }: { item: AddSearchWorkItem }) {
+export function WorkResultCard({ item, parameters }: WorkResultCardProps) {
   return (
     <ResultCardShell
       coverAlt={`Обкладинка «${item.work.title}»`}
@@ -24,7 +31,7 @@ export function WorkResultCard({ item }: { item: AddSearchWorkItem }) {
       ]}
     >
       <span className="book__meta">Для цього твору ще немає конкретного видання.</span>
-      <Link href={`/catalog/new?mode=manual&workId=${encodeURIComponent(item.work.id)}`}>
+      <Link href={manualFormHref(new URLSearchParams({ workId: item.work.id }), parameters)}>
         Уточнити видання
       </Link>{' '}
       <Link href={`/works/${item.work.id}`}>Відкрити твір</Link>
