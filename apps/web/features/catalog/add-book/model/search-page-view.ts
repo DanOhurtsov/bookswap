@@ -21,7 +21,7 @@ export function searchPageView(input: {
   page: number
   local: { ready: boolean; hasMore: boolean }
   rowCount: number
-  external: ExternalSearchState
+  external: ExternalSearchState<unknown>
 }): { next: NextPage; currentHasRows: boolean; finished: boolean } {
   return {
     next: nextPageOf({

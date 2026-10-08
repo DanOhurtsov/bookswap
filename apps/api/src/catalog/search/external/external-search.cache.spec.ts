@@ -20,13 +20,25 @@ describe('externalSearchCacheKey', () => {
 
   it('складає ключ із полів, розділених символом NUL', () => {
     expect(externalSearchCacheKey('OPEN_LIBRARY', 'Тигролови', 2, 10)).toBe(
-      ['OPEN_LIBRARY', '10', '2', 'тигролови'].join(String.fromCharCode(0)),
+      ['FULL', 'OPEN_LIBRARY', '10', '2', 'тигролови'].join(String.fromCharCode(0)),
     )
   })
 
   it('розрізняє джерела', () => {
     expect(externalSearchCacheKey('OPEN_LIBRARY', 'тигролови', 0, 10)).not.toBe(
       externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 10),
+    )
+  })
+
+  it('розрізняє режими: коротка відповідь підказки не підміняє повну', () => {
+    expect(externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 16, 'SUGGEST')).not.toBe(
+      externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 16, 'FULL'),
+    )
+  })
+
+  it('режим за замовчуванням — повний пошук', () => {
+    expect(externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 16)).toBe(
+      externalSearchCacheKey('GOOGLE_BOOKS', 'тигролови', 0, 16, 'FULL'),
     )
   })
 
@@ -190,5 +202,27 @@ describe('ExternalSearchCache', () => {
 
     await cache.resolve('b', load)
     expect(load).toHaveBeenCalledTimes(4)
+  })
+
+  it('підказки мають власний ліміт: вони не витісняють записи повного пошуку', async () => {
+    process.env.CATALOG_EXTERNAL_SEARCH_CACHE_MAX_ENTRIES = '2'
+    process.env.CATALOG_EXTERNAL_SUGGEST_CACHE_MAX_ENTRIES = '1'
+
+    try {
+      const load = jest.fn().mockImplementation(() => Promise.resolve(block('x')))
+      const full = externalSearchCacheKey('GOOGLE_BOOKS', 'кобзар', 0, 24, 'FULL')
+
+      await cache.resolve(full, load)
+      await cache.resolve(externalSearchCacheKey('GOOGLE_BOOKS', 'ко', 0, 16, 'SUGGEST'), load)
+      await cache.resolve(externalSearchCacheKey('GOOGLE_BOOKS', 'коб', 0, 16, 'SUGGEST'), load)
+      await cache.resolve(externalSearchCacheKey('GOOGLE_BOOKS', 'кобз', 0, 16, 'SUGGEST'), load)
+      expect(load).toHaveBeenCalledTimes(4)
+
+      // Три підказки пройшли через одну клітинку, а запис повного пошуку лишився на місці.
+      await cache.resolve(full, load)
+      expect(load).toHaveBeenCalledTimes(4)
+    } finally {
+      delete process.env.CATALOG_EXTERNAL_SUGGEST_CACHE_MAX_ENTRIES
+    }
   })
 })

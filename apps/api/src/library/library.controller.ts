@@ -16,6 +16,7 @@ import {
   type BorrowedLibraryResponse,
   type CopyResponse,
   type LibraryResponse,
+  type OwnBookResponse,
   type VisibleLibraryResponse,
 } from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
@@ -45,6 +46,19 @@ export class LibraryController {
   @Get('me/library/borrowed')
   listBorrowed(@CurrentUser() user: UserModel): Promise<BorrowedLibraryResponse> {
     return this.library.listBorrowed(user.id)
+  }
+
+  /**
+   * Сторінка власної книги. Шлях має сегмент `copies/`, а не голий `:copyId`: одно-сегментний
+   * `GET me/library/:copyId` перехопив би `GET me/library/add-search` з `AddSearchController`,
+   * який реєструється пізніше за цей контролер.
+   */
+  @Get('me/library/copies/:copyId')
+  getOwn(
+    @CurrentUser() user: UserModel,
+    @Param('copyId') copyId: string,
+  ): Promise<OwnBookResponse> {
+    return this.library.getOwn(user.id, copyId)
   }
 
   @Post('me/library')
@@ -78,6 +92,24 @@ export class LibraryController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeCopy(@CurrentUser() user: UserModel, @Param('copyId') copyId: string): Promise<void> {
     await this.library.removeCopy(user.id, copyId)
+  }
+
+  @Post('me/library/:copyId/archive')
+  @HttpCode(HttpStatus.OK)
+  archiveCopy(
+    @CurrentUser() user: UserModel,
+    @Param('copyId') copyId: string,
+  ): Promise<CopyResponse> {
+    return this.library.archiveCopy(user.id, copyId)
+  }
+
+  @Post('me/library/:copyId/restore')
+  @HttpCode(HttpStatus.OK)
+  restoreCopy(
+    @CurrentUser() user: UserModel,
+    @Param('copyId') copyId: string,
+  ): Promise<CopyResponse> {
+    return this.library.restoreCopy(user.id, copyId)
   }
 
   /** §6.5 і матриця §9 — усе рішення про видимість ухвалює сервіс. */

@@ -6,8 +6,8 @@ import type { Me } from '@bookswap/shared'
 import type { SessionState } from '@/app/lib/use-session'
 import { NavContent } from './NavBarContent'
 
-jest.mock('@/components/ThemeSwitcher', () => ({
-  ThemeSwitcher: () => <button type="button">Theme</button>,
+jest.mock('@/components/ThemeToggle', () => ({
+  ThemeToggleButton: () => <button type="button">Theme</button>,
 }))
 
 jest.mock('@/components/NavBar/NavBarAvatar', () => ({
@@ -66,7 +66,21 @@ describe('NavContent', () => {
     expect(screen.getByRole('link', { name: 'Друзі' })).toHaveAttribute('href', '/friends')
     expect(screen.getByRole('link', { name: 'Історія' })).toHaveAttribute('href', '/history')
     expect(screen.getByRole('button', { name: 'Notifications' })).toBeInTheDocument()
+    // The theme toggle lives inside the profile menu for signed-in users.
+    expect(screen.queryByRole('button', { name: 'Theme' })).not.toBeInTheDocument()
     expect(screen.getByTestId('profile-menu')).toHaveTextContent('Reader One')
     expect(screen.queryByRole('link', { name: 'Увійти' })).not.toBeInTheDocument()
+  })
+  it.each([
+    ['guestLoans=true', { guestLoans: true }, true],
+    ['guestLoans=false', { guestLoans: false }, false],
+    ['features unknown', undefined, false],
+  ])('contacts link (%s) visible: %s', (_name, features, visible) => {
+    renderState({ status: 'authenticated', user, features })
+
+    const link = screen.queryByRole('link', { name: 'Контакти' })
+
+    if (visible) expect(link).toHaveAttribute('href', '/contacts')
+    else expect(link).not.toBeInTheDocument()
   })
 })

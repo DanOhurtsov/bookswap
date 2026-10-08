@@ -67,6 +67,8 @@ const EDITION_ONLY_FIELDS = [
   // hands, so a `WORK` leaves the field empty rather than filling it with an
   // "approximately right" number.
   'pageCount',
+  // Fast-add: the local edition this printing is already known as (see `localEditionId`).
+  'localEditionId',
 ] as const
 
 /**
@@ -121,6 +123,13 @@ export const externalSearchResultSchema = z
     externalId: z.string().optional(),
     /** Open Library Work (`OL…W`) — reference metadata, never a FK. */
     workExternalId: z.string().optional(),
+    /**
+     * Fast-add (`/me/library/add-search/external`) only, `EDITION` only: this printing is ALREADY a
+     * `Edition` of ours (matched by ISBN or by a confirmed external reference) although the local search
+     * did not find it under this query. The server substitutes it in place BEFORE the page is cut, so
+     * the card shows the same state as the local one and adding it never depends on the provider.
+     */
+    localEditionId: z.string().optional(),
   })
   .superRefine((value, context) => {
     if (value.kind !== 'WORK') return
@@ -191,6 +200,24 @@ export const externalSearchMoreSchema = z.enum(EXTERNAL_SEARCH_MORE)
 
 export type ExternalSearchMore = z.infer<typeof externalSearchMoreSchema>
 
+/**
+ * Підказка виправлення написання: «Можливо, ви шукали «Гаррі Поттер»?». `text` — реально наявна назва
+ * твору або імʼя автора (з нашого каталогу чи з відповіді зовнішнього джерела), а не згенерований рядок.
+ *
+ * Підказка належить КОНКРЕТНОМУ запиту: `forQuery` — запит, для якого її обчислено. Сторінка показує
+ * її, лише поки нормалізований текст у полі дорівнює `forQuery`; відповідь на старий текст виправлення
+ * для нового не показує.
+ *
+ * Локальна половина списку дає рішення за нашим каталогом; зовнішня — за нашим каталогом ТА записами
+ * джерел разом, тож вона має останнє слово (див. `visibleSpellingSuggestion` на сторінці).
+ */
+export const spellingSuggestionSchema = z.object({
+  forQuery: z.string().min(1),
+  text: z.string().min(1),
+})
+
+export type SpellingSuggestion = z.infer<typeof spellingSuggestionSchema>
+
 export const externalSearchResponseSchema = z.object({
   results: z.array(externalSearchResultSchema).max(Math.max(...SEARCH_PAGE_SIZES)),
   sources: z.array(externalSearchSourceReportSchema),
@@ -208,6 +235,8 @@ export const externalSearchResponseSchema = z.object({
    * falsely empty page.
    */
   complete: z.boolean(),
+  /** Лише коли сервер питав джерела (`sources` не порожній) і є впевнений однозначний кандидат. */
+  spellingSuggestion: spellingSuggestionSchema.optional(),
 })
 
 export type ExternalSearchResponse = z.infer<typeof externalSearchResponseSchema>

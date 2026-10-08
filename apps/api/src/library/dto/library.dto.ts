@@ -28,6 +28,10 @@ export class LibraryQueryDto {
   status?: CopyStatus
 
   @IsOptional()
+  @IsIn(['true', 'false'], { message: 'archived: true або false' })
+  archived?: 'true' | 'false'
+
+  @IsOptional()
   @Transform(normalizeLanguage)
   @IsLanguageCode()
   lang?: string

@@ -67,6 +67,11 @@ export interface ExternalSearchBlock {
   readonly index: number
   /** How many raw records ONE outbound query of this block reads. */
   readonly size: number
+  /**
+   * How many outbound queries this block may spend; absent means the provider's whole plan.
+   * An auto-suggest passes `1`: it is the SERVER that holds the line, not the client's debounce.
+   */
+  readonly maxQueries?: number
 }
 
 export interface ExternalSearchBlockResult {
@@ -89,6 +94,14 @@ export interface ExternalSearchBlockResult {
    * service, from records it is already holding.
    */
   exhausted: boolean
+  /**
+   * Titles and author names of every structurally valid record the provider read — taken AFTER the
+   * body was checked and BEFORE `relevanceOf`. Only for the "Можливо, ви шукали…" correction: the right
+   * spelling of a misspelled query is exactly what the relevance gate rejects, so it must be collected
+   * ahead of it. These texts never enter `results`, the pool or the pages; they cost no request (they
+   * are the answer already in hand) and travel with the block through the cache.
+   */
+  spellingCandidates?: readonly string[]
   /**
    * Set when the block is INCOMPLETE: a sub-request of the provider's plan failed
    * (or was skipped past the deadline) while its siblings answered. The records
@@ -136,4 +149,38 @@ export class ExternalSearchProviderError extends Error {
     super(message)
     this.name = 'ExternalSearchProviderError'
   }
+}
+
+/**
+ * The provider answered HTTP 429. Classified as `RATE_LIMITED` and, unlike our own refusal, it also
+ * puts the source on cooldown (`ProviderRateLimiter.penalize`) for the time the provider asked for.
+ */
+export class ExternalSearchProviderRateLimitedError extends ExternalSearchProviderError {
+  constructor(
+    message: string,
+    /** From `Retry-After`; `undefined` when the provider named no usable figure. */
+    readonly retryAfterMs?: number,
+  ) {
+    super(message)
+    this.name = 'ExternalSearchProviderRateLimitedError'
+  }
+}
+
+/**
+ * `Retry-After` is either whole seconds or an HTTP date (RFC 9110 §10.2.3). Anything else — absent,
+ * negative, unparseable — is "no figure", and the caller falls back to its own cooldown.
+ */
+export function retryAfterMsFrom(
+  header: string | null,
+  now: number = Date.now(),
+): number | undefined {
+  if (header === null) return undefined
+
+  const value = header.trim()
+
+  if (/^\d+$/u.test(value)) return Number(value) * 1000
+
+  const date = Date.parse(value)
+
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now)
 }

@@ -1,204 +1,173 @@
+'use client'
+
 import type {
+  AddSearchEditionItem,
+  AddSearchExternalItem,
+  AddSearchResponse,
+  BookLookupResult,
   CopyEntryMethod,
-  ExternalSearchResult,
-  SearchPageSize,
-  WorkDetailResponse,
 } from '@bookswap/shared'
-import type { AddBookSearchResult } from '../api/search-add-book'
-import type { ExistingEditionInput, ExistingWorkInput, NewWorkInput } from '../model/add-book-step'
+import { useRouter } from 'next/navigation'
+import { describeAddBookError } from '@/app/lib/catalog-errors'
+import { searchHref, type SearchAddress } from '@/app/lib/search-page'
+import type { KeyedState } from '@/app/lib/use-keyed-request'
+import { FormStatus } from '@/components/Form/FormStatus'
+import { Button } from '@/components/ui/button'
 import type { ExternalSearchState } from '../model/external-search-state'
-import { searchPageView } from '../model/search-page-view'
-import { buildUnifiedResults } from '../model/unified-results'
-import { LookupCard } from './LookupCard'
+import { externalIdentities, externalTarget } from '../model/external-target'
+import { quickAddCardProps } from '../model/quick-add-card'
+import { identitiesOf, isbnIdentity } from '../model/quick-add-identities'
+import { ADD_BOOK_PATH } from '../model/search-address-urls'
+import type { EmptyStateKind, SearchResultsView } from '../model/search-results-view'
+import type { QuickAddApi } from '../model/use-quick-add'
+import { EditionResultCard } from './EditionResultCard'
+import { ExternalEditionCard } from './ExternalEditionCard'
+import { ExternalSearchStatus } from './ExternalSearchStatus'
+import { ExternalWorkCard } from './ExternalWorkCard'
+import { LookupAddCard } from './LookupAddCard'
+import { booksClass, emptyClass, pendingStatusClass, searchingStatusClass } from './screen-styles'
 import { SearchPagination } from './SearchPagination'
-import { SearchResultsList, type LocalListState } from './SearchResultsList'
+import { WorkResultCard } from './WorkResultCard'
+
+const EMPTY_STATE_TEXT: Record<EmptyStateKind, string> = {
+  BLIND:
+    'У BookSwap нічого схожого немає, а зовнішні каталоги не відповіли — чи є там ця книжка, невідомо.',
+  AUTO_IDLE:
+    'У нашому каталозі нічого схожого немає. Додайте символ або натисніть «Шукати» — тоді пошук піде й у зовнішні каталоги.',
+  PLAIN: 'Нічого схожого не знайшлося.',
+}
+
+type EditionRowProps = {
+  item: AddSearchEditionItem
+  quick: QuickAddApi
+  entryMethod: CopyEntryMethod
+}
+
+function EditionRow({ item, quick, entryMethod }: EditionRowProps) {
+  return (
+    <EditionResultCard
+      item={item}
+      {...quickAddCardProps(quick, entryMethod, identitiesOf(item), {
+        kind: 'EXISTING_EDITION',
+        editionId: item.edition.id,
+      })}
+    />
+  )
+}
 
 type SearchResultsProps = {
-  /** The local half's answer; absent while it is still loading or after it failed. */
-  result: AddBookSearchResult | undefined
-  local: LocalListState
+  view: SearchResultsView<BookLookupResult>
+  request: KeyedState<AddSearchResponse>
+  lookup: KeyedState<BookLookupResult>
+  external: ExternalSearchState<AddSearchExternalItem>
+  /** Normalized ISBN when the executed query is one. */
+  isbn: string | undefined
+  address: SearchAddress
+  parameters: URLSearchParams
+  quick: QuickAddApi
   entryMethod: CopyEntryMethod
-  external: ExternalSearchState
-  page: number
-  pageSize: SearchPageSize
-  /** Address of a page of THIS route — the wizard keeps its own parameters in it. */
-  hrefFor: (target: { page: number; pageSize: SearchPageSize }) => string
-  onPageSizeChange: (size: SearchPageSize) => void
-  onFoundEdition: (selection: ExistingEditionInput) => void
-  onFoundWork: (selection: ExistingWorkInput) => void
-  /** Creating a new work needs the query, which `result` may not carry yet. */
-  onCreateNew: (selection: NewWorkInput) => void
-  query: string
-  onSelectExternal: (result: ExternalSearchResult) => void
+  /** Suggestions → the explicit full search of the same text. */
+  onShowAll: () => void
 }
 
-function newWorkInput(result: AddBookSearchResult, entryMethod: CopyEntryMethod): NewWorkInput {
-  return {
-    initialTitle: result.lookup?.title ?? result.query,
-    entryMethod,
-    ...(result.isbn === undefined ? {} : { isbn: result.isbn }),
-    ...(result.lookup === undefined ? {} : { lookup: result.lookup }),
-  }
-}
-
-function existingWorkInput(
-  result: AddBookSearchResult,
-  candidate: WorkDetailResponse,
-  entryMethod: CopyEntryMethod,
-): ExistingWorkInput {
-  return {
-    workId: candidate.work.id,
-    title: candidate.work.title,
-    existingTranslations: candidate.translations,
-    entryMethod,
-    ...(result.isbn === undefined ? {} : { isbn: result.isbn }),
-    ...(result.lookup === undefined ? {} : { lookup: result.lookup }),
-  }
-}
-
-/**
- * The results area of the wizard: the SAME shared list and page controls as
- * `/catalog` (`SearchResultsList`, `SearchPagination`), plus what only the
- * wizard has — the exact-ISBN lookup card and the ways to create a new work.
- * What differs from `/catalog` is what happens AFTER a result is chosen: here an
- * existing edition becomes a copy, an existing work continues to translation, an
- * external record starts the duplicate check.
- *
- * Local rows appear as soon as the local request answers; external ones join the
- * same list when they arrive. Nothing waits: the external state is reported on one
- * line beside the list, never around it.
- *
- * The ISBN path is untouched. An ISBN query does not run an external title
- * search at all (`useExternalSearch`), so for it this renders what it always did:
- * the looked-up edition, and the offer to create a work from it.
- */
+/** Everything under the search bar: cards, statuses, the empty states and the page controls. */
 export function SearchResults({
-  result,
-  local,
-  entryMethod,
+  view,
+  request,
+  lookup,
   external,
-  page,
-  pageSize,
-  hrefFor,
-  onPageSizeChange,
-  onFoundEdition,
-  onFoundWork,
-  onCreateNew,
-  query,
-  onSelectExternal,
+  isbn,
+  address,
+  parameters,
+  quick,
+  entryMethod,
+  onShowAll,
 }: SearchResultsProps) {
-  const hasExactCatalogEdition =
-    result?.isbn !== undefined &&
-    result.candidates.some((candidate) =>
-      candidate.editions.some((edition) => edition.isbn13 === result.isbn),
-    )
-
-  const rows = buildUnifiedResults(
-    result?.candidates ?? [],
-    external.status === 'ready' ? external.results : [],
-  )
-
-  const view = searchPageView({
-    page,
-    local: { ready: result !== undefined, hasMore: result?.hasMore ?? false },
-    rowCount: rows.length,
-    external,
-  })
-
-  // The query the create form starts from: a lookup title beats the raw input.
-  const startNew = (): void => {
-    onCreateNew(
-      result === undefined
-        ? { initialTitle: query, entryMethod }
-        : newWorkInput(result, entryMethod),
-    )
-  }
-
-  if (
-    page === 1 &&
-    result !== undefined &&
-    result.candidates.length === 0 &&
-    result.lookup !== undefined &&
-    rows.length === 0
-  ) {
-    return (
-      <>
-        <p className="empty">У каталозі BookSwap цього видання ще немає.</p>
-        <ul className="books">
-          <LookupCard isbn={result.isbn} lookup={result.lookup} onUse={startNew} />
-        </ul>
-      </>
-    )
-  }
+  const router = useRouter()
+  const { response, items, externalItems, redundantLookup, lookupCard } = view
 
   return (
     <>
-      {result?.lookup !== undefined && !hasExactCatalogEdition && (
-        <>
-          <p className="empty">
-            Точне видання знайдено зовні. Перевірте, чи твір уже є у BookSwap.
-          </p>
-          <ul className="books">
-            <LookupCard isbn={result.isbn} lookup={result.lookup} />
-          </ul>
-        </>
+      {request.status === 'error' && <FormStatus error={describeAddBookError(request.error)} />}
+
+      {lookupCard !== undefined && isbn !== undefined && (
+        <ul className={booksClass}>
+          <LookupAddCard
+            isbn={isbn}
+            lookup={lookupCard}
+            {...quickAddCardProps(quick, entryMethod, [isbnIdentity(isbn)], {
+              kind: 'EXTERNAL_EDITION',
+              isbn13: isbn,
+            })}
+          />
+        </ul>
       )}
 
-      {rows.length > 0 && <p className="lede">Можливо, це одна з цих книжок?</p>}
+      {(items.length > 0 || externalItems.length > 0) && (
+        <ul className={booksClass}>
+          {items.map((item) =>
+            item.kind === 'WORK' ? (
+              <WorkResultCard key={item.key} item={item} />
+            ) : (
+              <EditionRow key={item.key} item={item} quick={quick} entryMethod={entryMethod} />
+            ),
+          )}
+          {externalItems.map((item) => {
+            if (item.kind === 'EDITION') {
+              return (
+                <EditionRow key={item.key} item={item} quick={quick} entryMethod={entryMethod} />
+              )
+            }
 
-      <SearchResultsList
-        rows={rows}
-        local={local}
-        external={external}
-        page={page}
-        firstPageHref={hrefFor({ page: 1, pageSize })}
-        localCard={(candidate) => ({
-          ...(result?.isbn === undefined ? {} : { searchedIsbn: result.isbn }),
-          onUseEdition: (editionId) => {
-            onFoundEdition({
-              workId: candidate.work.id,
-              title: candidate.work.title,
-              editionId,
-              entryMethod,
-            })
-          },
-          onUseWork: () => {
-            if (result !== undefined) onFoundWork(existingWorkInput(result, candidate, entryMethod))
-          },
-        })}
-        onSelectExternal={onSelectExternal}
-        emptyNotice={({ blind }) => (
-          <>
-            <p className="empty">
-              {blind
-                ? 'У BookSwap нічого схожого немає, а зовнішні каталоги не відповіли — чи є там ця книжка, невідомо.'
-                : 'Нічого схожого не знайшлося. Заведемо новий твір.'}
-            </p>
-            <button type="button" onClick={startNew}>
-              Створити новий твір
-            </button>
-          </>
-        )}
-      />
+            const target = externalTarget(item.result)
 
-      {local.status !== 'idle' && (
+            if (target === undefined)
+              return <ExternalWorkCard key={item.key} result={item.result} />
+
+            return (
+              <ExternalEditionCard
+                key={item.key}
+                result={item.result}
+                {...quickAddCardProps(quick, entryMethod, externalIdentities(item.result), target)}
+              />
+            )
+          })}
+        </ul>
+      )}
+
+      <ExternalSearchStatus state={external} localLoading={view.localLoading} />
+
+      {lookup.status === 'error' && !redundantLookup && response !== undefined && (
+        <p className={pendingStatusClass}>{describeAddBookError(lookup.error)}</p>
+      )}
+
+      {view.showUnavailableNotice && (
+        <p className={searchingStatusClass}>Зовнішній пошук тимчасово недоступний.</p>
+      )}
+
+      {view.emptyState !== undefined && (
+        <p className={emptyClass}>{EMPTY_STATE_TEXT[view.emptyState]}</p>
+      )}
+
+      {view.pageEmpty && <p className={emptyClass}>На цій сторінці результатів немає.</p>}
+
+      {view.showAllResults && (
+        <Button type="button" variant="outline" className="cursor-pointer" onClick={onShowAll}>
+          Показати всі результати
+        </Button>
+      )}
+
+      {view.showPagination && (
         <SearchPagination
-          page={page}
-          pageSize={pageSize}
+          page={address.page}
+          pageSize={address.pageSize}
           next={view.next}
           currentHasRows={view.currentHasRows}
-          hrefFor={hrefFor}
-          onPageSizeChange={onPageSizeChange}
+          hrefFor={(target) => searchHref(ADD_BOOK_PATH, parameters, { q: address.q, ...target })}
+          onPageSizeChange={(pageSize) => {
+            router.push(searchHref(ADD_BOOK_PATH, parameters, { q: address.q, page: 1, pageSize }))
+          }}
         />
-      )}
-
-      {(rows.length > 0 || !view.finished) && (
-        <p className="form__aside">
-          Не знайшли своє видання?{' '}
-          <button type="button" className="button--ghost" onClick={startNew}>
-            Завести новий твір
-          </button>
-        </p>
       )}
     </>
   )

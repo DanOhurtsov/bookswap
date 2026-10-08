@@ -5,6 +5,7 @@ import { BatchedBookLookupProvider } from './batched-book-lookup-provider'
 import { BOOK_LOOKUP_PROVIDER } from './book-lookup-provider'
 import { FallbackBookLookupProvider } from './fallback-book-lookup-provider'
 import { GoogleBooksLookupProvider } from './google-books-lookup-provider'
+import { EXTERNAL_VOLUME_PROVIDER, GoogleBooksVolumeProvider } from './google-books-volume-provider'
 import { IsbnDbLookupProvider } from './isbndb-lookup-provider'
 import { LookupController } from './lookup.controller'
 import { LookupService } from './lookup.service'
@@ -25,15 +26,18 @@ import { OpenLibraryLookupProvider } from './open-library-lookup-provider'
     LookupService,
     OpenLibraryLookupProvider,
     GoogleBooksLookupProvider,
+    GoogleBooksVolumeProvider,
     IsbnDbLookupProvider,
     FallbackBookLookupProvider,
     BatchedBookLookupProvider,
     { provide: BOOK_LOOKUP_PROVIDER, useExisting: FallbackBookLookupProvider },
+    // Швидке додавання зовнішнього видання: том Google Books за id. Токен, щоб тести підміняли його фейком.
+    { provide: EXTERNAL_VOLUME_PROVIDER, useExisting: GoogleBooksVolumeProvider },
     // Stage 8f-2, R7: a second token, not a second implementation of the first.
     // Batch resolution composes the providers differently (see
     // `BatchedBookLookupProvider`), and tests fake it the same way — by token.
     { provide: BATCH_BOOK_LOOKUP_PROVIDER, useExisting: BatchedBookLookupProvider },
   ],
-  exports: [LookupService],
+  exports: [LookupService, EXTERNAL_VOLUME_PROVIDER],
 })
 export class LookupModule {}

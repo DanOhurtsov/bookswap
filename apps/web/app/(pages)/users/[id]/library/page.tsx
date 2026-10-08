@@ -219,6 +219,13 @@ function CopyAction({
             <Link href={loanHref}>позичанні</Link>.
           </span>
         )
+      case 'PENDING_CONFIRMATION':
+        return (
+          <span className="book__meta">
+            Власник записав, що передав вам цю книжку. Підтвердьте отримання або відхиліть запис у{' '}
+            <Link href={loanHref}>позиченні</Link>.
+          </span>
+        )
       case 'HANDED_OVER':
         return (
           <span className="book__meta">

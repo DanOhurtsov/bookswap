@@ -17,13 +17,18 @@ import { AnalyticsService } from '../analytics/analytics.service'
 import { generateToken, hashToken } from '../auth/tokens'
 import { ApiException } from '../common/api.exception'
 import { isUniqueViolation } from '../common/prisma-errors'
+import { DevEmailSender } from '../email/dev-email-sender'
 import { EMAIL_SENDER, type EmailSender } from '../email/email-sender'
 import { FriendsService } from '../friends/friends.service'
 import type { InvitationModel, UserModel } from '../generated/prisma/models'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUBLIC_USER_FIELDS, toPublicUser } from '../users/user.mapper'
 import { InviteEmailHasher } from './invite-email-hasher'
-import { INVITATION_TTL_MS, invitationStatusOf } from './invitation.rules'
+import {
+  EMAIL_RECIPIENT_LIMIT_WINDOW_MS,
+  INVITATION_TTL_MS,
+  invitationStatusOf,
+} from './invitation.rules'
 
 /** D4: не більше 10 листів на користувача за добу. */
 export const EMAIL_INVITES_PER_USER_PER_DAY = 10
@@ -51,6 +56,7 @@ export class InvitationsService {
     private readonly config: ConfigService,
     private readonly emailHasher: InviteEmailHasher,
     @Inject(EMAIL_SENDER) private readonly email: EmailSender,
+    private readonly devEmail: DevEmailSender,
   ) {}
 
   async create(
@@ -236,7 +242,33 @@ export class InvitationsService {
     return { invitation: toInvitation({ ...row, _count: { acceptances: 0 } }, new Date()), token }
   }
 
-  private async createEmail(inviter: UserModel, email: string): Promise<CreateInvitationResponse> {
+  private createEmail(inviter: UserModel, email: string): Promise<CreateInvitationResponse> {
+    return this.createEmailWith(inviter, email, this.email, false)
+  }
+
+  /**
+   * Stage 10 (10g, D2): гостьове запрошення. Той самий `Invitation`/ліміти/аналітика, що
+   * й `createEmail`, з двома навмисними відмінностями:
+   *
+   * 1. Відправка завжди йде через `this.devEmail` — `DevEmailSender`, інжектований
+   *    напряму за класом, **не** через `EMAIL_SENDER`-токен (`this.email`). Це не стиль:
+   *    токен резолвиться `EmailModule`-фабрикою за `EMAIL_PROVIDER`, тож якби гостьовий
+   *    шлях брав `this.email`, помилкова конфігурація (`EMAIL_PROVIDER=resend`) реально
+   *    дзвонила б зовнішньому провайдеру. Пряма ін'єкція класу обходить цю фабрику
+   *    цілком — жодне значення конфігурації її не змінить.
+   * 2. `redactRecipient: true` — сирий email не лишається в dev-outbox і не потрапляє в
+   *    лог (Q4) навіть у самому транспорті, що й так нікуди не відправляє.
+   */
+  createGuestEmail(inviter: UserModel, email: string): Promise<CreateInvitationResponse> {
+    return this.createEmailWith(inviter, email, this.devEmail, true)
+  }
+
+  private async createEmailWith(
+    inviter: UserModel,
+    email: string,
+    sender: EmailSender,
+    redactRecipient: boolean,
+  ): Promise<CreateInvitationResponse> {
     if (!inviter.emailVerified) {
       throw new ApiException(
         API_ERROR_CODES.INVITE_EMAIL_UNVERIFIED,
@@ -265,7 +297,7 @@ export class InvitationsService {
       const perRecipient = await tx.invitation.count({
         where: {
           recipientEmailHash,
-          createdAt: { gt: new Date(now.getTime() - 7 * DAY_MS) },
+          createdAt: { gt: new Date(now.getTime() - EMAIL_RECIPIENT_LIMIT_WINDOW_MS) },
         },
       })
 
@@ -296,7 +328,7 @@ export class InvitationsService {
     // Синхронно й без черги (D5): збій провайдера — відповідь 502, а токен, який
     // ніхто не отримає, одразу гаситься, щоб не висіти чинним.
     try {
-      await this.email.send({
+      await sender.send({
         to: email,
         subject: `${headerSafe(inviter.displayName)} запрошує вас до BookSwap`,
         body:
@@ -306,6 +338,7 @@ export class InvitationsService {
           `Посилання дійсне 14 днів і працює один раз; ним може скористатися той, ` +
           `хто його має. Якщо ви не знаєте цієї людини, просто проігноруйте лист.`,
         idempotencyKey: `invite:${row.id}`,
+        redactRecipient,
       })
     } catch (error) {
       await this.prisma.invitation.update({

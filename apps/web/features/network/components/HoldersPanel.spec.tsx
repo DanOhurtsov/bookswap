@@ -36,12 +36,14 @@ const response: WorkHoldersResponse = {
   groups: [
     {
       translationId: null,
+      textKind: 'ORIGINAL',
       language: 'en',
       translator: null,
       owners: [{ owner: friend, relation: 'FRIEND', availableCopies: 1, copies: [copyOf('c-1')] }],
     },
     {
       translationId: 't-1',
+      textKind: 'TRANSLATION',
       language: 'uk',
       translator: 'Ірина',
       owners: [
@@ -83,6 +85,31 @@ describe('HoldersPanel', () => {
       '/works/w-1/holders',
       expect.objectContaining({ schema: expect.anything() }),
     )
+  })
+
+  it('невідомий текст — окрема група, а не «оригінал»; мова може бути невідомою', async () => {
+    apiRequestWithRedirect.mockResolvedValue({
+      data: {
+        workId: 'w-1',
+        groups: [
+          { ...response.groups[0], translationId: null },
+          {
+            translationId: null,
+            textKind: 'UNKNOWN',
+            language: null,
+            translator: null,
+            owners: response.groups[0]?.owners ?? [],
+          },
+        ],
+      },
+      redirected: false,
+    })
+    render(<HoldersPanel workId="w-1" />)
+
+    expect(await screen.findByRole('heading', { name: 'Оригінал (en)' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Оригінал чи переклад — невідомо' }),
+    ).toBeInTheDocument()
   })
 
   it('empty state points to inviting friends', async () => {

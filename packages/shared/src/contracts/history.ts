@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { conditionSchema, copyStatusSchema } from '../domain/copy'
-import { loanStatusSchema } from '../domain/loan'
+import { guestLoanEvidenceSchema, loanOriginSchema, loanStatusSchema } from '../domain/loan'
 import { editionSchema, workAuthorSchema, workSchema } from './catalog'
 import { publicUserSchema } from './user'
 
@@ -28,7 +28,23 @@ const historyFactsSchema = z.object({
   status: loanStatusSchema,
   /** §5.2: похідне від `HANDED_OVER` і `dueAt`, а не окремий статус. */
   isOverdue: z.boolean(),
-  requestedAt: z.iso.datetime(),
+  /**
+   * Stage 10 (10b): звідки взялася позика. Це не приватне поле — воно лише каже клієнтові, чи був
+   * запит: `REQUESTED` — звичайний request-flow, інакше позику записав власник.
+   */
+  origin: loanOriginSchema,
+  /**
+   * Stage 10 (10i.1): джерело доказу гостьової передачі, виведене з рядка підтвердження — «зі слів
+   * власника» / «очікується відповідь» / «підтверджено гостем» / «гість заперечує». `null` для
+   * позик не-гостьового походження. Лише факт про джерело, без alias/нікнейма/email.
+   */
+  guestEvidence: guestLoanEvidenceSchema.nullable(),
+  /**
+   * Stage 10 (T2): `null` для записаних власником позик — запиту не було, і дата не вигадується.
+   * Але БД має дефолт `now()`, тож ненульове значення при `origin ≠ REQUESTED` не означає запиту:
+   * джерелом істини є `origin`, а не `requestedAt`.
+   */
+  requestedAt: z.iso.datetime().nullable(),
   respondedAt: z.iso.datetime().nullable(),
   handedAt: z.iso.datetime().nullable(),
   returnedAt: z.iso.datetime().nullable(),
@@ -116,11 +132,14 @@ export type WorkHistoryResponse = z.infer<typeof workHistoryResponseSchema>
 /**
  * §8: `GET /me/history` — «що я брав і що в мене брали».
  *
- * Обидва списки завжди іменовані: viewer — сторона кожного з цих лоанів, а не
- * стороння людина, тож §6.6 сюди не застосовується.
+ * `borrowed` завжди іменований: viewer сам бере участь як зареєстрований позичальник, а гість
+ * ніколи не може бути «я». `lent` (Stage 10, 10f.3) може містити й анонімний гостьовий факт
+ * (`names: false`, без alias/contactId/loanId) — саме тому тут `historyEntrySchema` (union), а не
+ * `namedHistoryEntrySchema`: власник бачить, що комусь передавав книжку, але не хто саме — alias
+ * віддається лише через окремий owner-only `GET /loans/guest[/:id]` (D4, P1/P2).
  */
 export const myHistoryEntrySchema = z.object({
-  entry: namedHistoryEntrySchema,
+  entry: historyEntrySchema,
   copy: historyCopySchema,
 })
 

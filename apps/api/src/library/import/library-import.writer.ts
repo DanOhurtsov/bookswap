@@ -44,7 +44,8 @@ function newId(): string {
 
 interface LockedWork {
   id: string
-  origLang: string
+  /** `null` — мова оригіналу твору невідома (зовнішній чи ручний запис без неї). */
+  origLang: string | null
   mergedIntoId: string | null
 }
 
@@ -273,6 +274,9 @@ export class LibraryImportWriter {
       pageCount: number | null
       coverUrl: string | null
       format: LibraryImportResolvedCatalog['edition']['format']
+      /** Явно, а не «за відсутністю перекладу»: що відомо про текст цього видання (див. `edition-language.ts`). */
+      textKind: 'ORIGINAL' | 'TRANSLATION'
+      lang: string
       createdById: string
     }[] = []
 
@@ -302,6 +306,9 @@ export class LibraryImportWriter {
         workId,
         translationId,
         ...chain.catalog.edition,
+        // Імпорт завжди знає мову видання: мова перекладу, а без нього — мова оригіналу з файлу.
+        textKind: chain.catalog.translation === null ? 'ORIGINAL' : 'TRANSLATION',
+        lang: chain.catalog.translation?.lang ?? chain.catalog.work.origLang,
         createdById: ownerId,
       })
       editionByIsbn.set(chain.isbn13, { editionId })
@@ -339,7 +346,13 @@ function chainFault(
   // resolves to an edition in the original language. Attaching that to a work
   // written in a different language would quietly assert something the file
   // never said — and would be invisible afterwards.
-  return work.origLang === chain.catalog.work.origLang ? undefined : 'WORK_LANG_MISMATCH'
+  //
+  // A work whose original language is UNKNOWN (`null`) cannot disagree with the
+  // file: the edition simply keeps the language the file gave it, and the work
+  // is left as it was (docs/plan/fast-book-add.md, §1).
+  return work.origLang === null || work.origLang === chain.catalog.work.origLang
+    ? undefined
+    : 'WORK_LANG_MISMATCH'
 }
 
 /** Same conversion as `LibraryService.addCopy`: a date-only cell is midnight UTC. */

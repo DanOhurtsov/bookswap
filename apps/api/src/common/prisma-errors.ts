@@ -113,3 +113,22 @@ export function isDeadlockOrSerializationFailure(error: unknown): boolean {
     (message.includes('deadlock detected') || message.includes('could not serialize access'))
   )
 }
+
+/**
+ * Порушення **конкретного** зовнішнього ключа (SQLSTATE 23503, Prisma `P2003`).
+ *
+ * Ім'я обмеження шукається в лапках у повідомленні драйвера — так само, як у
+ * `isUniqueViolationOn`; форма пінується `test/db/prisma-errors.db-spec.ts` на
+ * живому порушенні `Loan_copyId_fkey`.
+ */
+export function isForeignKeyViolationOn(error: unknown, constraint: string): boolean {
+  const isForeignKey =
+    (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2003') ||
+    driverCode(error) === '23503'
+
+  if (!isForeignKey) return false
+
+  if (declaredNames(error).includes(constraint)) return true
+
+  return driverMessage(error)?.includes(`"${constraint}"`) ?? false
+}

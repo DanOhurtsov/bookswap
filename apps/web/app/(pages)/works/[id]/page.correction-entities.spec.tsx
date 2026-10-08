@@ -26,6 +26,9 @@ import WorkPage from './page'
 
 // Holders have their own component tests; here the work's own fetch sequence is the subject.
 jest.mock('@/features/network/index.client', () => ({ HoldersPanel: () => null }))
+// The reading-status panel has its own specs (page.reading-status.spec.tsx); its GET would shift
+// the `mockImplementationOnce` order these tests rely on.
+jest.mock('@/features/reading-status/index.client', () => ({ ReadingStatusPanel: () => null }))
 
 jest.mock('@/app/lib/api', () => {
   const actual = jest.requireActual<typeof import('@/app/lib/api')>('@/app/lib/api')
@@ -86,6 +89,7 @@ function edition(publisher: string, revision = 1): Edition {
     id: 'edition-1',
     workId: 'work-1',
     translationId: 'translation-1',
+    textKind: 'TRANSLATION',
     publisher,
     year: null,
     isbn13: null,

@@ -1,8 +1,10 @@
 import {
+  byRequestedAt,
   toAnonymousEntry,
   toHistoryEntry,
   toNamedEntry,
   type HistoryLoanRow,
+  type NamedHistoryLoanRow,
 } from './history.mapper'
 
 /**
@@ -18,10 +20,12 @@ const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
 
 const NOW = new Date('2026-06-15T12:00:00.000Z')
 
-function loanRow(overrides: Partial<HistoryLoanRow> = {}): HistoryLoanRow {
+function loanRow(overrides: Partial<NamedHistoryLoanRow> = {}): NamedHistoryLoanRow {
   return {
     id: 'loan-1',
     status: 'RETURNED',
+    origin: 'REQUESTED',
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
     requestedAt: new Date('2026-06-01T10:00:00.000Z'),
     respondedAt: new Date('2026-06-02T10:00:00.000Z'),
     handedAt: new Date('2026-06-03T10:00:00.000Z'),
@@ -29,6 +33,7 @@ function loanRow(overrides: Partial<HistoryLoanRow> = {}): HistoryLoanRow {
     dueAt: new Date('2026-06-12T23:59:59.999Z'),
     owner: MARTA,
     borrower: OLES,
+    guestConfirmation: null,
     ...overrides,
   }
 }
@@ -128,5 +133,79 @@ describe('toHistoryEntry', () => {
     expect(anonymous.status).toBe(named.status)
     expect(anonymous.requestedAt).toBe(named.requestedAt)
     expect(anonymous.dueAt).toBe(named.dueAt)
+  })
+})
+
+/**
+ * Stage 10 (T1, D4): гостьова позика не має зареєстрованого позичальника. До кроку 10f
+ * гостя не показує ніхто — навіть власник, — тож і `showNames = true` дає анонімний запис.
+ */
+describe('гостьова позика без зареєстрованого позичальника (Stage 10)', () => {
+  const guestLoan: HistoryLoanRow = { ...loanRow(), borrower: null }
+
+  it('showNames = true все одно дає анонімну проєкцію без ключів особи', () => {
+    const entry = toHistoryEntry(guestLoan, true, NOW)
+
+    expect(entry.names).toBe(false)
+
+    for (const key of IDENTIFYING_KEYS) {
+      expect(entry).not.toHaveProperty(key)
+    }
+  })
+
+  it('зареєстрований позичальник і showNames = true — як і раніше іменована', () => {
+    expect(toHistoryEntry(loanRow(), true, NOW).names).toBe(true)
+  })
+})
+
+describe('записана власником позика без requestedAt (Stage 10, T2)', () => {
+  it('requestedAt = null не вигадується і не ламає проєкцію', () => {
+    const entry = toHistoryEntry(loanRow({ requestedAt: null }), false, NOW)
+
+    expect(entry.requestedAt).toBeNull()
+  })
+
+  it('byRequestedAt падає назад на createdAt, коли запиту не було', () => {
+    const early = loanRow({
+      id: 'a',
+      requestedAt: null,
+      createdAt: new Date('2026-05-01T00:00:00Z'),
+    })
+    const late = loanRow({ id: 'b', requestedAt: new Date('2026-06-01T00:00:00Z') })
+
+    expect(byRequestedAt(early, late)).toBeLessThan(0)
+  })
+})
+
+describe('guestEvidence (10i.1): джерело доказу виводиться з рядка підтвердження', () => {
+  const guestRow = (
+    status: 'OPEN' | 'DENIED' | 'RECEIVED' | 'CANCELLED' | 'OWNER_RECORDED' | null,
+  ) =>
+    ({
+      ...loanRow({ origin: 'RECORDED_GUEST' }),
+      borrower: null,
+      guestConfirmation: status === null ? null : { status },
+    }) satisfies HistoryLoanRow
+
+  it('не-гостьова позика → null', () => {
+    expect(toAnonymousEntry(loanRow(), NOW).guestEvidence).toBeNull()
+    expect(toAnonymousEntry(loanRow({ origin: 'RECORDED_EXISTING' }), NOW).guestEvidence).toBeNull()
+  })
+
+  it.each([
+    [null, 'OWNER_STATEMENT'],
+    ['OWNER_RECORDED', 'OWNER_STATEMENT'],
+    ['OPEN', 'AWAITING_GUEST'],
+    ['DENIED', 'GUEST_DENIED'],
+    ['RECEIVED', 'GUEST_CONFIRMED'],
+    ['CANCELLED', null],
+  ] as const)('гостьова позика, підтвердження %s → %s', (status, evidence) => {
+    expect(toAnonymousEntry(guestRow(status), NOW).guestEvidence).toBe(evidence)
+  })
+
+  it('анонімний запис і далі без ідентифікуючих ключів', () => {
+    const raw = JSON.stringify(toAnonymousEntry(guestRow('RECEIVED'), NOW))
+
+    for (const key of IDENTIFYING_KEYS) expect(raw).not.toContain(`"${key}"`)
   })
 })

@@ -75,6 +75,7 @@ describe('унікальні обмеження §4', () => {
     const edition = {
       workId: graph.workId,
       createdById: graph.ownerId,
+      textKind: 'UNKNOWN' as const,
       isbn13: '9786171262737',
     }
 
@@ -83,8 +84,12 @@ describe('унікальні обмеження §4', () => {
 
     // NULL в унікальному індексі PostgreSQL не конфліктує сам із собою — і це саме
     // те, що потрібно: більшість старих видань ISBN не має.
-    await prisma.edition.create({ data: { workId: graph.workId, createdById: graph.ownerId } })
-    await prisma.edition.create({ data: { workId: graph.workId, createdById: graph.ownerId } })
+    await prisma.edition.create({
+      data: { workId: graph.workId, createdById: graph.ownerId, textKind: 'UNKNOWN' },
+    })
+    await prisma.edition.create({
+      data: { workId: graph.workId, createdById: graph.ownerId, textKind: 'UNKNOWN' },
+    })
 
     expect(await prisma.edition.count({ where: { isbn13: null } })).toBe(3)
   })

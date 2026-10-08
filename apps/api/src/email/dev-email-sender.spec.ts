@@ -152,6 +152,133 @@ describe('DevEmailSender поза production', () => {
 
     expect(sender.outbox).toHaveLength(0)
   })
+
+  describe('sealed (Stage 10, 10i.2, D2)', () => {
+    const secret = {
+      ...message,
+      to: 'gost@guest.invalid',
+      subject: 'BookSwap: код',
+      body: 'Код підтвердження: 123456',
+    }
+
+    it('не друкує ні адресу, ні тіло (токен/код) у лог і не кладе лист у звичайний outbox', async () => {
+      const logged: string[] = []
+
+      jest.spyOn(sender['logger'], 'log').mockImplementation((value: unknown) => {
+        logged.push(String(value))
+      })
+
+      await sender.send({ ...secret, sealed: true })
+
+      const output = logged.join('\n')
+
+      expect(output).not.toContain('gost@guest.invalid')
+      expect(output).not.toContain('123456')
+      expect(output).toContain('[приховано]')
+      expect(sender.outbox).toHaveLength(0)
+      expect(sender.lastTo(secret.to)).toBeUndefined()
+    })
+
+    it('sealed важливіший за redactRecipient: навіть разом із ним тіло в лог не потрапляє', async () => {
+      const logged: string[] = []
+
+      jest.spyOn(sender['logger'], 'log').mockImplementation((value: unknown) => {
+        logged.push(String(value))
+      })
+
+      await sender.send({ ...secret, sealed: true, redactRecipient: true })
+
+      expect(logged.join('\n')).not.toContain('123456')
+      expect(sender.sealedTo(secret.to)?.body).toContain('123456')
+    })
+
+    it('віддає лист лише через sealedTo (без урахування регістру й пробілів), не лишаючи адресу відкритою', async () => {
+      await sender.send({ ...secret, sealed: true })
+
+      expect(sender.sealedTo('  GOST@guest.invalid ')).toEqual({
+        subject: secret.subject,
+        body: secret.body,
+      })
+      expect(sender.sealedTo('inshyj@guest.invalid')).toBeUndefined()
+      expect(JSON.stringify(sender['sealed'])).not.toContain('gost@guest.invalid')
+    })
+
+    it('sealedTo віддає копію, останній лист для адреси перемагає, clear() спорожнює', async () => {
+      await sender.send({ ...secret, sealed: true })
+      await sender.send({ ...secret, body: 'Код підтвердження: 654321', sealed: true })
+
+      const found = sender.sealedTo(secret.to)
+
+      expect(found?.body).toContain('654321')
+
+      if (found !== undefined) found.body = 'зіпсовано'
+
+      expect(sender.sealedTo(secret.to)?.body).toContain('654321')
+
+      sender.clear()
+
+      expect(sender.sealedTo(secret.to)).toBeUndefined()
+    })
+
+    it('сховище обмежене', async () => {
+      for (let i = 0; i < 60; i += 1) {
+        await sender.send({ ...secret, to: `g${String(i)}@guest.invalid`, sealed: true })
+      }
+
+      expect(sender.sealedTo('g0@guest.invalid')).toBeUndefined()
+      expect(sender.sealedTo('g59@guest.invalid')).toBeDefined()
+    })
+
+    it('у production відмовляє й нічого не лишає', async () => {
+      let nodeEnv = 'development'
+      const prod = new DevEmailSender({ get: () => nodeEnv } as unknown as ConfigService)
+
+      nodeEnv = 'production'
+
+      await expect(prod.send({ ...secret, sealed: true })).rejects.toThrow(
+        DevEmailSenderInProductionError,
+      )
+      expect(prod.sealedTo(secret.to)).toBeUndefined()
+    })
+  })
+
+  describe('redactRecipient (Stage 10, 10g, Q4)', () => {
+    it('не потрапляє в outbox, не лишає адресу в лозі, але лишає тіло з посиланням', async () => {
+      const logged: string[] = []
+
+      jest.spyOn(sender['logger'], 'log').mockImplementation((value: unknown) => {
+        logged.push(String(value))
+      })
+
+      await sender.send({ ...message, redactRecipient: true })
+
+      expect(sender.outbox).toHaveLength(0)
+      expect(sender.lastTo(message.to)).toBeUndefined()
+      expect(logged.join('\n')).not.toContain(message.to)
+      // Без API-поля з токеном лог лишається єдиним способом пройти флоу вручну (§0.8).
+      expect(logged.join('\n')).toContain(message.body)
+      expect(logged.join('\n')).toContain('[приховано]')
+    })
+
+    it('не впливає на звичайні листи до й після себе', async () => {
+      await sender.send(message)
+      await sender.send({ ...message, redactRecipient: true })
+      await sender.send({ ...message, subject: 'Другий звичайний' })
+
+      expect(sender.outbox).toHaveLength(2)
+      expect(sender.outbox.map((item) => item.subject)).toEqual([
+        message.subject,
+        'Другий звичайний',
+      ])
+    })
+
+    it('redactRecipient=false поводиться так само, як його відсутність', async () => {
+      await sender.send({ ...message, redactRecipient: false })
+
+      expect(sender.outbox).toHaveLength(1)
+      expect(sender.lastTo(message.to)).toBeDefined()
+    })
+  })
 })
 
 /** Знімає readonly лише в межах тесту, який навмисно намагається зіпсувати копію. */

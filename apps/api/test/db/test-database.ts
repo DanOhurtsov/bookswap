@@ -100,6 +100,7 @@ const TABLES = [
   'Review',
   'TranslationRating',
   'WishlistItem',
+  'WorkReadingStatus',
   'NotificationDelivery',
   'NotificationPreference',
   'Notification',

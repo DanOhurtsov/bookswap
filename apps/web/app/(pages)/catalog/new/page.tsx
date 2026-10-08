@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { AddBookWizard } from '@/features/catalog/add-book/index.client'
+import { AddBookScreen } from '@/features/catalog/add-book/index.client'
 
 export default function NewBookPage() {
   return (
@@ -11,7 +11,7 @@ export default function NewBookPage() {
         </main>
       }
     >
-      <AddBookWizard />
+      <AddBookScreen />
     </Suspense>
   )
 }

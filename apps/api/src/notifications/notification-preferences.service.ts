@@ -4,6 +4,7 @@ import {
   NOTIFICATION_TYPE,
   PREFERENCE_CHANNEL,
   defaultPreferenceEnabled,
+  isGuestResponseNotificationType,
   type Channel,
   type NotificationChannels,
   type NotificationPreference,
@@ -90,6 +91,10 @@ export class NotificationPreferencesService {
     const channels: Channel[] = []
 
     for (const channel of PREFERENCE_CHANNEL) {
+      // Stage 10 (10i.3): відповіді гостя не мають Telegram за жодним налаштуванням — навіть якщо
+      // клітинка колись потрапила в базу явною (`update` таке вже відхиляє).
+      if (channel === 'TELEGRAM' && isGuestResponseNotificationType(type)) continue
+
       const explicit = stored.find((row) => row.channel === channel)
       const enabled =
         explicit?.enabled ?? defaultPreferenceEnabled(type, channel, { telegramLinked })
@@ -135,6 +140,21 @@ export class NotificationPreferencesService {
     request: UpdateNotificationPreferencesRequest,
   ): Promise<NotificationPreferencesResponse> {
     const recipient = await this.recipient(userId)
+
+    // Stage 10 (10i.3): Telegram для відповідей гостя не існує — краще чесна відмова, ніж збережений
+    // перемикач, який нічого не робить. EMAIL — звичайна клітинка.
+    if (
+      request.preferences.some(
+        (row) =>
+          row.enabled && row.channel === 'TELEGRAM' && isGuestResponseNotificationType(row.type),
+      )
+    ) {
+      throw new ApiException(
+        API_ERROR_CODES.VALIDATION_ERROR,
+        'Сповіщення про відповіді гостя не надсилаються в Telegram: вмикати його для них не можна',
+        HttpStatus.BAD_REQUEST,
+      )
+    }
 
     if (
       request.preferences.some((row) => row.channel === 'TELEGRAM' && row.enabled) &&

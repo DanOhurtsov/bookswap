@@ -63,6 +63,8 @@ describe('validateEnv', () => {
       LIBRARY_IMPORT_PREVIEW_RATE_LIMIT: 5,
       LIBRARY_IMPORT_PATCH_RATE_LIMIT: 120,
       LIBRARY_IMPORT_RATE_WINDOW_MS: 60000,
+      GUEST_LOANS_ENABLED: false,
+      GUEST_LOANS_SYNTHETIC_ONLY: false,
     })
   })
 
@@ -191,4 +193,84 @@ describe('Telegram (§7.4)', () => {
       /TELEGRAM_BOT_USERNAME/,
     )
   })
+})
+
+describe('гостьові позики — запобіжник D2 (Stage 10 §7.3)', () => {
+  const prod = {
+    ...required,
+    NODE_ENV: 'production',
+    EMAIL_PROVIDER: 'resend',
+    RESEND_API_KEY: 're_x',
+    EMAIL_FROM: 'BookSwap <noreply@example.com>',
+    INVITE_EMAIL_HMAC_SECRET: 'x'.repeat(32),
+  }
+
+  it('вимкнено за замовчуванням, у будь-якому NODE_ENV', () => {
+    for (const NODE_ENV of ['development', 'test', 'production']) {
+      const env = NODE_ENV === 'production' ? prod : { ...required, NODE_ENV }
+
+      expect(validateEnv(env).GUEST_LOANS_ENABLED).toBe(false)
+    }
+  })
+
+  it('явне false проходить, включно з production', () => {
+    expect(validateEnv({ ...required, GUEST_LOANS_ENABLED: 'false' }).GUEST_LOANS_ENABLED).toBe(
+      false,
+    )
+    expect(validateEnv({ ...prod, GUEST_LOANS_ENABLED: 'false' }).GUEST_LOANS_ENABLED).toBe(false)
+  })
+
+  it('production забороняє запуск з увімкненою функцією, навіть із synthetic-only', () => {
+    expect(() => validateEnv({ ...prod, GUEST_LOANS_ENABLED: 'true' })).toThrow(
+      /GUEST_LOANS_ENABLED.*production/,
+    )
+    expect(() =>
+      validateEnv({ ...prod, GUEST_LOANS_ENABLED: 'true', GUEST_LOANS_SYNTHETIC_ONLY: 'true' }),
+    ).toThrow(/GUEST_LOANS_ENABLED.*production/)
+  })
+
+  it.each(['development', 'test'])(
+    '%s: увімкнення без synthetic-only (відсутній або false) відхиляється',
+    (NODE_ENV) => {
+      const on = { ...required, NODE_ENV, GUEST_LOANS_ENABLED: 'true' }
+
+      expect(() => validateEnv(on)).toThrow(/GUEST_LOANS_SYNTHETIC_ONLY/)
+      expect(() => validateEnv({ ...on, GUEST_LOANS_SYNTHETIC_ONLY: 'false' })).toThrow(
+        /GUEST_LOANS_SYNTHETIC_ONLY/,
+      )
+    },
+  )
+
+  it.each(['development', 'test'])(
+    '%s: увімкнення із synthetic-only=true проходить',
+    (NODE_ENV) => {
+      const result = validateEnv({
+        ...required,
+        NODE_ENV,
+        GUEST_LOANS_ENABLED: 'true',
+        GUEST_LOANS_SYNTHETIC_ONLY: 'true',
+      })
+
+      expect(result.GUEST_LOANS_ENABLED).toBe(true)
+      expect(result.GUEST_LOANS_SYNTHETIC_ONLY).toBe(true)
+    },
+  )
+
+  it('synthetic-only без увімкненої функції нічого не вмикає', () => {
+    const result = validateEnv({ ...required, GUEST_LOANS_SYNTHETIC_ONLY: 'true' })
+
+    expect(result.GUEST_LOANS_ENABLED).toBe(false)
+  })
+
+  it.each(['1', '0', 'yes', 'TRUE', 'True', '', ' true', 'on'])(
+    'некоректне значення %j не приймається',
+    (value) => {
+      expect(() => validateEnv({ ...required, GUEST_LOANS_ENABLED: value })).toThrow(
+        /GUEST_LOANS_ENABLED/,
+      )
+      expect(() => validateEnv({ ...required, GUEST_LOANS_SYNTHETIC_ONLY: value })).toThrow(
+        /GUEST_LOANS_SYNTHETIC_ONLY/,
+      )
+    },
+  )
 })

@@ -79,7 +79,7 @@ export class CatalogDiscoveryService {
           authors: toWorkAuthors(work.authors),
           editions: work.editions
             .filter((edition) => editionIds.has(edition.id))
-            .map((edition) => toEdition(edition, work))
+            .map((edition) => toEdition(edition))
             .sort(byEditionOrder),
           matchedOn: row.matchedOn,
           locations: groupByOwner(inventory),

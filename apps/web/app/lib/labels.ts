@@ -4,9 +4,13 @@ import type {
   Condition,
   CopyStatus,
   EditionFormat,
+  GuestLoanAction,
+  GuestLoanConfirmationStatus,
+  GuestLoanEvidence,
   LoanAction,
   LoanStatus,
   NotificationType,
+  ReadingStatus,
   Visibility,
 } from '@bookswap/shared'
 
@@ -54,7 +58,20 @@ export const LOAN_STATUS_LABELS: Readonly<Record<LoanStatus, string>> = {
   HANDED_OVER: 'На руках',
   RETURNED: 'Повернено',
   LOST: 'Втрачено',
+  // Stage 10 (10e): запис власника, що чекає відповіді позичальника.
+  PENDING_CONFIRMATION: 'Очікує підтвердження',
+  DECLINED: 'Відхилено позичальником',
 }
+
+/** Stage 10 (10j, R-1): особистий статус читання — думка користувача, а не факт позики. */
+export const READING_STATUS_LABELS: Readonly<Record<ReadingStatus, string>> = {
+  NOT_READ: 'Не читав',
+  READING: 'Читаю',
+  READ: 'Прочитано',
+}
+
+/** Stage 10 (10j, R-5): тег за підтвердженою фактичною передачею твору саме цьому користувачу. */
+export const WAS_BORROWED_LABEL = 'Була позичена'
 
 /** Підписи кнопок §8. Дієслово від першої особи того, хто тисне. */
 export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {
@@ -64,6 +81,24 @@ export const LOAN_ACTION_LABELS: Readonly<Record<LoanAction, string>> = {
   hand_over: 'Я отримав книжку',
   return: 'Книжку повернуто',
   mark_lost: 'Позначити втраченою',
+  recover: 'Знайшлася',
+  confirm_record: 'Підтверджую: отримав книжку',
+  decline_record: 'Відхилити запис',
+  withdraw_record: 'Відкликати запис',
+  amend_record: 'Зберегти нові дати',
+}
+
+/**
+ * Stage 10 (10f.3): підписи кнопок для гостьової позики — окремий, вужчий словник дій
+ * (`GUEST_LOAN_ACTIONS`), бо гість не має акаунта: немає ні «погодити», ні «отримав».
+ * «Закрити втрату» — дієслово від першої особи власника, як і решта, і навмисно не звучить
+ * як «знайшлася» — це різні факти (§6.11.1 execution plan).
+ */
+export const GUEST_LOAN_ACTION_LABELS: Readonly<Record<GuestLoanAction, string>> = {
+  return: 'Повернуто',
+  mark_lost: 'Втрачено',
+  recover: 'Знайшлася',
+  close_loss: 'Закрити втрату',
 }
 
 export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>> = {
@@ -77,6 +112,38 @@ export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>
   LOAN_OVERDUE: 'Термін минув',
   FRIEND_REQUESTED: 'Новий запит у друзі',
   FRIEND_ACCEPTED: 'Запит у друзі прийнято',
+  LOAN_RECORD_PROPOSED: 'Вам записали передачу книжки',
+  LOAN_RECORD_AMENDED: 'Запис про передачу виправлено',
+  LOAN_RECORD_CONFIRMED: 'Отримання підтверджено',
+  LOAN_RECORD_DECLINED: 'Запис про передачу відхилено',
+  LOAN_RECORD_WITHDRAWN: 'Запис про передачу відкликано',
+  // Stage 10 (10i.3): відповіді гостя. IN_APP змістовно, EMAIL лише загальний лист; без нікнейма й email гостя.
+  GUEST_LOAN_RECEIVED: 'Гість підтвердив отримання книжки',
+  GUEST_LOAN_DENIED: 'Гість заперечує отримання книжки',
+}
+
+/**
+ * Stage 10 (10i.3): джерело гостьової передачі — окремо від статусу позики. Чотири формулювання рішення PO
+ * (§0.10): «зі слів власника» — ручний запис 10f.3 і «залишити зі слів власника»; «очікуємо відповідь гостя» —
+ * запит відкритий, отримання НЕ підтверджене; «підтверджено гостем» — відповідь через посилання після
+ * підтвердження контролю введеного гостем email (не доведена особа); «гість заперечує» — розбіжність.
+ */
+export const GUEST_EVIDENCE_LABELS: Readonly<Record<GuestLoanEvidence, string>> = {
+  OWNER_STATEMENT: 'зі слів власника',
+  AWAITING_GUEST: 'очікуємо відповідь гостя',
+  GUEST_CONFIRMED: 'підтверджено гостем',
+  GUEST_DENIED: 'гість заперечує',
+}
+
+/** Технічні стани запиту підтвердження (§0.13: назви — технічні, не продуктові правила). */
+export const GUEST_CONFIRMATION_STATUS_LABELS: Readonly<
+  Record<GuestLoanConfirmationStatus, string>
+> = {
+  OPEN: 'Очікує відповіді гостя',
+  DENIED: 'Гість заперечує отримання',
+  RECEIVED: 'Гість підтвердив отримання',
+  CANCELLED: 'Передачу скасовано',
+  OWNER_RECORDED: 'Залишено зі слів власника',
 }
 
 /**
@@ -131,5 +198,16 @@ export function formatDate(iso: string): string {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+  })
+}
+
+/** Дата й час для строку дії посилання: точність до хвилини, локаль явна. */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('uk-UA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }

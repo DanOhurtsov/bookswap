@@ -34,9 +34,9 @@ export class CreateLoanDto {
 }
 
 /**
- * §8: `PATCH /loans/:id { action, note?, dueAt? }`.
+ * §8: `PATCH /loans/:id { action, note?, dueAt?, effectiveAt? }`.
  *
- * Один ендпоінт із полем `action` замість шести маршрутів — так усі переходи
+ * Один ендпоінт із полем `action` замість окремих маршрутів — так усі переходи
  * проходять крізь одну точку, де живе валідація стейт-машини.
  *
  * Правило «`dueAt` лише разом із `approve`» тут не виражається: `class-validator`
@@ -46,7 +46,8 @@ export class CreateLoanDto {
  */
 export class UpdateLoanDto {
   @IsIn(LOAN_ACTIONS, {
-    message: 'Невідома дія: очікується approve, reject, cancel, hand_over, return або mark_lost',
+    message:
+      'Невідома дія: очікується approve, reject, cancel, hand_over, return, mark_lost, recover, confirm_record, decline_record, withdraw_record або amend_record',
   })
   action!: LoanAction
 
@@ -55,6 +56,38 @@ export class UpdateLoanDto {
   @IsString()
   @MaxLength(LOAN_LIMITS.noteMax)
   note?: string
+
+  @IsOptional()
+  @IsIsoDate()
+  dueAt?: string | null
+
+  /** Stage 10 (10d): фактична дата знахідки; лише з `recover`, не в майбутньому (перевіряє сервіс). */
+  @IsOptional()
+  @IsIsoDate()
+  effectiveAt?: string
+
+  /** Stage 10 (10e): нова фактична дата передачі; лише з `amend_record`, не в майбутньому (перевіряє сервіс). */
+  @IsOptional()
+  @IsIsoDate()
+  handedAt?: string
+}
+
+/** Stage 10 (10e, D6): `POST /loans/recorded { copyId, borrowerId, handedAt, dueAt? }`. */
+export class CreateRecordedLoanDto {
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(1, { message: 'Не вказано примірник' })
+  @MaxLength(LOAN_LIMITS.idMax)
+  copyId!: string
+
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(1, { message: 'Не вказано позичальника' })
+  @MaxLength(LOAN_LIMITS.idMax)
+  borrowerId!: string
+
+  @IsIsoDate()
+  handedAt!: string
 
   @IsOptional()
   @IsIsoDate()

@@ -88,7 +88,7 @@ describe('searchHref', () => {
     )
   })
 
-  it('переносить параметри майстра, окрім названих у drop', () => {
+  it('переносить параметри сторінки додавання, окрім названих у drop', () => {
     const current = new URLSearchParams('q=old&page=4&mode=scan&workId=w1&external=tok')
 
     expect(searchHref('/catalog/new', current, { q: 'new', page: 1, pageSize: 20 })).toBe(

@@ -65,7 +65,7 @@ export class NetworkActivationService {
       if (owner === null) return
 
       const copies = await this.prisma.copy.findMany({
-        where: { ownerId, status: 'AVAILABLE' },
+        where: { ownerId, status: 'AVAILABLE', archivedAt: null },
         distinct: ['visibility'],
         select: { visibility: true },
       })

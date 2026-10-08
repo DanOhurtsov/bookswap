@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import type { AuthorRole } from '../../generated/prisma/enums'
 import { PrismaService } from '../../prisma/prisma.service'
+import { applyEditionTextUpdates } from '../edition-language-cascade'
+import { planMergeLanguage } from '../edition-language'
 import { WORK_MERGE_ERROR_CODES, WorkMergeError } from './merge-errors'
 
 /** Скільки чого переїхало — це те, що CLI показує оператору. */
@@ -13,16 +15,20 @@ export interface MergeSummary {
   reviewsArchived: number
   wishlistItemsMoved: number
   wishlistDuplicatesRemoved: number
+  readingStatusesMoved: number
+  readingStatusDuplicatesRemoved: number
   authorLinksMoved: number
   authorLinksDuplicatesRemoved: number
   incomingMergesRepointed: number
+  /** Видання-оригінали, яким злиття заповнило невідому мову мовою оригіналу цілі. */
+  editionLanguagesSet: number
 }
 
 /**
  * §6.3, «мердж дублікатів», підетап 7g.
  *
- * Об'єднує два `Work`: переносить `Edition`, `Translation`, `Review` і
- * `WishlistItem` на канонічний запис і проставляє `mergedIntoId` на вихідному.
+ * Об'єднує два `Work`: переносить `Edition`, `Translation`, `Review`,
+ * `WishlistItem` і `WorkReadingStatus` на канонічний запис і проставляє `mergedIntoId` на вихідному.
  * Вихідний твір НЕ видаляється — інакше вмирають зовнішні посилання (§6.3), а
  * читання за старим id (підетап 7h) не мало б куди дивитися.
  *
@@ -50,11 +56,23 @@ export class MergeService {
       await this.lockWorks(tx, sourceWorkId, targetWorkId)
       await this.assertMergeable(tx, sourceWorkId, targetWorkId)
 
+      // ДО переносу: поки видання ще на вихідному творі, їхня мова виводиться з нього.
+      const editionLanguagesSet = await this.reconcileEditionLanguages(
+        tx,
+        sourceWorkId,
+        targetWorkId,
+      )
+
       // Конфлікти розв'язуються ДО переносу: інакше перенос рецензій нижче
       // вдариться в `one_active_review_per_work_user` і покладе транзакцію
       // замість того, щоб застосувати R5.
       const reviewsArchived = await this.archiveLosingReviews(tx, sourceWorkId, targetWorkId)
       const wishlistDuplicatesRemoved = await this.dropLosingWishlistItems(
+        tx,
+        sourceWorkId,
+        targetWorkId,
+      )
+      const readingStatusDuplicatesRemoved = await this.dropLosingReadingStatuses(
         tx,
         sourceWorkId,
         targetWorkId,
@@ -68,6 +86,7 @@ export class MergeService {
       const editions = await tx.edition.updateMany(onSource)
       const reviews = await moveReviews(tx, sourceWorkId, targetWorkId)
       const wishlistItems = await tx.wishlistItem.updateMany(onSource)
+      const readingStatuses = await moveReadingStatuses(tx, sourceWorkId, targetWorkId)
       const authorLinks = await this.consolidateWorkAuthors(tx, sourceWorkId, targetWorkId)
 
       // R4, глибина розв'язання рівно 1: усе, що вказувало на вихідний твір,
@@ -93,11 +112,66 @@ export class MergeService {
         reviewsArchived,
         wishlistItemsMoved: wishlistItems.count,
         wishlistDuplicatesRemoved,
+        readingStatusesMoved: readingStatuses,
+        readingStatusDuplicatesRemoved,
         authorLinksMoved: authorLinks.moved,
         authorLinksDuplicatesRemoved: authorLinks.duplicatesRemoved,
         incomingMergesRepointed: repointed.count,
+        editionLanguagesSet,
       }
     })
+  }
+
+  /**
+   * Мова видань-оригіналів при злитті (`planMergeLanguage`): мову видання злиття не змінює й не губить.
+   *
+   * - мова оригіналу цілі невідома — мова видання лишається як є (вона власна, а не виведена з твору);
+   * - мова оригіналу цілі відома, а в видання невідома — заповнюється мовою цілі;
+   * - збіг — без змін;
+   * - різні ВІДОМІ мови — злиття відхиляється повністю (`WORK_MERGE_LANGUAGE_CONFLICT`).
+   *
+   * Переклади й видання з невідомим типом тексту переносяться без змін. Мову оригіналу самого твору
+   * злиття не змінює ніколи. Кожна зміна — з аудитом (`actorId = null`: зробив оператор через CLI).
+   */
+  private async reconcileEditionLanguages(
+    tx: TransactionClient,
+    sourceWorkId: string,
+    targetWorkId: string,
+  ): Promise<number> {
+    const target = await tx.work.findUniqueOrThrow({
+      where: { id: targetWorkId },
+      select: { origLang: true },
+    })
+    const editions = await tx.edition.findMany({
+      where: { workId: sourceWorkId },
+      select: { id: true, textKind: true, lang: true },
+      orderBy: { id: 'asc' },
+    })
+    const updates: { id: string; lang: string | null }[] = []
+    const conflicts: string[] = []
+
+    for (const edition of editions) {
+      const plan = planMergeLanguage(
+        { id: edition.id, kind: edition.textKind, lang: edition.lang },
+        target.origLang,
+      )
+
+      if (plan.action === 'CONFLICT') conflicts.push(edition.id)
+      else if (plan.action === 'SET' && plan.lang !== edition.lang) {
+        updates.push({ id: edition.id, lang: plan.lang })
+      }
+    }
+
+    if (conflicts.length > 0) {
+      throw new WorkMergeError(
+        WORK_MERGE_ERROR_CODES.WORK_MERGE_LANGUAGE_CONFLICT,
+        `Видання вихідного твору мають відому мову, відмінну від мови оригіналу цільового твору (${target.origLang ?? 'невідома'}): ${conflicts.join(', ')}`,
+      )
+    }
+
+    await applyEditionTextUpdates(tx, updates, null)
+
+    return updates.length
   }
 
   /**
@@ -244,6 +318,35 @@ export class MergeService {
   }
 
   /**
+   * Stage 10 (10j, Q19): той самий користувач має статус читання на обох творах.
+   *
+   * Лишається статус із новішим `updatedAt` — **у тому числі явний `NOT_READ`**: свідоме скидання
+   * бере участь нарівні з `READING`/`READ`. За точної рівності виграє рядок цільового твору (`>`
+   * хибне — програє вихідна сторона; той самий вторинний критерій, що й у рецензій). Програшний рядок
+   * видаляється ДО переносу, інакше `UNIQUE (userId, workId)` завалить транзакцію.
+   */
+  private async dropLosingReadingStatuses(
+    tx: TransactionClient,
+    sourceWorkId: string,
+    targetWorkId: string,
+  ): Promise<number> {
+    const rows = await tx.workReadingStatus.findMany({
+      where: { workId: { in: [sourceWorkId, targetWorkId] } },
+      select: { id: true, userId: true, workId: true, updatedAt: true },
+    })
+
+    const losers = pairUpByUser(rows, sourceWorkId).map(({ source, target }) =>
+      source.updatedAt > target.updatedAt ? target.id : source.id,
+    )
+
+    if (losers.length === 0) return 0
+
+    const removed = await tx.workReadingStatus.deleteMany({ where: { id: { in: losers } } })
+
+    return removed.count
+  }
+
+  /**
    * TD-06 + Stage 8e-1 R10a: consolidates `WorkAuthor` links during a merge,
    * `position` included.
    *
@@ -320,7 +423,9 @@ type TransactionClient = Pick<
   | 'edition'
   | 'review'
   | 'wishlistItem'
+  | 'workReadingStatus'
   | 'workAuthor'
+  | 'catalogRevision'
   | '$queryRaw'
   | '$executeRaw'
 >
@@ -349,6 +454,21 @@ async function moveReviews(
   `
 }
 
+/**
+ * Перенос статусів читання — сирим SQL, а не `updateMany`, за тією ж причиною, що й `moveReviews`:
+ * перенесення не є зміною статусу користувачем і не має переставляти `updatedAt`, який вирішує Q19
+ * наступного злиття.
+ */
+async function moveReadingStatuses(
+  tx: TransactionClient,
+  sourceWorkId: string,
+  targetWorkId: string,
+): Promise<number> {
+  return tx.$executeRaw`
+    UPDATE "WorkReadingStatus" SET "workId" = ${targetWorkId} WHERE "workId" = ${sourceWorkId}
+  `
+}
+
 interface SidedRows<T> {
   source: T
   target: T
@@ -358,7 +478,7 @@ interface SidedRows<T> {
  * Рядки того самого користувача, що є на ОБОХ творах.
  *
  * Другої сторони немає — конфлікту немає, рядок просто переїде разом з усіма.
- * Спільна для рецензій і вішлиста, бо обидві таблиці конфліктують однаково: за
+ * Спільна для рецензій, вішлиста і статусів читання, бо всі таблиці конфліктують однаково: за
  * парою (користувач, твір).
  */
 function pairUpByUser<T extends { userId: string; workId: string }>(

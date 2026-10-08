@@ -3,9 +3,11 @@ import {
   DIGEST_NOTIFICATION_TYPE,
   FLOW_CRITICAL_NOTIFICATION_TYPE,
   IMMEDIATE_NOTIFICATION_TYPE,
+  GUEST_RESPONSE_NOTIFICATION_TYPE,
   NOTIFICATION_TYPE,
   defaultPreferenceEnabled,
   isDigestNotificationType,
+  isGuestResponseNotificationType,
 } from './notification'
 import type { NotificationType } from './notification'
 
@@ -59,14 +61,19 @@ describe('§7.6: дефолти матриці', () => {
     }
   })
 
-  it('після прив’язки «усе в TELEGRAM»', () => {
+  it('після прив’язки «усе в TELEGRAM» — крім відповідей гостя', () => {
     for (const type of NOTIFICATION_TYPE) {
-      expect(defaultPreferenceEnabled(type, 'TELEGRAM', { telegramLinked: true })).toBe(true)
+      expect(defaultPreferenceEnabled(type, 'TELEGRAM', { telegramLinked: true })).toBe(
+        !isGuestResponseNotificationType(type),
+      )
     }
   })
 
-  it('email за замовчуванням — лише критичне для флоу', () => {
-    const critical = new Set<string>(FLOW_CRITICAL_NOTIFICATION_TYPE)
+  it('email за замовчуванням — критичне для флоу та відповіді гостя (лист загальний)', () => {
+    const critical = new Set<string>([
+      ...FLOW_CRITICAL_NOTIFICATION_TYPE,
+      ...GUEST_RESPONSE_NOTIFICATION_TYPE,
+    ])
 
     for (const type of NOTIFICATION_TYPE) {
       expect(defaultPreferenceEnabled(type, 'EMAIL', { telegramLinked: false })).toBe(
@@ -104,5 +111,35 @@ describe('§7.6: дефолти матриці', () => {
         )
       }
     }
+  })
+})
+
+describe('Stage 10 (10i.3): відповіді гостя', () => {
+  it('це рівно RECEIVED і DENIED, і вони негайні, а не дайджестові', () => {
+    expect([...GUEST_RESPONSE_NOTIFICATION_TYPE].sort()).toEqual([
+      'GUEST_LOAN_DENIED',
+      'GUEST_LOAN_RECEIVED',
+    ])
+
+    for (const type of GUEST_RESPONSE_NOTIFICATION_TYPE) {
+      expect((IMMEDIATE_NOTIFICATION_TYPE as readonly string[]).includes(type)).toBe(true)
+      expect(isDigestNotificationType(type)).toBe(false)
+    }
+  })
+
+  it.each(GUEST_RESPONSE_NOTIFICATION_TYPE)(
+    '%s: IN_APP і EMAIL увімкнені за замовчуванням, TELEGRAM — ніколи, навіть з прив’язаним чатом',
+    (type) => {
+      for (const telegramLinked of [false, true]) {
+        expect(defaultPreferenceEnabled(type, 'IN_APP', { telegramLinked })).toBe(true)
+        expect(defaultPreferenceEnabled(type, 'EMAIL', { telegramLinked })).toBe(true)
+        expect(defaultPreferenceEnabled(type, 'TELEGRAM', { telegramLinked })).toBe(false)
+      }
+    },
+  )
+
+  it('решта типів не позначена як відповіді гостя', () => {
+    expect(isGuestResponseNotificationType('LOAN_REQUESTED')).toBe(false)
+    expect(isGuestResponseNotificationType('LOAN_RECORD_PROPOSED')).toBe(false)
   })
 })

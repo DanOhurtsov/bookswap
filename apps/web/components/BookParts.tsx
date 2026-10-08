@@ -35,16 +35,15 @@ function WorkTitle({ work, authors }: { work: Work; authors: WorkAuthor[] }) {
 }
 
 /**
- * Рядок видання. `lang` і `translator` рахує сервер — для видання мовою
- * оригіналу це мова твору й порожній перекладач (§4.4), і фронт цю умову не
- * повторює.
+ * Рядок видання. `lang` і `translator` рахує сервер, і фронт цієї умови не повторює. Невідомі
+ * мова чи формат (`null`) не показуються взагалі: порожнє місце чесніше за вигадане значення.
  */
 function EditionLine({ edition }: { edition: Edition }) {
   const parts = [
     edition.publisher,
     edition.year === null ? null : String(edition.year),
     edition.lang,
-    EDITION_FORMAT_LABELS[edition.format],
+    edition.format === null ? null : EDITION_FORMAT_LABELS[edition.format],
     edition.pageCount === null ? null : `${String(edition.pageCount)} с.`,
   ].filter((part): part is string => part !== null && part !== '')
 

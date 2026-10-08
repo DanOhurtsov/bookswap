@@ -399,7 +399,7 @@ describe('Бібліотека (e2e)', () => {
     })
 
     it.each(['APPROVED', 'HANDED_OVER'] as const)(
-      'не видаляє примірник із лоаном у %s (§5.2)',
+      'не видаляє примірник із лоаном у %s (§5.2, Stage 10: COPY_HAS_LOAN_HISTORY)',
       async (status) => {
         const owner = await register()
         const borrower = await register()
@@ -415,16 +415,15 @@ describe('Бібліотека (e2e)', () => {
           .set('Cookie', owner.cookie)
           .expect(409)
 
-        expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.COPY_HAS_ACTIVE_LOAN)
+        expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.COPY_HAS_LOAN_HISTORY)
 
-        // Головне: історія позичань уціліла. Copy → Loan каскадний, тож без цієї
-        // заборони видалення примірника стерло б і її.
+        // Головне: історія позичань уціліла.
         expect(await prisma.copy.findUnique({ where: { id: copyId } })).not.toBeNull()
         expect(await prisma.loan.count({ where: { copyId } })).toBe(1)
       },
     )
 
-    it('завершений лоан видаленню не заважає', async () => {
+    it('Stage 10: навіть завершений лоан блокує видалення — історія не стирається', async () => {
       const owner = await register()
       const borrower = await register()
       const { editionId } = await createEdition(owner)
@@ -434,10 +433,13 @@ describe('Бібліотека (e2e)', () => {
         data: { copyId, ownerId: owner.id, borrowerId: borrower.id, status: 'RETURNED' },
       })
 
-      await request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .delete(url(`/me/library/${copyId}`))
         .set('Cookie', owner.cookie)
-        .expect(204)
+        .expect(409)
+
+      expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.COPY_HAS_LOAN_HISTORY)
+      expect(await prisma.loan.count({ where: { copyId } })).toBe(1)
     })
 
     it('чужий примірник — 404 і не видаляється', async () => {

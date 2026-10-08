@@ -83,5 +83,60 @@ jobs:
           pnpm db:seed
           pnpm db:seed
 
+      # guest-contact-retention-cleanup-cli.db-spec runs the BUILT command (apps/api/dist/cli/...). turbo's
+      # test:db builds the api's dependencies but not the api itself; gate.sh builds before test:db, so
+      # this job has to as well, with turbo so that @bookswap/shared is built first.
+      - name: Зібрати API (db-spec запускає зібрану CLI)
+        run: pnpm turbo run build --filter=@bookswap/api
+
       - name: Тести constraint'ів і e2e
         run: pnpm test:db
+
+  # Браузерні e2e (усі `*.browser-spec.ts`): гостьовий потік (Stage 10, 10i.3) і особистий статус читання (10j.2). Окрема job: потребує PostgreSQL, Chromium і його
+  # системних бібліотек, яких немає в `pnpm install`, тому в локальний `gate.sh` не входить. Відсутній
+  # Chromium дає ПАДІННЯ тесту, а не пропуск. Поштовий провайдер у тесті примусово `dev` (browser-env.ts).
+  browser-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: bookswap
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: bookswap
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bookswap -d bookswap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Згенерувати Prisma Client
+        run: pnpm db:generate
+
+      # @bookswap/shared is consumed from its build (dist). The other jobs get it from turbo's ^build, but
+      # this job calls the package script directly, so without this step neither the API under test nor
+      # `next dev` can resolve the package.
+      - name: Зібрати спільний пакет
+        run: pnpm --filter @bookswap/shared build
+
+      # Версія браузера визначається закріпленою версією playwright-core (apps/api/package.json).
+      - name: Chromium і його системні залежності
+        run: pnpm --filter @bookswap/api exec playwright-core install --with-deps chromium
+
+      - name: Браузерний e2e
+        run: pnpm --filter @bookswap/api test:browser

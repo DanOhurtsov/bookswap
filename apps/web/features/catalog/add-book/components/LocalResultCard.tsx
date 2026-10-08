@@ -58,7 +58,6 @@ export function LocalResultCard({
 
   return (
     <ResultCardShell
-      badge="Наш каталог"
       coverUrl={coverOf(candidate)}
       coverAlt={`Обкладинка «${candidate.work.title}»`}
       title={
@@ -72,7 +71,7 @@ export function LocalResultCard({
       }
       authors={<AuthorLine authors={candidate.authors} />}
       meta={[
-        candidate.work.origLang,
+        candidate.work.origLang ?? undefined,
         candidate.work.firstPubYear === null
           ? undefined
           : `уперше видано ${String(candidate.work.firstPubYear)}`,

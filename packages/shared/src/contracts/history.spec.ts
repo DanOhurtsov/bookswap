@@ -16,6 +16,8 @@ const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
 
 const facts = {
   status: 'RETURNED',
+  origin: 'REQUESTED',
+  guestEvidence: null,
   isOverdue: false,
   requestedAt: '2026-06-01T10:00:00.000Z',
   respondedAt: '2026-06-02T10:00:00.000Z',
@@ -116,6 +118,7 @@ describe('historyCopySchema', () => {
       pageCount: 800,
       coverUrl: null,
       format: 'HARDCOVER',
+      textKind: 'ORIGINAL',
       lang: 'en',
       translator: null,
       revision: 1,
@@ -158,5 +161,19 @@ describe('historyCopySchema', () => {
 
     expect(response).not.toHaveProperty('owner')
     expect(JSON.stringify(response)).not.toContain('user-marta')
+  })
+})
+
+describe('requestedAt (Stage 10, T2)', () => {
+  it('допускає null для записаних власником позик — запиту не було', () => {
+    expect(
+      historyEntrySchema.parse({ ...facts, requestedAt: null, names: false }).requestedAt,
+    ).toBeNull()
+  })
+
+  it('усе ще відхиляє некоректну дату', () => {
+    expect(
+      historyEntrySchema.safeParse({ ...facts, requestedAt: '2026-06-01', names: false }).success,
+    ).toBe(false)
   })
 })

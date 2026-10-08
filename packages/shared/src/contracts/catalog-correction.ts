@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { authorRoleSchema, catalogEntityTypeSchema, editionFormatSchema } from '../domain/catalog'
+import { languageCodeSchema } from '../domain/language'
+import {
+  authorRoleSchema,
+  catalogEntityTypeSchema,
+  editionFormatSchema,
+  editionTextKindSchema,
+} from '../domain/catalog'
 import {
   authorHasOneSource,
   AUTHOR_HAS_ONE_SOURCE_MESSAGE,
@@ -92,6 +98,8 @@ const strictWorkAuthorInputSchema = workAuthorInputObjectSchema
 export const workPatchRequestSchema = createWorkRequestSchema
   .partial()
   .extend({
+    // `null` — мова оригіналу невідома (очищення). Видання при цьому не змінюються (ред. 2, §1).
+    origLang: languageCodeSchema.nullable().optional(),
     authors: z
       .array(strictWorkAuthorInputSchema)
       .min(1, 'Потрібен хоча б один автор')
@@ -113,7 +121,14 @@ export type TranslationPatchRequest = z.infer<typeof translationPatchRequestSche
 /** R10: `translationId` дозволений, але Translation мусить належати тому самому Work — 8e-2. */
 export const editionPatchRequestSchema = createEditionRequestSchema
   .partial()
-  .extend({ expectedRevision: expectedRevisionSchema })
+  .extend({
+    // `null` — формат невідомий (очищення).
+    format: editionFormatSchema.nullable().optional(),
+    // Що відомо про текст видання й яка його мова — правила переходів у `edition-language.ts`.
+    textKind: editionTextKindSchema.optional(),
+    lang: languageCodeSchema.nullable().optional(),
+    expectedRevision: expectedRevisionSchema,
+  })
   .strict()
 
 export type EditionPatchRequest = z.infer<typeof editionPatchRequestSchema>
@@ -163,7 +178,8 @@ export type WorkRevisionAuthor = z.infer<typeof workRevisionAuthorSchema>
 /** Для Work знімок включає авторські зв'язки та їхній порядок (R9). */
 export const workRevisionSnapshotSchema = z.object({
   title: z.string(),
-  origLang: z.string(),
+  /** `null` — мова оригіналу невідома. Старі знімки завжди мали рядок. */
+  origLang: z.string().nullable(),
   firstPubYear: z.number().int().nullable(),
   description: z.string().nullable(),
   authors: z.array(workRevisionAuthorSchema),
@@ -189,8 +205,14 @@ export const editionRevisionSnapshotSchema = z.object({
   isbn13: z.string().nullable(),
   pageCount: z.number().int().nullable(),
   coverUrl: z.string().nullable(),
-  format: editionFormatSchema,
+  format: editionFormatSchema.nullable(),
   translationId: z.string().nullable(),
+  /**
+   * Fast-add (docs/plan/fast-book-add.md, §4): тип тексту й мова видання. Опційні, бо знімки,
+   * записані до цієї зміни, їх не мають; `textKind: null` — легасі-рядок до backfill.
+   */
+  textKind: editionTextKindSchema.nullable().optional(),
+  lang: z.string().nullable().optional(),
 })
 
 export type EditionRevisionSnapshot = z.infer<typeof editionRevisionSnapshotSchema>

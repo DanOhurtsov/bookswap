@@ -1,3 +1,4 @@
+import { INVITE_HMAC_TEST_SECRET, restoreInviteHmacSecret } from './helpers/invite-hmac-secret'
 import 'reflect-metadata'
 import { Logger, type INestApplication } from '@nestjs/common'
 import request from 'supertest'
@@ -39,9 +40,6 @@ class FakeEmailSender implements EmailSender {
   }
 }
 
-const HMAC_SECRET = 'invite-hmac-test-secret-0123456789abcdef'
-process.env.INVITE_EMAIL_HMAC_SECRET = HMAC_SECRET
-
 describe('Email invitations (e2e)', () => {
   let app: INestApplication<App>
   let prisma: PrismaService
@@ -61,6 +59,7 @@ describe('Email invitations (e2e)', () => {
 
   afterAll(async () => {
     await app.close()
+    restoreInviteHmacSecret()
   })
 
   beforeEach(() => {
@@ -124,7 +123,7 @@ describe('Email invitations (e2e)', () => {
 
     expect(row.tokenHash).toBe(hashToken(tokenIn(message)))
     expect(row.recipientEmailHash).toBe(
-      createHmac('sha256', HMAC_SECRET)
+      createHmac('sha256', INVITE_HMAC_TEST_SECRET)
         .update(`bookswap-invite-email:v2:${recipient}`)
         .digest('hex'),
     )

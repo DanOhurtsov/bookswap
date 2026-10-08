@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { sessionResponseSchema, type Me } from '@bookswap/shared'
+import { sessionResponseSchema, type Me, type SessionFeatures } from '@bookswap/shared'
 import { ApiRequestError, apiRequest, describeError } from './api'
 
 /**
@@ -19,13 +19,16 @@ import { ApiRequestError, apiRequest, describeError } from './api'
 export type SessionState =
   | { status: 'loading' }
   | { status: 'guest' }
-  | { status: 'authenticated'; user: Me }
+  // `features` comes from the server (T9); absent means unknown, and every consumer
+  // must treat unknown as off.
+  | { status: 'authenticated'; user: Me; features?: SessionFeatures }
   | { status: 'error'; message: string }
 
 export interface SessionApi {
   state: SessionState
   reload: () => void
-  setUser: (user: Me) => void
+  /** `features` omitted keeps the ones already known (e.g. after a profile edit). */
+  setUser: (user: Me, features?: SessionFeatures) => void
   /** Explicit "I just confirmed with the server that no one is logged in" — see `setGuest` below. */
   setGuest: () => void
 }
@@ -64,14 +67,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     async function load(): Promise<void> {
       try {
-        const { user } = await apiRequest('/auth/session', {
+        const { user, features } = await apiRequest('/auth/session', {
           schema: sessionResponseSchema,
           signal: controller.signal,
         })
 
         if (controller.signal.aborted || generation.current !== thisGeneration) return
 
-        setState({ status: 'authenticated', user })
+        setState({ status: 'authenticated', user, features })
       } catch (error) {
         if (controller.signal.aborted || generation.current !== thisGeneration) return
 
@@ -96,9 +99,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setNonce((value) => value + 1)
   }, [])
 
-  const setUser = useCallback((user: Me) => {
+  const setUser = useCallback((user: Me, features?: SessionFeatures) => {
     generation.current += 1
-    setState({ status: 'authenticated', user })
+    setState((previous) => ({
+      status: 'authenticated',
+      user,
+      features: features ?? (previous.status === 'authenticated' ? previous.features : undefined),
+    }))
   }, [])
 
   const setGuest = useCallback(() => {

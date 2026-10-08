@@ -1,6 +1,6 @@
 'use client'
 
-export { AddBookWizard } from './components/AddBookWizard'
+export { AddBookScreen } from './components/AddBookScreen'
 
 /**
  * Search-result components shared with the catalog discovery page. Discovery
@@ -12,7 +12,6 @@ export { ExternalSearchStatus } from './components/ExternalSearchStatus'
 export { LocalResultCard } from './components/LocalResultCard'
 export { SearchPagination } from './components/SearchPagination'
 export { SearchResultsList, type LocalCardActions } from './components/SearchResultsList'
-export { stashExternalSelection } from './model/external-handoff'
 export { type ExternalSearchState } from './model/external-search-state'
 export { searchPageView } from './model/search-page-view'
 export { buildUnifiedResults, type LocalCandidate } from './model/unified-results'

@@ -1,19 +1,31 @@
 import { Inject, Injectable, Logger } from '@nestjs/common'
 import {
   SEARCH_MAX_PAGE,
+  isValidIsbn13,
   splitSearchPage,
   type ExternalSearchMore,
   type ExternalSearchResponse,
   type ExternalSearchResult,
   type ExternalSearchSourceReport,
   type ExternalSearchSourceStatus,
+  type SpellingSuggestion,
 } from '@bookswap/shared'
 import { runWithTimeout } from '../../lookup/lookup-timeout'
 import { LocalMatches } from '../local-matches.service'
-import { ExternalSearchCache, externalSearchCacheKey } from './external-search.cache'
-import { externalSearchBlockSize, externalSearchTimeoutMs } from './external-search.config'
+import {
+  ExternalSearchCache,
+  externalSearchCacheKey,
+  type ExternalSearchMode,
+} from './external-search.cache'
+import {
+  externalSearchBlockSize,
+  externalSearchTimeoutMs,
+  externalSuggestBlockSize,
+  externalSuggestMinGapMs,
+} from './external-search.config'
 import {
   EXTERNAL_SEARCH_PROVIDERS,
+  ExternalSearchProviderRateLimitedError,
   ExternalSearchTimeoutError,
   type ExternalSearchContext,
   type ExternalSearchProvider,
@@ -30,6 +42,45 @@ import { ProviderRateLimitedError, ProviderRateLimiter } from './provider-rate-l
  */
 const MAX_BLOCKS = SEARCH_MAX_PAGE
 
+/**
+ * Maps external records (by `id`) to OUR edition they are already known as. Used by the add-book page
+ * (`/me/library/add-search/external`); `/catalog/search/external` passes none.
+ */
+export type LocalMatcher = (
+  records: readonly ExternalSearchResult[],
+) => Promise<Map<string, string>>
+
+/**
+ * Marks matched records with `localEditionId` and collapses the ones that resolve to the same edition (the
+ * first keeps its place). Deterministic for a given pool, so the pool stays prefix-stable across pages.
+ */
+async function markLocalEditions(
+  pool: ExternalSearchResult[],
+  matchLocal: LocalMatcher,
+): Promise<ExternalSearchResult[]> {
+  if (pool.length === 0) return pool
+
+  const matches = await matchLocal(pool)
+  const seen = new Set<string>()
+  const result: ExternalSearchResult[] = []
+
+  for (const record of pool) {
+    const editionId = matches.get(record.id)
+
+    if (editionId === undefined) {
+      result.push(record)
+      continue
+    }
+
+    if (seen.has(editionId)) continue
+
+    seen.add(editionId)
+    result.push({ ...record, localEditionId: editionId })
+  }
+
+  return result
+}
+
 /** What one source has contributed to this request so far. */
 interface ProviderState {
   readonly provider: ExternalSearchProvider
@@ -37,6 +88,24 @@ interface ProviderState {
   /** The provider's stream ended — asking for a further block is pointless. */
   exhausted: boolean
   entries: RankedResult[]
+  /** Titles and authors read BEFORE the relevance gate; only for the spelling correction. */
+  spellingCandidates: Set<string>
+}
+
+/**
+ * The correction for this request, decided from our catalog and everything the sources said together.
+ * Reads only our database: the candidates are texts the providers already returned.
+ */
+async function spellingSuggestionOf(
+  local: LocalMatches,
+  query: string,
+  states: readonly ProviderState[],
+): Promise<{ spellingSuggestion: SpellingSuggestion } | undefined> {
+  // The same book is usually named by both sources: each text goes to the decision once.
+  const texts = new Set(states.flatMap((state) => [...state.spellingCandidates]))
+  const text = await local.spellingSuggestion(query, [...texts])
+
+  return text === undefined ? undefined : { spellingSuggestion: { forQuery: query, text } }
 }
 
 /**
@@ -109,17 +178,22 @@ export class ExternalSearchService {
    * because the budget ran out — is reported honestly as `complete: false` with
    * `more: UNKNOWN`, and the client asks again; each ask reads one more block.
    */
-  async search(query: string, page: number, pageSize: number): Promise<ExternalSearchResponse> {
+  async search(
+    query: string,
+    page: number,
+    pageSize: number,
+    options: { localTotal?: number; matchLocal?: LocalMatcher; spellingSuggestion?: boolean } = {},
+  ): Promise<ExternalSearchResponse> {
     const matches = await this.local.rank(query, { authors: false })
-    const { externalFrom, externalCount } = splitSearchPage({
-      page,
-      pageSize,
-      localTotal: matches.works.length,
-    })
+    // `localTotal` — скільки рядків спільного списку належить нам. Для `/catalog/search` це кількість
+    // творів; сторінка додавання рахує локальну половину у ВИДАННЯХ (`AddSearchService`) і передає
+    // свою кількість, щоб обидві половини ділили сторінку за однією довжиною.
+    const localTotal = options.localTotal ?? matches.works.length
+    const { externalFrom, externalCount } = splitSearchPage({ page, pageSize, localTotal })
 
     // The page is made of our own rows alone AND more of them follow: nothing to
     // ask outside, and the next page is proved by the local half.
-    if (externalCount === 0 && matches.works.length > page * pageSize) {
+    if (externalCount === 0 && localTotal > page * pageSize) {
       return { results: [], sources: [], page, pageSize, more: 'UNKNOWN', complete: true }
     }
 
@@ -130,6 +204,7 @@ export class ExternalSearchService {
       status: 'OK',
       exhausted: false,
       entries: [],
+      spellingCandidates: new Set(),
     }))
 
     // One past the page is the proof; a page that is all local still probes one
@@ -165,6 +240,10 @@ export class ExternalSearchService {
         states.flatMap((state) => state.entries),
       ).filter((result) => result.isbn13 === undefined || !known.has(result.isbn13))
 
+      // Fast-add: records that are ALREADY our editions (by ISBN or a confirmed reference) are marked and
+      // collapsed HERE, before the page is cut — never on the client, never after pagination.
+      if (options.matchLocal !== undefined) pool = await markLocalEditions(pool, options.matchLocal)
+
       if (pool.length >= needed) break
     }
 
@@ -189,6 +268,113 @@ export class ExternalSearchService {
       // Final when full, or when there is nothing left to read. Short with more
       // to read means only the budget stopped us.
       complete: results.length === externalCount || !canReadMore,
+      ...(options.spellingSuggestion === true
+        ? await spellingSuggestionOf(this.local, query, states)
+        : undefined),
+    }
+  }
+
+  /**
+   * The external half of an AUTO-SUGGEST — a fixed, capped mode, not a smaller page.
+   *
+   * The ceiling is held HERE, on the server, because a client's debounce is only a courtesy:
+   *
+   * - **Every registered source, once, in parallel** (today Open Library and Google Books; a
+   *   source added to `EXTERNAL_SEARCH_PROVIDERS` — ISBNdb, should it ever get a title search —
+   *   joins without touching this method). Each is asked for **one outbound request**
+   *   (`maxQueries: 1`: Google's title reading, Open Library's single cross-field query) and
+   *   each under its own deadline, so a slow or failing source costs the others nothing. A source
+   *   that is down is reported in `sources`; the rest still answer.
+   * - **One block per source, never read further.** No continuation, no second block, no paging:
+   *   the answer is `complete` as it stands, and "more" is only a reason to offer the full search.
+   * - **A free slot or nothing, per source.** `tryAcquire` refuses instead of queueing, so a
+   *   refused suggestion is reported as `RATE_LIMITED` with no call made, and never delays a full
+   *   search. The limiter is per source, so one source's cooldown does not mute the other.
+   * - **Nothing at all for an ISBN or when our own catalog already fills the list.** Both are
+   *   decided before any provider is touched.
+   *
+   * The cache entry is keyed in its own mode, so this one-query block can never stand in for a
+   * full one. Errors, refusals and partial blocks are not cached (`ExternalSearchCache`), so a
+   * failure is never remembered as "no such book".
+   */
+  async suggest(
+    query: string,
+    options: {
+      limit: number
+      localTotal: number
+      matchLocal?: LocalMatcher
+      spellingSuggestion?: boolean
+    },
+  ): Promise<ExternalSearchResponse> {
+    const remaining = options.limit - options.localTotal
+    const empty = (more: ExternalSearchMore): ExternalSearchResponse => ({
+      results: [],
+      sources: [],
+      page: 1,
+      pageSize: options.limit,
+      more,
+      complete: true,
+    })
+
+    // An exact ISBN is the lookup scenario's job; a text query built from it asks a nonsense question.
+    if (isValidIsbn13(query) || this.providers.length === 0) return empty('NO')
+    // Our own catalog already fills the list: nothing outside is asked.
+    if (remaining <= 0) return empty('YES')
+
+    const matches = await this.local.rank(query, { authors: false })
+    const known = await this.local.isbnsOf(matches.works.map((row) => row.id))
+    const states: ProviderState[] = this.providers.map((provider) => ({
+      provider,
+      status: 'OK',
+      exhausted: false,
+      entries: [],
+      spellingCandidates: new Set(),
+    }))
+
+    await Promise.all(
+      states.map(async (state) =>
+        this.readBlock(state, query, 0, externalSuggestBlockSize(), {
+          minGapMs: externalSuggestMinGapMs(),
+        }),
+      ),
+    )
+
+    let pool = mergeResults(
+      query,
+      states.flatMap((state) => state.entries),
+    ).filter((result) => result.isbn13 === undefined || !known.has(result.isbn13))
+
+    if (options.matchLocal !== undefined) pool = await markLocalEditions(pool, options.matchLocal)
+
+    return {
+      results: pool.slice(0, remaining),
+      sources: states.map((state): ExternalSearchSourceReport => ({
+        source: state.provider.source,
+        status: state.status,
+      })),
+      page: 1,
+      pageSize: options.limit,
+      // Proof only: a record in hand beyond the list. "No more" needs every source to say it ended;
+      // otherwise unknown — the full search may know more.
+      more:
+        pool.length > remaining
+          ? 'YES'
+          : states.every((state) => state.status === 'OK' && state.exhausted)
+            ? 'NO'
+            : 'UNKNOWN',
+      complete: true,
+      ...(options.spellingSuggestion === true
+        ? await spellingSuggestionOf(this.local, query, states)
+        : undefined),
+    }
+  }
+
+  private coolDownOnRateLimit(
+    source: ExternalSearchResult['sources'][number],
+    error: unknown,
+  ): void {
+    if (error instanceof ExternalSearchProviderRateLimitedError) {
+      this.limiter.penalize(source, error.retryAfterMs)
     }
   }
 
@@ -210,8 +396,10 @@ export class ExternalSearchService {
     query: string,
     index: number,
     size: number,
+    suggest?: { minGapMs: number },
   ): Promise<void> {
-    const key = externalSearchCacheKey(state.provider.source, query, index, size)
+    const mode: ExternalSearchMode = suggest === undefined ? 'FULL' : 'SUGGEST'
+    const key = externalSearchCacheKey(state.provider.source, query, index, size, mode)
 
     try {
       const block = await this.cache.resolve(key, async () => {
@@ -224,14 +412,35 @@ export class ExternalSearchService {
             // provider may need several field-restricted queries to answer one
             // search (Google Books has no OR). The limit is per source and has
             // to count every one of them.
-            acquire: async () => this.limiter.acquire(state.provider.source, timeoutMs),
+            //
+            // A suggestion never queues for a slot: it takes a free one or is
+            // refused, so it cannot delay a search somebody asked for.
+            acquire: async () =>
+              suggest === undefined
+                ? this.limiter.acquire(state.provider.source, timeoutMs)
+                : this.limiter.tryAcquire(state.provider.source, suggest.minGapMs),
           }
 
-          return state.provider.search(query, { index, size }, context)
+          // `maxQueries: 1` is what makes a suggestion ONE outbound request.
+          return state.provider.search(
+            query,
+            suggest === undefined ? { index, size } : { index, size, maxQueries: 1 },
+            context,
+          )
         })
 
         if (outcome.kind === 'timeout') throw new ExternalSearchTimeoutError()
-        if (outcome.kind === 'error') throw outcome.error
+
+        // The provider's 429 puts the source on cooldown for everyone — here, in the call that
+        // actually went out, so requests coalesced onto it do not each extend the pause.
+        if (outcome.kind === 'error') {
+          this.coolDownOnRateLimit(state.provider.source, outcome.error)
+          throw outcome.error
+        }
+
+        if (outcome.value.partialFailure !== undefined) {
+          this.coolDownOnRateLimit(state.provider.source, outcome.value.partialFailure)
+        }
 
         return outcome.value
       })
@@ -248,6 +457,8 @@ export class ExternalSearchService {
         )
         state.status = classify(block.partialFailure)
       }
+
+      for (const text of block.spellingCandidates ?? []) state.spellingCandidates.add(text)
 
       block.results.forEach((result, position) => {
         // `rank` is absolute within the source's stream, so it stays comparable
@@ -273,6 +484,7 @@ export class ExternalSearchService {
 function classify(error: unknown): ExternalSearchSourceStatus {
   if (error instanceof ExternalSearchTimeoutError) return 'TIMEOUT'
   if (error instanceof ProviderRateLimitedError) return 'RATE_LIMITED'
+  if (error instanceof ExternalSearchProviderRateLimitedError) return 'RATE_LIMITED'
 
   return 'ERROR'
 }

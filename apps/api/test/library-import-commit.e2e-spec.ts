@@ -693,7 +693,7 @@ describe('CSV import commit (e2e)', () => {
   ): Promise<{ editionId: string; workId: string }> {
     const { workId } = await seedWork(`Наявний твір ${isbn13}`)
     const edition = await prisma.edition.create({
-      data: { workId, isbn13, publisher, createdById: ownerId },
+      data: { workId, isbn13, publisher, textKind: 'ORIGINAL', createdById: ownerId },
       select: { id: true },
     })
 

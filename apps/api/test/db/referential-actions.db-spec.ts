@@ -58,20 +58,36 @@ describe('referential actions', () => {
     expect(await prisma.notificationDelivery.count()).toBe(0)
   })
 
-  it('видалення Copy зносить його лоани — вони і є історія примірника (§4.6)', async () => {
+  it('DEL4: Copy з будь-яким Loan не видалити — RESTRICT зберігає історію (§4.6, M3)', async () => {
+    for (const status of Object.values(LoanStatus)) {
+      await truncateAll(prisma)
+
+      const graph = await createGraph(prisma)
+      const loan = await prisma.loan.create({
+        data: {
+          copyId: graph.copyId,
+          ownerId: graph.ownerId,
+          borrowerId: graph.borrowerId,
+          status,
+        },
+      })
+
+      await expectRejection(
+        prisma.copy.delete({ where: { id: graph.copyId } }),
+        /Loan_copyId_fkey|foreign key/i,
+      )
+
+      expect(await prisma.copy.count({ where: { id: graph.copyId } })).toBe(1)
+      expect(await prisma.loan.count({ where: { id: loan.id } })).toBe(1)
+    }
+  })
+
+  it('DEL1: Copy без Loan видаляється', async () => {
     const graph = await createGraph(prisma)
-    await prisma.loan.create({
-      data: {
-        copyId: graph.copyId,
-        ownerId: graph.ownerId,
-        borrowerId: graph.borrowerId,
-        status: LoanStatus.RETURNED,
-      },
-    })
 
     await prisma.copy.delete({ where: { id: graph.copyId } })
 
-    expect(await prisma.loan.count()).toBe(0)
+    expect(await prisma.copy.count()).toBe(0)
   })
 
   it('видалення Edition із примірниками заблоковане', async () => {

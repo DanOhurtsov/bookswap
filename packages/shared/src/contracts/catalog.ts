@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { authorRoleSchema, editionFormatSchema } from '../domain/catalog'
+import { authorRoleSchema, editionFormatSchema, editionTextKindSchema } from '../domain/catalog'
 import { isbn13Schema } from '../domain/isbn'
 import { languageCodeSchema } from '../domain/language'
 
@@ -149,7 +149,8 @@ const idSchema = z.string().trim().min(1).max(CATALOG_LIMITS.idMax)
 export const workSchema = z.object({
   id: z.string(),
   title: z.string(),
-  origLang: z.string(),
+  /** `null` — мова оригіналу невідома (зовнішні та ручні записи): її не вигадують. */
+  origLang: z.string().nullable(),
   firstPubYear: z.number().int().nullable(),
   description: z.string().nullable(),
   createdAt: z.iso.datetime(),
@@ -201,11 +202,12 @@ export const translationSchema = z.object({
 export type Translation = z.infer<typeof translationSchema>
 
 /**
- * Видання. `lang` і `translator` — обчислені: для видання мовою оригіналу
- * (`translationId = null`) це `Work.origLang` і `null`.
+ * Видання. `translator` береться з перекладу (`null`, коли зв'язку немає). `lang` — мова ЦЬОГО
+ * видання; `null`, коли вона невідома. `textKind` каже, що відомо про текст: оригінал, переклад
+ * чи нічого (`UNKNOWN`) — і ніколи не виводиться з того, що `translationId = null`.
  *
- * Рахує їх сервер, а не клієнт: інакше кожна сторінка, що показує видання,
- * повторювала б це «якщо переклад є — беремо з нього» і одного дня помилилася б.
+ * Рахує це сервер, а не клієнт: інакше кожна сторінка, що показує видання, повторювала б правило
+ * «якщо переклад є — беремо з нього» і одного дня помилилася б.
  */
 export const editionSchema = z.object({
   id: z.string(),
@@ -216,8 +218,10 @@ export const editionSchema = z.object({
   isbn13: z.string().nullable(),
   pageCount: z.number().int().nullable(),
   coverUrl: z.string().nullable(),
-  format: editionFormatSchema,
-  lang: z.string(),
+  /** `null` — формат невідомий: «м'яка палітурка» не вгадується. */
+  format: editionFormatSchema.nullable(),
+  textKind: editionTextKindSchema,
+  lang: z.string().nullable(),
   translator: z.string().nullable(),
   /** Stage 8e-1, R9: optimistic concurrency — see `expectedRevisionSchema`. */
   revision: z.number().int().positive(),

@@ -18,11 +18,11 @@ describe('safeReturnTo', () => {
     ' /invite',
     '/library',
   ])('rejects %j and falls back', (value) => {
-    expect(safeReturnTo(value)).toBe('/profile')
+    expect(safeReturnTo(value)).toBe('/')
   })
 
   it('falls back for missing values and honours a custom fallback', () => {
-    expect(safeReturnTo(null)).toBe('/profile')
+    expect(safeReturnTo(null)).toBe('/')
     expect(safeReturnTo(undefined, '/x')).toBe('/x')
   })
 })

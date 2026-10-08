@@ -47,6 +47,14 @@ export class ResendEmailSender implements EmailSender {
   constructor(private readonly config: ConfigService) {}
 
   async send(message: EmailMessage): Promise<void> {
+    // Stage 10 (10i.2, D2): листи гостьового підтвердження несуть секрет на синтетичну адресу; реальний
+    // провайдер їх не отримує за жодної конфігурації (маршрут бере лише `DevEmailSender`) — це другий рубіж.
+    if (message.sealed === true) {
+      throw new Error(
+        'Запечатаний лист гостьового підтвердження не можна надсилати реальним провайдером',
+      )
+    }
+
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {

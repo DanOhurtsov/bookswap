@@ -33,7 +33,6 @@ type ExternalResultCardProps = {
 export function ExternalResultCard({ result, onSelect }: ExternalResultCardProps) {
   return (
     <ResultCardShell
-      badge={result.sources.map((source) => SOURCE_LABELS[source]).join(' · ')}
       coverUrl={result.coverUrl}
       coverAlt={`Обкладинка «${result.title}»`}
       title={<span className="book__title">{result.title}</span>}

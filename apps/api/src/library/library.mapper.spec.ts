@@ -29,6 +29,7 @@ function copyRow(overrides: Partial<CopyRow> = {}): CopyRow {
     id: 'copy-1',
     ownerId: MARTA.id,
     currentHolderId: MARTA.id,
+    heldByContactId: null,
     status: 'AVAILABLE',
     visibility: 'FRIENDS',
     condition: 'GOOD',
@@ -48,6 +49,8 @@ function copyRow(overrides: Partial<CopyRow> = {}): CopyRow {
       pageCount: 800,
       coverUrl: null,
       format: 'HARDCOVER',
+      textKind: 'TRANSLATION',
+      lang: 'uk',
       revision: 1,
       translation: { lang: 'uk', translator: 'Любов Пилаєва' },
       work: {
@@ -103,6 +106,47 @@ describe('isHome', () => {
   it('вдома — це тримач, який дорівнює власнику (інваріант §5.3.2)', () => {
     expect(isHome(copyRow())).toBe(true)
     expect(isHome(lentOut())).toBe(false)
+  })
+
+  /** Stage 10 (T1-a): гість-тримач і невідомий тримач (стерто за D3) — «не вдома». */
+  it('тримач-гість чи NULL-тримач — не вдома', () => {
+    expect(isHome(copyRow({ currentHolderId: null, heldByContactId: 'contact-1' }))).toBe(false)
+    expect(isHome(copyRow({ currentHolderId: null, heldByContactId: null }))).toBe(false)
+  })
+})
+
+describe('копія в гостя (Stage 10, T1-a)', () => {
+  const heldByGuest = (): CopyRow =>
+    copyRow({
+      status: 'LENT_OUT',
+      currentHolderId: null,
+      heldByContactId: 'contact-1',
+      currentHolder: null,
+    })
+
+  it('власник: не вдома, тримача-користувача немає', () => {
+    const copy = toOwnCopy(heldByGuest())
+
+    expect(copy.isHome).toBe(false)
+    expect(copy.holder).toBeNull()
+  })
+
+  it('друг навіть із showHolderNames = true не бачить нічого про гостя (D4)', () => {
+    const copy = toVisibleCopy(heldByGuest(), guest(true))
+
+    expect(copy.isHome).toBe(false)
+    expect(copy.holder).toBeNull()
+    expect(copy.canRequest).toBe(false)
+  })
+
+  it('активна гостьова позика не ламає ownerLoanOf', () => {
+    const row = heldByGuest()
+
+    row.loans = [
+      { id: 'loan-g', status: 'HANDED_OVER', borrowerId: null, dueAt: null, borrower: null },
+    ]
+
+    expect(toOwnCopy(row).activeLoan).toBeNull()
   })
 })
 
@@ -341,6 +385,24 @@ describe('expectedReturnAt — орієнтовна дата поверненн�
     expect(toVisibleCopy(withExclusive('LENT_OUT', null), guest(true)).expectedReturnAt).toBeNull()
   })
 
+  it('Stage 10 (10e): непідтверджений запис (PENDING_CONFIRMATION) дати не віддає — це претензія, а не факт', () => {
+    const pending = copyRow({
+      status: 'RESERVED',
+      loans: [
+        loanRow({
+          id: 'loan-record',
+          status: 'PENDING_CONFIRMATION',
+          borrowerId: BOHDAN.id,
+          borrower: BOHDAN,
+          dueAt: new Date('2026-06-12T23:59:59.999Z'),
+        }),
+      ],
+    })
+
+    expect(toVisibleCopy(pending, guest(true)).expectedReturnAt).toBeNull()
+    expect(toVisibleCopy(pending, guest(true)).canRequest).toBe(false)
+  })
+
   it('для вільного примірника дати немає — вона там безглузда', () => {
     expect(toVisibleCopy(copyRow(), guest(true)).expectedReturnAt).toBeNull()
   })
@@ -411,14 +473,34 @@ describe('groupByEdition', () => {
     expect(group?.edition.translator).toBe('Любов Пилаєва')
   })
 
-  it('для видання мовою оригіналу мова береться з твору, перекладача немає', () => {
+  it('видання-оригінал: тип і мова — власні поля видання, перекладача немає', () => {
     const original = copyRow({
-      edition: { ...copyRow().edition, translationId: null, translation: null },
+      edition: {
+        ...copyRow().edition,
+        translationId: null,
+        translation: null,
+        textKind: 'ORIGINAL',
+        lang: 'en',
+      },
     })
     const [group] = groupByEdition([original], toOwnCopy)
 
-    expect(group?.edition.lang).toBe('en')
-    expect(group?.edition.translator).toBeNull()
+    expect(group?.edition).toMatchObject({ textKind: 'ORIGINAL', lang: 'en', translator: null })
+  })
+
+  it('невідомий текст і мова не вигадуються з твору', () => {
+    const unknown = copyRow({
+      edition: {
+        ...copyRow().edition,
+        translationId: null,
+        translation: null,
+        textKind: 'UNKNOWN',
+        lang: null,
+      },
+    })
+    const [group] = groupByEdition([unknown], toOwnCopy)
+
+    expect(group?.edition).toMatchObject({ textKind: 'UNKNOWN', lang: null })
   })
 
   it('порожній список — це порожній список, а не помилка', () => {

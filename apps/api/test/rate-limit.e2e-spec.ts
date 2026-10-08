@@ -1,3 +1,4 @@
+import './helpers/guest-loans-on'
 import 'reflect-metadata'
 import type { INestApplication } from '@nestjs/common'
 import request from 'supertest'
@@ -78,6 +79,39 @@ describe('Rate limiting (e2e)', () => {
       .post(url('/friends/requests'))
       .set('Cookie', cookie)
       .send({ userId: 'ckl0000000000000000000000' })
+      .expect(429)
+
+    expect(apiErrorSchema.parse(last.body).code).toBe(API_ERROR_CODES.TOO_MANY_REQUESTS)
+  })
+
+  it('запрошення гостя (10g) відсікається після ліміту, той самий, що й у /invitations', async () => {
+    const email = uniqueEmail('throttle-guest-invite')
+    const registration = await request(app.getHttpServer())
+      .post(url('/auth/register'))
+      .send({ email, password: VALID_PASSWORD, displayName: 'Настирливий власник' })
+      .expect(201)
+
+    const cookie = sessionCookie(registration.headers)
+    const statuses: number[] = []
+
+    // Контакту з таким id не існує — кожен запит падає на 404 в handler'і, не витрачаючи
+    // жодного доменного ліміту Етапу 9 (перевірка контакту йде до InvitationsService).
+    // Ліміт — 30 на годину; 32 звернення мусять упертися в стелю.
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const response = await request(app.getHttpServer())
+        .post(url('/me/external-borrowers/does-not-exist/invitation'))
+        .set('Cookie', cookie)
+        .send({ email: 'guest@guest.invalid' })
+
+      statuses.push(response.status)
+    }
+
+    expect(statuses.filter((status) => status === 429).length).toBeGreaterThan(0)
+
+    const last = await request(app.getHttpServer())
+      .post(url('/me/external-borrowers/does-not-exist/invitation'))
+      .set('Cookie', cookie)
+      .send({ email: 'guest@guest.invalid' })
       .expect(429)
 
     expect(apiErrorSchema.parse(last.body).code).toBe(API_ERROR_CODES.TOO_MANY_REQUESTS)

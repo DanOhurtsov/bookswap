@@ -70,12 +70,57 @@ describe('CreateLoanDto ↔ createLoanRequestSchema', () => {
 })
 
 describe('UpdateLoanDto ↔ updateLoanRequestSchema', () => {
-  it('однаково приймає всі шість дій §8', () => {
+  it('однаково приймає всі дії §8 і recover Етапу 10', () => {
     expectAgreement(
       UpdateLoanDto,
       updateLoanRequestSchema,
-      LOAN_ACTIONS.map((action) => ({ name: action, payload: { action }, valid: true })),
+      // `amend_record` без дат — правило про пару полів (контролер і zod-refine); нижче окремо.
+      LOAN_ACTIONS.filter((action) => action !== 'amend_record').map((action) => ({
+        name: action,
+        payload: { action },
+        valid: true,
+      })),
     )
+  })
+
+  it('amend_record: дати передачі й строку — рядки-дати; зіпсована дата відхиляється', () => {
+    expectAgreement(UpdateLoanDto, updateLoanRequestSchema, [
+      {
+        name: 'нова дата передачі',
+        payload: { action: 'amend_record', handedAt: '2026-05-01' },
+        valid: true,
+      },
+      {
+        name: 'новий строк',
+        payload: { action: 'amend_record', dueAt: '2026-06-01' },
+        valid: true,
+      },
+      {
+        name: 'обидві дати',
+        payload: { action: 'amend_record', handedAt: '2026-05-01', dueAt: '2026-06-01' },
+        valid: true,
+      },
+      {
+        name: 'зіпсована дата',
+        payload: { action: 'amend_record', handedAt: 'вчора' },
+        valid: false,
+      },
+      {
+        name: 'dueAt: null — прибрати строк',
+        payload: { action: 'amend_record', dueAt: null },
+        valid: true,
+      },
+      {
+        name: 'зіпсований строк',
+        payload: { action: 'amend_record', dueAt: 'колись' },
+        valid: false,
+      },
+      {
+        name: 'порожній рядок замість строку',
+        payload: { action: 'amend_record', dueAt: '' },
+        valid: false,
+      },
+    ])
   })
 
   it('однаково відхиляє невідомі дії', () => {
@@ -101,6 +146,35 @@ describe('UpdateLoanDto ↔ updateLoanRequestSchema', () => {
       },
       { name: 'зіпсована дата', payload: { action: 'approve', dueAt: 'колись' }, valid: false },
     ])
+  })
+
+  it('recover: дата знахідки — день без часу; невалідна відхиляється обома', () => {
+    expectAgreement(UpdateLoanDto, updateLoanRequestSchema, [
+      { name: 'без дати', payload: { action: 'recover' }, valid: true },
+      { name: 'з датою', payload: { action: 'recover', effectiveAt: '2026-09-20' }, valid: true },
+      {
+        name: 'дата з часом',
+        payload: { action: 'recover', effectiveAt: '2026-09-20T10:00Z' },
+        valid: false,
+      },
+      {
+        name: 'неіснуюча дата',
+        payload: { action: 'recover', effectiveAt: '2026-02-30' },
+        valid: false,
+      },
+      { name: 'не дата', payload: { action: 'recover', effectiveAt: 'вчора' }, valid: false },
+    ])
+  })
+
+  it('розбіжність механізмів: «effectiveAt лише з recover» і «recover без note» — лише zod', () => {
+    // Як і `dueAt`: пари полів `class-validator` не виражає, їх тримають zod і контролер.
+    for (const payload of [
+      { action: 'return', effectiveAt: '2026-09-20' },
+      { action: 'recover', note: 'знайшли' },
+    ]) {
+      expect(updateLoanRequestSchema.safeParse(payload).success).toBe(false)
+      expect(acceptedByDto(UpdateLoanDto, payload)).toBe(true)
+    }
   })
 
   it('розбіжність механізмів: «dueAt лише з approve» виражає лише zod', () => {

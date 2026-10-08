@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Script from 'next/script'
 import type { ReactNode } from 'react'
 import './globals.css'
 import { Providers } from './lib/query-client'
@@ -14,10 +15,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="uk" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INITIALIZER_SCRIPT }} />
-      </head>
       <body>
+        <Script id="theme-initializer" strategy="beforeInteractive">
+          {THEME_INITIALIZER_SCRIPT}
+        </Script>
         <SessionProvider>
           <Providers>
             <NavBar />

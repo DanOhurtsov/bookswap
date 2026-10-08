@@ -2,6 +2,7 @@ import {
   confirmPasswordResetRequestSchema,
   loginRequestSchema,
   registerRequestSchema,
+  sessionResponseSchema,
 } from './auth'
 
 describe('registerRequestSchema', () => {
@@ -63,6 +64,33 @@ describe('confirmPasswordResetRequestSchema', () => {
     ).toBe(false)
     expect(
       confirmPasswordResetRequestSchema.safeParse({ token: 'abc', password: 'korot' }).success,
+    ).toBe(false)
+  })
+})
+
+describe('sessionResponseSchema', () => {
+  const user = {
+    id: 'u-1',
+    email: 'a@example.com',
+    emailVerified: true,
+    displayName: 'Марта',
+    avatarUrl: null,
+    bio: null,
+    libraryVisibility: 'FRIENDS',
+    showHolderNames: false,
+    createdAt: '2026-09-27T10:00:00.000Z',
+  }
+
+  it.each([true, false])('несе доступність гостьових позик (%s)', (guestLoans) => {
+    expect(sessionResponseSchema.parse({ user, features: { guestLoans } }).features).toEqual({
+      guestLoans,
+    })
+  })
+
+  it('відхиляє відповідь без features або з нелогічним значенням', () => {
+    expect(sessionResponseSchema.safeParse({ user }).success).toBe(false)
+    expect(
+      sessionResponseSchema.safeParse({ user, features: { guestLoans: 'true' } }).success,
     ).toBe(false)
   })
 })

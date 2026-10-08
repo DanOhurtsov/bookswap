@@ -1,0 +1,15 @@
+-- Stage 10, крок 10f.3, M8b (docs/plan/stage-10-real-world-history.md, §6.11.1, T7b-1, §6.13).
+--
+-- Не більше однієї події `LOSS_CLOSED` на позику — точна калька M4 (`one_recovery_per_loan`) для
+-- нового типу події. Другий і конкурентний `close_loss` отримують порушення цього індексу
+-- (API → 409 `LOAN_ALREADY_CLOSED`), а не другу подію. Частковий індекс, тож Prisma про нього не
+-- знає (як `one_recovery_per_loan`/`one_active_loan_per_copy`): у `schema.prisma` його немає,
+-- `prisma migrate diff` його не вимагає.
+--
+-- Не заважає одночасному існуванню `RECOVERED` для того самого `loanId` (§6.11.1, Q3c: `recover`
+-- дозволений і після `LOSS_CLOSED`) — це окремий частковий індекс на інше значення `type`.
+--
+-- Міграція лише додає індекс. Вона не читає й не переписує жодного `Copy`/`Loan`, не створює
+-- жодної події: `LoanEvent` типу `LOSS_CLOSED` до цього кроку не існує, тож на наповненій БД
+-- вибірка для індексу порожня.
+CREATE UNIQUE INDEX "one_loss_closure_per_loan" ON "LoanEvent" ("loanId") WHERE "type" = 'LOSS_CLOSED';

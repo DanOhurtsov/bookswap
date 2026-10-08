@@ -25,6 +25,8 @@ export const API_ERROR_CODES = {
   TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
   /** Непередбачена помилка сервера (HTTP 5xx). Деталі назовні не віддаються. */
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** Функція вимкнена конфігурацією сервера (HTTP 403). Не залежить від прав користувача. */
+  FEATURE_DISABLED: 'FEATURE_DISABLED',
 
   // --- Акаунт і сесії (§6.1) -------------------------------------------------
   /** Реєстрація на вже зайнятий email (HTTP 409). */
@@ -64,11 +66,51 @@ export const API_ERROR_CODES = {
    */
   COPY_HAS_ACTIVE_LOAN: 'COPY_HAS_ACTIVE_LOAN',
   /**
+   * Stage 10 (10c): примірник не можна видалити, бо в нього є (чи були) позики
+   * будь-якого статусу (HTTP 409). Історія живе лише в `Loan`, тож замість
+   * видалення пропонується архів.
+   */
+  COPY_HAS_LOAN_HISTORY: 'COPY_HAS_LOAN_HISTORY',
+  /**
+   * Stage 10 (10d): дія неможлива, бо примірник в архіві (HTTP 409). Спершу `restore`
+   * (`POST /me/library/:copyId/restore`), потім повторити дію (наприклад `recover`).
+   */
+  COPY_ARCHIVED: 'COPY_ARCHIVED',
+  /**
    * Власник не може перемкнути `status` просто зараз: книжка не вдома або має
    * активний лоан (HTTP 409). Стосується **лише** поля `status` — решта полів
    * примірника редагується завжди.
    */
   COPY_STATUS_LOCKED: 'COPY_STATUS_LOCKED',
+  /**
+   * Швидке додавання (HTTP 409): той самий `operationId` уже використано з ІНШИМ вмістом запиту.
+   * Ключ ідентифікує одну дію користувача; нова дія (зокрема «ще один примірник») — новий ключ.
+   */
+  /**
+   * Мова видання суперечить зв'язаному перекладу, мові оригіналу твору чи іншим виданням (HTTP 409).
+   * Нічого не змінено: введена мова не відкидається мовчки, суперечність пояснюється явно.
+   * `details.editionIds` — видання, яких вона стосується (коли їх кілька, наприклад при зміні мови
+   * оригіналу твору).
+   */
+  EDITION_LANGUAGE_CONFLICT: 'EDITION_LANGUAGE_CONFLICT',
+  /**
+   * Тип тексту видання (`textKind`) не узгоджений зі зв'язком з перекладом (HTTP 422):
+   * `details.reason` — `KIND_REQUIRES_UNLINK` (з перекладу в оригінал лише разом із
+   * `translationId: null`) або `UNLINK_NEEDS_KIND` (мова оригіналу твору невідома — вкажіть тип явно).
+   */
+  EDITION_TEXT_KIND_CONFLICT: 'EDITION_TEXT_KIND_CONFLICT',
+  /**
+   * Швидке додавання зовнішнього видання (HTTP 409): ISBN і зовнішнє посилання указують на РІЗНІ видання
+   * (або посилання вже належить іншому виданню). Примірник не створено, посилання не переприв'язано.
+   * `details: { isbnEditionId?, referenceEditionId? }`.
+   */
+  EXTERNAL_IDENTITY_CONFLICT: 'EXTERNAL_IDENTITY_CONFLICT',
+  LIBRARY_ADD_OPERATION_CONFLICT: 'LIBRARY_ADD_OPERATION_CONFLICT',
+  /**
+   * Швидке додавання (HTTP 409): операцію з цим ключем уже виконано, але створений нею примірник
+   * видалено. Повтор НЕ відновлює примірник — нове додавання потребує нового `operationId`.
+   */
+  LIBRARY_ADD_RESULT_REMOVED: 'LIBRARY_ADD_RESULT_REMOVED',
   /**
    * The addressed `Work` was merged into another one (§6.3, R4).
    *
@@ -213,6 +255,38 @@ export const API_ERROR_CODES = {
    * стати доменною помилкою, а не 500.
    */
   LOAN_ALREADY_APPROVED: 'LOAN_ALREADY_APPROVED',
+  /**
+   * Stage 10 (10d): для цієї `LOST`-позики знахідку вже зафіксовано (HTTP 409). Ефект `recover`
+   * однократний: повтор не дає другої події й не змінює стан примірника. Це не «повторна 200».
+   * Підкріплено частковим унікальним індексом `one_recovery_per_loan`.
+   */
+  LOAN_ALREADY_RECOVERED: 'LOAN_ALREADY_RECOVERED',
+  /** Stage 10 (10d): `effectiveAt` у майбутньому відносно серверної дати (HTTP 400). */
+  LOAN_RECOVERY_DATE_INVALID: 'LOAN_RECOVERY_DATE_INVALID',
+  /**
+   * Stage 10 (10e): дати запису наявної позики некоректні (HTTP 400): `handedAt` у майбутньому
+   * (за серверною датою UTC) або `dueAt` раніше за день передачі. Стосується `POST /loans/recorded`
+   * і `amend_record`.
+   */
+  LOAN_RECORD_DATE_INVALID: 'LOAN_RECORD_DATE_INVALID',
+  /**
+   * Stage 10 (10f.3, T7b): для цієї `LOST`-позики вже зафіксовано `RECOVERED` або `LOSS_CLOSED`
+   * (HTTP 409). Той самий принцип однократності, що й `LOAN_ALREADY_RECOVERED`: другий і будь-який
+   * наступний виклик `close_loss` — цей код без жодного додаткового ефекту, не нова подія.
+   */
+  LOAN_ALREADY_CLOSED: 'LOAN_ALREADY_CLOSED',
+
+  // --- Гостьові контакти (Stage 10, D1–D4, 10f.2–10f.3) -----------------------
+  /**
+   * Stage 10 (10f.3, Q3d): контакт не можна видалити — у нього є активна гостьова позика
+   * (`HANDED_OVER`, HTTP 409). Спершу `return` або `mark_lost`.
+   */
+  EXTERNAL_BORROWER_HAS_ACTIVE_LOAN: 'EXTERNAL_BORROWER_HAS_ACTIVE_LOAN',
+  /**
+   * Stage 10 (10f.3, Q3d): контакт не можна видалити — у нього є незакрита `LOST`-позика, без
+   * `RECOVERED` чи `LOSS_CLOSED` (HTTP 409). Спершу «Знайшлася» або «Закрити втрату».
+   */
+  EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS: 'EXTERNAL_BORROWER_HAS_UNRESOLVED_LOSS',
 
   // --- Зовнішні канали сповіщень (§7.2, §7.4) --------------------------------
   /**
@@ -253,6 +327,23 @@ export const API_ERROR_CODES = {
   INVITE_RATE_LIMITED: 'INVITE_RATE_LIMITED',
   /** Листи-запрошення доступні лише з підтвердженою поштою (HTTP 403). */
   INVITE_EMAIL_UNVERIFIED: 'INVITE_EMAIL_UNVERIFIED',
+  /**
+   * Stage 10 (10i.2): посилання гостьового підтвердження невідоме, погашене, замінене новим, або запит
+   * уже розв'язаний (HTTP 404). Один код на всі випадки: за токеном не можна вгадати, який саме.
+   */
+  GUEST_LINK_INVALID: 'GUEST_LINK_INVALID',
+  /** Stage 10 (10i.2): 7-денний строк посилання минув (HTTP 410); запит лишається відкритим. */
+  GUEST_LINK_EXPIRED: 'GUEST_LINK_EXPIRED',
+  /** Stage 10 (10i.2): код підтвердження email хибний, прострочений чи погашений (HTTP 400). */
+  GUEST_CODE_INVALID: 'GUEST_CODE_INVALID',
+  /** Stage 10 (10i.2): забагато хибних кодів або запитів коду для цього посилання (HTTP 429). */
+  GUEST_CODE_RATE_LIMITED: 'GUEST_CODE_RATE_LIMITED',
+  /** Stage 10 (10i.2): немає чинного доказу контролю email для цієї відповіді (HTTP 403). */
+  GUEST_PROOF_INVALID: 'GUEST_PROOF_INVALID',
+  /** Stage 10 (10i.2): лист із посиланням не надіслано; посилання погашено (HTTP 502). */
+  GUEST_LINK_EMAIL_FAILED: 'GUEST_LINK_EMAIL_FAILED',
+  /** Stage 10 (10i.2): посилання можна видати лише для запиту, що очікує відповіді (HTTP 409). */
+  GUEST_LINK_NOT_ISSUABLE: 'GUEST_LINK_NOT_ISSUABLE',
 } as const
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES]

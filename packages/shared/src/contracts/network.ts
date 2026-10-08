@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { editionTextKindSchema } from '../domain/catalog'
 import { copyStatusSchema } from '../domain/copy'
 import { publicUserSchema } from './user'
 
@@ -44,8 +45,11 @@ export const workHoldersRequestSchema = z.object({
 })
 
 export const workHolderGroupSchema = z.object({
+  /** `null` — немає зв'язку з конкретним перекладом (це НЕ означає «оригінал»: див. `textKind`). */
   translationId: z.string().nullable(),
-  language: z.string(),
+  textKind: editionTextKindSchema,
+  /** `null` — мова видання невідома. */
+  language: z.string().nullable(),
   translator: z.string().nullable(),
   owners: z.array(networkOwnerSchema).min(1),
 })

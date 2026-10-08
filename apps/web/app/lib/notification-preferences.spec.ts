@@ -1,4 +1,9 @@
-import { NOTIFICATION_TYPE, PREFERENCE_CHANNEL, defaultPreferenceEnabled } from '@bookswap/shared'
+import {
+  NOTIFICATION_TYPE,
+  PREFERENCE_CHANNEL,
+  defaultPreferenceEnabled,
+  isGuestResponseNotificationType,
+} from '@bookswap/shared'
 import {
   changedCells,
   channelStates,
@@ -80,7 +85,18 @@ describe('toMatrix', () => {
     const matrix = toMatrix([], true)
 
     for (const type of NOTIFICATION_TYPE) {
-      expect(matrix[type].TELEGRAM).toBe(true)
+      // Stage 10 (10i.3): відповіді гостя в Telegram не вмикаються ніколи.
+      expect(matrix[type].TELEGRAM).toBe(!isGuestResponseNotificationType(type))
+    }
+  })
+
+  it('відповіді гостя: IN_APP і EMAIL увімкнені за замовчуванням, TELEGRAM вимкнений навіть після прив’язки', () => {
+    for (const linked of [false, true]) {
+      const matrix = toMatrix([], linked)
+
+      for (const type of ['GUEST_LOAN_RECEIVED', 'GUEST_LOAN_DENIED'] as const) {
+        expect(matrix[type]).toEqual({ IN_APP: true, EMAIL: true, TELEGRAM: false })
+      }
     }
   })
 

@@ -242,6 +242,8 @@ export type BorrowedLibraryGroup = z.infer<typeof borrowedLibraryGroupSchema>
  */
 export const libraryQueryRequestSchema = z.object({
   status: copyStatusSchema.optional(),
+  /** Stage 10 (10c): `true` — лише архів власника; без параметра чи `false` — активні примірники. */
+  archived: z.enum(['true', 'false']).optional(),
   lang: languageCodeSchema.optional(),
   q: z.string().trim().min(LIBRARY_LIMITS.queryMin).max(LIBRARY_LIMITS.queryMax).optional(),
 })
@@ -315,3 +317,20 @@ export const copyResponseSchema = z.object({
 })
 
 export type CopyResponse = z.infer<typeof copyResponseSchema>
+
+/**
+ * `GET /me/library/copies/:copyId`: сторінка власної книги — один примірник із приватним
+ * (нотатка) і каталожним контекстом.
+ *
+ * Окрема схема, а не `libraryGroupSchema` із одним елементом: сторінка адресує примірник, а не
+ * групу за виданням, і приватне поле тут живе лише тому, що в `ownCopySchema` воно вже є. Для
+ * чужих проєкцій (`visibleCopySchema`, `borrowedCopySchema`) нотатки не існує взагалі (§9).
+ */
+export const ownBookResponseSchema = z.object({
+  copy: ownCopySchema,
+  edition: editionSchema,
+  work: workSchema,
+  authors: z.array(workAuthorSchema),
+})
+
+export type OwnBookResponse = z.infer<typeof ownBookResponseSchema>

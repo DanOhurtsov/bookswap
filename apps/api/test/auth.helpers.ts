@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config'
 import { Test, type TestingModuleBuilder } from '@nestjs/testing'
 import { ThrottlerGuard } from '@nestjs/throttler'
 import type { INestApplication } from '@nestjs/common'
@@ -71,6 +72,14 @@ export async function createTestApp({
 
   configureApp(app, { trustProxy })
 
+  // Те саме, що `main.ts`: браузер на `WEB_ORIGIN` ходить в API з кукі. Для supertest це нічого не змінює
+  // (він не надсилає `Origin`), але без цього `createTestApp()` був би не тим самим застосунком, що `main.ts`,
+  // і браузерний e2e (`test:browser`) не міг би працювати проти нього.
+  app.enableCors({
+    origin: app.get(ConfigService).getOrThrow<string>('WEB_ORIGIN'),
+    credentials: true,
+  })
+
   // `listen(0)`, а не `init()`: один слухач на весь файл.
   //
   // Інакше слухача піднімає supertest — і закриває його після КОЖНОГО запиту
@@ -98,11 +107,19 @@ export async function createTestApp({
 
 let counter = 0
 
+/**
+ * Every test file gets its own module registry, so `counter` restarts from zero for each of them
+ * while the pid is shared by all the files one process runs. Two files that register the same
+ * prefix (`notif-owner`) with the same counter would produce the same address and fail with a 409.
+ * A random tag, different for every file, keeps such addresses apart.
+ */
+const fileTag = Math.random().toString(36).slice(2, 8)
+
 /** Унікальна адреса на кожен виклик: e2e-файли ділять одну тестову базу. */
 export function uniqueEmail(prefix = 'user'): string {
   counter += 1
 
-  return `${prefix}-${String(counter)}-${String(process.pid)}@example.com`
+  return `${prefix}-${String(counter)}-${String(process.pid)}-${fileTag}@example.com`
 }
 
 export const VALID_PASSWORD = 'dovhyj-parol-2026'

@@ -10,9 +10,23 @@ import { copyVisibleTo, holderNamesVisibleTo, type ViewerRole } from '../access/
 import { toEdition, toWork, toWorkAuthors } from '../catalog/catalog.mapper'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
+import { ACTUAL_HANDOVER } from './actual-handover'
 import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
-import { byRequestedAt, toHistoryCopy, toHistoryEntry, toNamedEntry } from './history.mapper'
-import type { FriendRelation } from '@bookswap/shared'
+import {
+  byRequestedAt,
+  hasRegisteredBorrower,
+  toAnonymousEntry,
+  toHistoryCopy,
+  toHistoryEntry,
+  toNamedEntry,
+} from './history.mapper'
+import type { FriendRelation, LoanOrigin, LoanStatus } from '@bookswap/shared'
+
+/**
+ * Stage 10 (T5): позика, яку власник записав і яка ще не підтверджена (або відхилена), — це
+ * претензія однієї сторони, а не факт. Її бачать лише сторони позики.
+ */
+const CLAIM_STATUSES: readonly LoanStatus[] = ['PENDING_CONFIRMATION', 'DECLINED']
 
 /** Каталожний контекст примірника — рівно те, що читає `history.mapper`. */
 const COPY_CATALOG = {
@@ -27,6 +41,8 @@ const COPY_CATALOG = {
 const WITH_SIDES = {
   owner: { select: PUBLIC_USER_FIELDS },
   borrower: { select: PUBLIC_USER_FIELDS },
+  // Stage 10 (10i.1): лише статус — джерело доказу гостьової передачі виводиться з нього.
+  guestConfirmation: { select: { status: true } },
 } as const
 
 /**
@@ -84,10 +100,12 @@ export class HistoryService {
     // полиці й доступ до того, хто що в кого брав, — різні питання.
     assertHistoryVisible(role)
 
-    const loans = await this.prisma.loan.findMany({
-      where: { copyId: copy.id },
-      include: WITH_SIDES,
-    })
+    const loans = (
+      await this.prisma.loan.findMany({
+        where: { copyId: copy.id },
+        include: WITH_SIDES,
+      })
+    ).filter((loan) => isVisibleToParty(loan, viewerId))
 
     const showNames = holderNamesVisibleTo(role, copy.owner.showHolderNames)
     const now = new Date()
@@ -125,7 +143,10 @@ export class HistoryService {
         visibility: true,
         owner: { select: { libraryVisibility: true, showHolderNames: true } },
         edition: { include: { translation: true, work: true } },
-        loans: { include: WITH_SIDES },
+        loans: {
+          where: ACTUAL_HANDOVER,
+          include: WITH_SIDES,
+        },
       },
     })
 
@@ -149,7 +170,7 @@ export class HistoryService {
         entries.push({
           entry: toHistoryEntry(loan, showNames, now),
           copyId: copy.id,
-          edition: toEdition(copy.edition, copy.edition.work),
+          edition: toEdition(copy.edition),
         })
       }
     }
@@ -164,8 +185,12 @@ export class HistoryService {
   /**
    * §8: `GET /me/history` — «що я брав і що в мене брали».
    *
-   * Обидва списки завжди з іменами: viewer — сторона кожного з цих лоанів, а не
-   * стороння людина, тож §6.6 сюди не застосовується.
+   * `borrowed` завжди з іменами: viewer тут сам зареєстрований позичальник, а гість ніколи не
+   * може бути «я». `lent` (Stage 10, 10f.3) може містити й анонімний гостьовий факт — той самий
+   * `toAnonymousEntry`, що вже ховає імена від друга/стороннього (D4, P1): жодного alias/contactId
+   * тут немає й не буде — власник отримує їх лише через окремий owner-only `GET /loans/guest[/:id]`
+   * (§6.9/§6.10 execution plan). Раніше `hasRegisteredBorrower`-фільтр застосовувався до **всього**
+   * набору, тож гостьові факти власника губилися ще до сортування — цю прогалину закрито тут.
    */
   async myHistory(userId: string): Promise<MyHistoryResponse> {
     const loans = await this.prisma.loan.findMany({
@@ -177,17 +202,34 @@ export class HistoryService {
     })
 
     const now = new Date()
-    const ordered = [...loans].sort((one, other) => byRequestedAt(other, one))
-    const project = (loan: (typeof ordered)[number]): MyHistoryResponse['borrowed'][number] => ({
-      entry: toNamedEntry(loan, now),
+    const sorted = [...loans].sort((one, other) => byRequestedAt(other, one))
+    const project = (loan: (typeof sorted)[number]): MyHistoryResponse['borrowed'][number] => ({
+      entry: hasRegisteredBorrower(loan) ? toNamedEntry(loan, now) : toAnonymousEntry(loan, now),
       copy: toHistoryCopy(loan.copy),
     })
 
     return {
-      borrowed: ordered.filter((loan) => loan.borrowerId === userId).map(project),
-      lent: ordered.filter((loan) => loan.ownerId === userId).map(project),
+      // `borrowerId === userId` структурно неможливе для гостьової позики (`borrowerId` завжди
+      // `NULL`), тож додаткового фільтра `hasRegisteredBorrower` тут не потрібно.
+      borrowed: sorted.filter((loan) => loan.borrowerId === userId).map(project),
+      lent: sorted.filter((loan) => loan.ownerId === userId).map(project),
     }
   }
+}
+
+/**
+ * Претензії бачать лише власник і позичальник цієї позики: `PENDING_CONFIRMATION`/`DECLINED`, а також відкликаний
+ * запис (`CANCELLED` з `origin ≠ REQUESTED`) — передача, що так і не була підтверджена, не факт для третіх осіб.
+ */
+function isVisibleToParty(
+  loan: { status: LoanStatus; origin: LoanOrigin; ownerId: string; borrowerId: string | null },
+  viewerId: string,
+): boolean {
+  const withdrawnRecord = loan.status === 'CANCELLED' && loan.origin !== 'REQUESTED'
+
+  if (!CLAIM_STATUSES.includes(loan.status) && !withdrawnRecord) return true
+
+  return loan.ownerId === viewerId || loan.borrowerId === viewerId
 }
 
 /**

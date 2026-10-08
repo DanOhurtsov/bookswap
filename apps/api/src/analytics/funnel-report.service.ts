@@ -8,9 +8,17 @@ import {
   type FunnelReport,
   type FunnelReportQuery,
 } from './funnel-report'
-import { PRODUCT_EVENT_TYPE, productEventTypeSchema } from './product-event.types'
+import {
+  PRODUCT_EVENT_TYPE,
+  RECORDED_LOAN_EVENT_TYPE,
+  productEventTypeSchema,
+} from './product-event.types'
 
-const CONVERSION_EVENT_TYPES = PRODUCT_EVENT_TYPE.filter((type) => type !== 'SIGNUP_COMPLETED')
+// Записані позики (Stage 10) — окремий блок метрик (Q9 не вирішено), тож у кроки funnel не потрапляють.
+const CONVERSION_EVENT_TYPES = PRODUCT_EVENT_TYPE.filter(
+  (type) =>
+    type !== 'SIGNUP_COMPLETED' && !(RECORDED_LOAN_EVENT_TYPE as readonly string[]).includes(type),
+)
 const DAY_MS = 24 * 60 * 60 * 1000
 
 @Injectable()

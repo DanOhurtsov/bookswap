@@ -11,13 +11,16 @@ import {
 } from '../../lookup/lookup-provider.utils'
 import {
   ExternalSearchProviderError,
+  ExternalSearchProviderRateLimitedError,
   ExternalSearchTimeoutError,
+  retryAfterMsFrom,
   type ExternalSearchBlock,
   type ExternalSearchBlockResult,
   type ExternalSearchContext,
   type ExternalSearchProvider,
 } from './external-search-provider'
 import { searchTerms } from './search-terms'
+import { spellingTexts } from './spelling-texts'
 
 const API_ROOT = 'https://www.googleapis.com/books/v1/volumes'
 
@@ -113,7 +116,7 @@ const QUERY_BUDGET = 3
  * non-empty answer returned the biographies and never asked for the author's
  * own novels.
  */
-function queryPlan(terms: readonly string[]): string[] {
+function queryPlan(terms: readonly string[], maxQueries: number = QUERY_BUDGET): string[] {
   const titleQuery = terms.map((term) => `intitle:"${term}"`).join(' ')
 
   // Longest first: a surname carries more than a conjunction, and length is
@@ -125,7 +128,8 @@ function queryPlan(terms: readonly string[]): string[] {
     .slice(0, QUERY_BUDGET - 1)
     .map(({ term }) => `inauthor:"${term}"`)
 
-  return [titleQuery, ...probes]
+  // The title query always comes first, so a budget of one is exactly the title reading.
+  return [titleQuery, ...probes].slice(0, Math.max(1, maxQueries))
 }
 
 /**
@@ -182,6 +186,8 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
 
     const seen = new Set<string>()
     const found: ExternalSearchResult[] = []
+    // Everything that parsed, gated or not: see `ExternalSearchBlockResult.spellingCandidates`.
+    const parsed: ExternalSearchResult[] = []
     let failure: Error | undefined
     // Only a query that came back SHORT proves its own end. Anything else —
     // a failed query, one skipped past the deadline, one that filled its window
@@ -189,7 +195,7 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
     // only when every one of its queries is.
     let exhausted = true
 
-    for (const planned of queryPlan(terms)) {
+    for (const planned of queryPlan(terms, block.maxQueries)) {
       // The deadline belongs to the whole source, so once it has passed there
       // is nobody left to answer: returning what we already have beats
       // spending a rate-limit slot on a response nobody will read.
@@ -211,6 +217,8 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
         // the stream, and counting the survivors would make it look like one.
         if (page.returned >= maxResults) exhausted = false
 
+        parsed.push(...page.results)
+
         for (const result of page.results) {
           if (seen.has(result.id) || !relevanceOf(query, result).matched) continue
 
@@ -222,6 +230,9 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
         // wrap is here so the rethrow below is typed as an error, not `unknown`.
         failure ??= error instanceof Error ? error : new ExternalSearchProviderError(String(error))
         exhausted = false
+
+        // The provider asked us to back off: the rest of the plan would be more calls into a 429.
+        if (error instanceof ExternalSearchProviderRateLimitedError) break
       }
     }
 
@@ -236,6 +247,7 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
     return {
       results: found,
       exhausted,
+      spellingCandidates: spellingTexts(parsed),
       ...(failure === undefined ? {} : { partialFailure: failure }),
     }
   }
@@ -275,6 +287,13 @@ export class GoogleBooksSearchProvider implements ExternalSearchProvider {
     } catch (error) {
       throw new ExternalSearchProviderError(
         error instanceof Error ? error.message : 'мережева помилка',
+      )
+    }
+
+    if (response.status === 429) {
+      throw new ExternalSearchProviderRateLimitedError(
+        'Google Books відповів HTTP 429',
+        retryAfterMsFrom(response.headers.get('retry-after')),
       )
     }
 

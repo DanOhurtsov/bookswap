@@ -7,6 +7,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { TextAreaField, TextField } from '@/components/Form/FormFields'
+import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { parseTranslationConflict } from '../api/correction-requests'
 import { nullableNumber } from '../model/form-values'
@@ -16,7 +17,6 @@ import {
 } from '../model/translation-form'
 import type { CatalogCorrection } from '../model/use-catalog-correction'
 import { ConflictNotice } from './ConflictNotice'
-import { LanguageField } from './LanguageField'
 import { RefreshNotice } from './RefreshNotice'
 
 type TranslationCorrectionFormProps = {
@@ -136,7 +136,7 @@ export function TranslationCorrectionForm({
         control={control}
         name="lang"
         render={({ field }) => (
-          <LanguageField
+          <LanguageSelect
             id="correction-translation-lang"
             label="Мова перекладу"
             value={field.value}
@@ -149,7 +149,7 @@ export function TranslationCorrectionForm({
         control={control}
         name="sourceLang"
         render={({ field }) => (
-          <LanguageField
+          <LanguageSelect
             id="correction-translation-source"
             label="З якої мови перекладено"
             value={field.value}

@@ -204,6 +204,18 @@ Prisma 7 більше не підвантажує `.env` сама, тож `apps/
 - **`NODE_ENV=production` вимагає `EMAIL_PROVIDER=resend`.** `DevEmailSender` нічого не надсилає й друкує тіло листа з одноразовим токеном у лог.
 - **Змінні Telegram — усі три або жодної.** Токен без імені бота не дає зібрати deep link; токен без секрету лишає `POST /webhooks/telegram` — єдиний маршрут без сесії — відкритим для будь-кого, хто знає адресу.
 
+#### Запобіжник гостьових позик (Етап 10, крок 10f.1)
+
+| Змінна                       | Навіщо                                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `GUEST_LOANS_ENABLED`        | `false` за замовчуванням. Допустимі значення — рівно `true` або `false`; будь-що інше зупиняє старт. |
+| `GUEST_LOANS_SYNTHETIC_ONLY` | `false` за замовчуванням. Обов'язково `true`, якщо `GUEST_LOANS_ENABLED=true` поза production.       |
+
+- **`NODE_ENV=production` + `GUEST_LOANS_ENABLED=true` — API не стартує** (константа `GUEST_LOANS_PRODUCTION_ALLOWED = false` у `env.validation.ts`; змінюється лише кодом за письмовим рішенням PO).
+- Поза production увімкнення без `GUEST_LOANS_SYNTHETIC_ONLY=true` теж зупиняє старт.
+- Маршрути `POST/GET/PATCH/DELETE /me/external-borrowers` (10f.2/10f.3) і `POST/GET /loans/guest`, `GET/PATCH /loans/guest/:id` (10f.3: `return`/`mark_lost`/`recover`/«Закрити втрату») захищає `GuestLoansEnabledGuard`: при вимкненій функції — `403 FEATURE_DISABLED` ще до сесії, сервісів і БД. Стан функції для UI віддає `features.guestLoans` у `GET /auth/session`. `DELETE` контакту відмовляє (409), доки лишається активна гостьова позика чи незакрита втрата. Retention (`retainUntil`, крок 10h) ще не реалізовано.
+- **Реальні персональні дані гостя заборонені в усіх середовищах.** `GUEST_LOANS_SYNTHETIC_ONLY=true` — організаційне підтвердження, а не перевірка: код не відрізняє реальну людину від синтетичної. Запобіжник **не знімає D2** (відкритий release blocker). Деталі — [runbook](docs/runbooks/guest-loans-safeguard.md).
+
 ## Акаунт і сесії
 
 ### Ендпоінти
@@ -561,6 +573,8 @@ Open Library і Google Books опитуються **паралельно**, ко
 
 **Кеш і ліміти.** Джерело читається **блоками** по `CATALOG_EXTERNAL_SEARCH_BLOCK_SIZE` сирих записів (дефолт 24), а сторінка ріжеться вже з того, що пройшло ворота релевантності й дедуплікацію: блок зазвичай покриває дві-три сторінки, і сторінки в його межах не коштують жодного звернення назовні. За один запит довантажується щонайбільше **один** блок, якого немає в кеші — другий гарантовано впирався б у дедлайн джерела й коштував би всіх результатів, а не останніх. Кеш — in-memory LRU з TTL (`CATALOG_EXTERNAL_SEARCH_CACHE_TTL_MS`, дефолт година) і склеюванням одночасних однакових запитів; ключ — джерело + нормалізований запит + індекс блоку + розмір блоку, помилки не кешуються. **Він окремий для кожного процесу й зникає з рестартом** — наявна `ExternalBookLookup` має `isbn` первинним ключем і запит за назвою вмістити не може. Ліміт провайдера тримає `ProviderRateLimiter` (`CATALOG_EXTERNAL_SEARCH_MIN_INTERVAL_MS`): [Open Library документує](https://openlibrary.org/developers/api) 1 запит/с без ідентифікації і 3 — з `User-Agent`, що несе контакт. `@Throttle` на ендпоінті рахує кожного клієнта окремо й сумарний потік назовні не обмежує взагалі — саме тому потрібні обидва механізми.
 
+**Автопідказки під час введення** ([план, §11](docs/plan/fast-book-add.md#11-автопошук-під-час-введення)). `GET /me/library/add-search/suggest` (наш каталог, `q` ≥ 2, до 8 елементів) і `…/suggest/external` (`q` ≥ 3) — фіксований режим без `page`/`pageSize`. Зовнішня половина опитує **Open Library і Google Books паралельно — по одному HTTP-запиту до кожного** (список бере з `EXTERNAL_SEARCH_PROVIDERS`, тож нове джерело долучається без змін), нічого не дочитує й не стоїть у черзі за слотом `ProviderRateLimiter` (`tryAcquire` окремо на джерело, не частіше ніж раз на `CATALOG_EXTERNAL_SUGGEST_MIN_GAP_MS`). Кеш підказок — окремий режим у ключі й окремий LRU (`CATALOG_EXTERNAL_SUGGEST_CACHE_MAX_ENTRIES`); помилки, відмови й 429 не кешуються. Відповідь 429 від провайдера охолоджує джерело на `Retry-After` (1 с…5 хв; без заголовка — `CATALOG_EXTERNAL_RATE_LIMIT_COOLDOWN_MS`). **Межа бюджету:** limiter, кеш і `@Throttle` — per-process, тож реальна стеля до провайдера множиться на кількість інстансів API (≤ 60 стартів викликів/хв на джерело на інстанс для пошуку за назвою; підказки — ≤ 30/хв на джерело); ISBN lookup і `fetchVolume` у цей limiter не входять.
+
 Перед створенням нового `Work` вибір зовнішнього запису проходить **перевірку дублікатів** через той самий `/catalog/search/candidates`: спершу за ISBN, якщо він є, далі за назвою й першим автором. Збіг за назвою подається як питання, а не як висновок — тезки трапляються й серед книжок. Запит, що сам є валідним ISBN, зовнішній пошук за назвою не запускає: на нього вже відповідає `/catalog/lookup`, і чинна ISBN-поведінка незмінна.
 
 У web (`apps/web/app/catalog/new`) обидва ендпоінти складаються в один флоу: пошук за назвою або ISBN показує кандидатів, і залежно від того, що знайшлося, — одна з гілок §6.3 (наявне видання → тільки `Copy`; наявний твір → нові `Translation`/`Edition`; нічого → повний ланцюг `Work → Translation → Edition → Copy`). Дані з lookup підставляються у форму й лишаються редаговані до збереження; 429, 504 і помилка провайдера мають окремі зрозумілі повідомлення (`lib/catalog-errors.ts`).
@@ -625,9 +639,12 @@ pnpm --filter @bookswap/api run merge:works --from <workId> --into <workId>
 POST   /api/v1/loans                  { copyId, message?, proposedDueAt? }
 GET    /api/v1/loans                  ?role=owner|borrower&status=…
 GET    /api/v1/loans/:id
+POST   /api/v1/loans/recorded         { copyId, borrowerId, handedAt, dueAt? }   (Етап 10, 10e)
 PATCH  /api/v1/loans/:id              { action: approve | reject | cancel |
-                                                hand_over | return | mark_lost,
-                                        note?, dueAt? }
+                                                hand_over | return | mark_lost | recover |
+                                                confirm_record | decline_record |
+                                                withdraw_record | amend_record,
+                                        note?, dueAt?, effectiveAt?, handedAt? }
 ```
 
 Один `PATCH` із полем `action` замість шести маршрутів (§8): усі переходи проходять крізь одну точку, де живе валідація стейт-машини. Прямих ендпоінтів «підтвердити» чи «повернути» немає й не буде — кожен із них був би другим місцем, де ухвалюється рішення про перехід.
@@ -654,6 +671,25 @@ PATCH  /api/v1/loans/:id              { action: approve | reject | cancel |
 - **`respondedAt` — це «власник відповів на запит»**, а не «востаннє щось сталося». Тому його ставлять лише `approve`, `reject` і авто-відхилення конкурентів. `REQUESTED → CANCELLED` лишає поле порожнім (відповіді не було), а `APPROVED → CANCELLED` **не перезаписує** значення від апруву. Окремих колонок під `CANCELLED` і `LOST` §4.6 не має, і вигадувати їх без вимоги специфікації не треба.
 - **`reject` і `cancel` із `REQUESTED` не мають передумов на `Copy` і не чіпають його.** Власник міг після появи запиту перемкнути книжку в `UNAVAILABLE` — саме тоді прибрати висячий запит потрібно найбільше, і цей перехід не має права мовчки скасувати його рішення.
 - **Дружба перевіряється лише на створенні.** Після появи лоану переходи авторизуються за `ownerId`/`borrowerId`. Це прямий наслідок §5.2: «видалення з друзів не скасовує активні лоани» — фізична книжка все одно в когось, і `return` мусить лишитися можливим. Повторна перевірка зробила б блокування інструментом утримання чужої речі.
+
+### Запис наявної позики між друзями (Етап 10, крок 10e)
+
+Власник записує книжку, яку вже віддав зареєстрованому другові (D6), — без вигаданих `REQUESTED`/`APPROVED`. Усі рішення — у тій самій чистій `resolveTransition()`, яка тепер отримує `origin`; дії request-flow над записом і дії запису над request-flow відмовляють (`409 LOAN_INVALID_TRANSITION`).
+
+| Звідки                     | Дія             | Хто         | Куди                   | `Copy` після               | Побічні ефекти                                                                                                               |
+| -------------------------- | --------------- | ----------- | ---------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| — (`POST /loans/recorded`) | —               | власник     | `PENDING_CONFIRMATION` | `RESERVED`, удома          | `RECORD_PROPOSED`, `LOAN_RECORD_PROPOSED`; `requestedAt = NULL`; чужі `REQUESTED` не чіпаються                               |
+| `PENDING_CONFIRMATION`     | confirm_record  | позичальник | `HANDED_OVER`          | `LENT_OUT`, у позичальника | `handedAt` не перезаписується; `RECORD_CONFIRMED`; **лише тут** справжні конкуруючі `REQUESTED` → `REJECTED` зі сповіщеннями |
+| `PENDING_CONFIRMATION`     | decline_record  | позичальник | `DECLINED`             | `AVAILABLE`                | `RECORD_DECLINED`; чужі `REQUESTED` лишаються чинними                                                                        |
+| `PENDING_CONFIRMATION`     | withdraw_record | власник     | `CANCELLED`            | `AVAILABLE`                | `RECORD_WITHDRAWN`; чужі `REQUESTED` лишаються чинними                                                                       |
+| `PENDING_CONFIRMATION`     | amend_record    | власник     | `PENDING_CONFIRMATION` | не змінюється              | лише `handedAt`/`dueAt`; `RECORD_AMENDED` із попередніми/новими значеннями (Q12: після підтвердження — `409`)                |
+
+- **Ексклюзивність (M5).** `PENDING_CONFIRMATION` входить до `EXCLUSIVE_LOAN_STATUS` і до індексу `one_active_loan_per_copy`; примірник `RESERVED`, тож ніде не «доступний». Запис і подія, і сповіщення — в одній транзакції під `FOR UPDATE` на `Copy`.
+- **Q6 — без auto-expiry.** Непідтверджений запис ніхто не скасовує сам; нагадування власнику (10e-r) відкладено рішенням PO (лише заготовка в плані).
+- **Межі `origin`.** `/loans` віддає лише валідні позики: `RECORDED_EXISTING` зі статусом `REQUESTED`/`APPROVED`/`REJECTED` або без `handedAt`, а також `RECORDED_GUEST`, не проходять `asServedLoan` (`404`). `requestedAt` у контракті nullable; підпис визначає `origin`.
+- **Приватність.** `PENDING_CONFIRMATION`, `DECLINED` і відкликаний запис (`CANCELLED` з `origin ≠ REQUESTED`) бачать лише сторони; `expectedReturnAt` для непідтвердженого запису чужим не віддається.
+- **Аналітика.** `LOAN_RECORDED`, `LOAN_RECORD_CONFIRMED`, `LOAN_RECORD_DECLINED`, `LOAN_RECORD_WITHDRAWN` (`subjectUserId` — власник); у 13 кроків funnel не входять (Q9). Кроки core loop (`LOAN_HANDED_OVER` тощо) для записаних позик не пишуться.
+- Докладніше — [execution plan §6.2–§6.3, §6.16](docs/plan/stage-10-real-world-history.md) і [runbook](docs/runbooks/stage-10-migration-rollback.md).
 
 ### Конкурентність
 
@@ -774,6 +810,10 @@ GET    /api/v1/me/history
 Назовні це дискримінований union за полем `names`, тож клієнт звужує тип одним порівнянням і фізично не може прочитати ім'я там, де його немає. Перевіряється двічі: unit-тестом маперів і e2e-тестом, який шукає заборонені ключі в **сирому** тілі відповіді — розібране схемою тіло сховало б витік саме там, де його треба побачити.
 
 `GET /me/history` завжди з іменами: viewer — сторона кожного з цих лоанів, а не стороння людина, і без імені йому немає кому вертати книжку.
+
+**«Хто читав» (`GET /works/:id/history`) — лише фактична передача (Етап 10, крок 10b).** У відповідь потрапляють позики зі статусом `HANDED_OVER`, `RETURNED` або `LOST` **і** з `handedAt != null`. За рішенням Product Owner (Q8) `LOST` — «читав» лише тоді, коли передача справді відбулася; `LOST` без `handedAt` читанням не є. `REQUESTED`, `APPROVED`, `REJECTED`, `CANCELLED`, `PENDING_CONFIRMATION` і `DECLINED` — це запит, відмова або претензія, а не читання. Повна activity history не втрачається: `GET /copies/:id/history` і `GET /me/history` як і раніше показують усі статуси, зокрема `REJECTED` і `CANCELLED`. `PENDING_CONFIRMATION` і `DECLINED` бачать лише сторони відповідної позики — не друзі власника. Правила friendship, block, видимості примірника й `showHolderNames` не змінені; гостьові рядки для не-власника завжди анонімні. В інтерфейсі цей розділ сторінки твору з кроку 10j називається «Хто брав цю книжку» (Q16): змінено лише текст, фільтр і контракт `GET /works/:id/history` ті самі. Особистий статус читання (`/me/reading-statuses/:workId`, `/me/reading-list`) приватний і в історії не з’являється.
+
+Кожен запис історії несе `origin` (`REQUESTED` / `RECORDED_EXISTING` / `RECORDED_GUEST`). Для записаної власником позики UI показує «Записано власником» замість «Попросили …», навіть якщо `requestedAt` ненульовий через дефолт БД: джерелом істини про «чи був запит» є `origin`, а не дата. Для звичайного request-flow текст «Попросили …» не змінився.
 
 ## Сповіщення
 

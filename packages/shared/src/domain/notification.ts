@@ -27,6 +27,15 @@ export const NOTIFICATION_TYPE = [
   'LOAN_OVERDUE',
   'FRIEND_REQUESTED',
   'FRIEND_ACCEPTED',
+  // Stage 10 (10e): життєвий цикл запису наявної позики.
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
+  'LOAN_RECORD_AMENDED',
+  // Stage 10 (10i.3): відповідь гостя на запит підтвердження конкретної позики. IN_APP + загальний EMAIL за правилами власника; Telegram недоступний.
+  'GUEST_LOAN_RECEIVED',
+  'GUEST_LOAN_DENIED',
 ] as const
 
 export const notificationTypeSchema = z.enum(NOTIFICATION_TYPE)
@@ -48,7 +57,38 @@ export const IMMEDIATE_NOTIFICATION_TYPE = [
   'LOAN_RETURNED',
   'FRIEND_REQUESTED',
   'FRIEND_ACCEPTED',
+  // Stage 10 (10e): життєвий цикл запису наявної позики.
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_CONFIRMED',
+  'LOAN_RECORD_DECLINED',
+  'LOAN_RECORD_WITHDRAWN',
+  'LOAN_RECORD_AMENDED',
+  // Stage 10 (10i.3): створюються в транзакції відповіді гостя.
+  'GUEST_LOAN_RECEIVED',
+  'GUEST_LOAN_DENIED',
 ] as const
+
+/**
+ * Stage 10 (10i.3): відповіді гостя на запит підтвердження позики.
+ *
+ * Рішення PO (forward-запис у плані): власник отримує IN_APP з результатом; EMAIL доступний за звичайними
+ * правилами (підтверджена адреса, налаштування власника) і ввімкнений за замовчуванням, але лист лише
+ * ЗАГАЛЬНИЙ (без книжки, результату, нікнейма, email гостя, alias чи id запиту — див. renderer);
+ * TELEGRAM для цих типів недоступний ніколи: ні за замовчуванням, ні за явним налаштуванням, ні за
+ * прив'язаним чатом.
+ */
+export const GUEST_RESPONSE_NOTIFICATION_TYPE = [
+  'GUEST_LOAN_RECEIVED',
+  'GUEST_LOAN_DENIED',
+] as const
+
+export type GuestResponseNotificationType = (typeof GUEST_RESPONSE_NOTIFICATION_TYPE)[number]
+
+export function isGuestResponseNotificationType(
+  type: NotificationType,
+): type is GuestResponseNotificationType {
+  return (GUEST_RESPONSE_NOTIFICATION_TYPE as readonly NotificationType[]).includes(type)
+}
 
 /**
  * §7.5, друга група: тільки щоденним дайджестом.
@@ -80,6 +120,9 @@ export const FLOW_CRITICAL_NOTIFICATION_TYPE = [
   'LOAN_DUE_SOON',
   'LOAN_OVERDUE',
   'FRIEND_REQUESTED',
+  // Stage 10 (10e): без відповіді позичальника запис не рухається (виправлення дат — так само).
+  'LOAN_RECORD_PROPOSED',
+  'LOAN_RECORD_AMENDED',
 ] as const
 
 /** Чи створюється тип щоденною задачею, а не переходом стану. */
@@ -109,8 +152,14 @@ export function defaultPreferenceEnabled(
   // без жодного каналу подія була б невидимою навіть на власній сторінці.
   if (channel === 'IN_APP') return true
 
-  // «після підключення Telegram — усе в TELEGRAM». До підключення надсилати нікуди.
-  if (channel === 'TELEGRAM') return context.telegramLinked
+  // «після підключення Telegram — усе в TELEGRAM». До підключення надсилати нікуди. Відповіді гостя
+  // (`GUEST_RESPONSE_NOTIFICATION_TYPE`) — виняток: Telegram для них недоступний.
+  if (channel === 'TELEGRAM')
+    return context.telegramLinked && !isGuestResponseNotificationType(type)
 
-  return (FLOW_CRITICAL_NOTIFICATION_TYPE as readonly NotificationType[]).includes(type)
+  // EMAIL: критичне для флоу + відповіді гостя (лист загальний, див. renderer).
+  return (
+    isGuestResponseNotificationType(type) ||
+    (FLOW_CRITICAL_NOTIFICATION_TYPE as readonly NotificationType[]).includes(type)
+  )
 }

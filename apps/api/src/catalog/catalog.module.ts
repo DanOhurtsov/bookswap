@@ -44,6 +44,6 @@ import { TextNormalizer } from './text-normalizer'
     WorkHoldersService,
     TextNormalizer,
   ],
-  exports: [TextNormalizer],
+  exports: [TextNormalizer, CatalogService],
 })
 export class CatalogModule {}

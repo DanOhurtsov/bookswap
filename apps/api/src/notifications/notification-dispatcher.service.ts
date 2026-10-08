@@ -396,13 +396,16 @@ export class NotificationDispatcher implements OnModuleInit, OnModuleDestroy {
         emailVerified: notification.user.emailVerified,
         telegramChatId: notification.user.telegramChatId,
       },
-      message: renderNotification({
-        type: notification.type,
-        payload,
-        actorName: actor?.displayName ?? null,
-        bookTitle: copy?.edition.work.title ?? null,
-        webOrigin: this.config.getOrThrow<string>('WEB_ORIGIN'),
-      }),
+      message: renderNotification(
+        {
+          type: notification.type,
+          payload,
+          actorName: actor?.displayName ?? null,
+          bookTitle: copy?.edition.work.title ?? null,
+          webOrigin: this.config.getOrThrow<string>('WEB_ORIGIN'),
+        },
+        delivery.channel,
+      ),
     }
   }
 

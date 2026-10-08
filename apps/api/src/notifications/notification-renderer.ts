@@ -1,5 +1,5 @@
-import { isDigestNotificationType } from '@bookswap/shared'
-import type { NotificationPayload, NotificationType } from '@bookswap/shared'
+import { isDigestNotificationType, isGuestResponseNotificationType } from '@bookswap/shared'
+import type { Channel, NotificationPayload, NotificationType } from '@bookswap/shared'
 import type { DeliveryAction, RenderedNotification } from './channels/notification-channel'
 
 /**
@@ -9,9 +9,10 @@ import type { DeliveryAction, RenderedNotification } from './channels/notificati
  * аргументом. Це те, що дозволяє перевірити формулювання й — головне — набір
  * інлайн-кнопок, не піднімаючи ні PostgreSQL, ні Telegram.
  *
- * Один текст на всі канали. Розділити його на «лист» і «повідомлення в бота»
- * було б передчасно: різниця між ними вичерпується темою листа, яку канал і так
- * бере окремим полем.
+ * Один текст на всі канали — крім відповідей гостя (10i.3): їх рішення PO вимагає
+ * показувати в застосунку змістовно, а в листі — лише загальним нагадуванням, бо
+ * пошта покидає контур BookSwap. Різниця живе тут, у чистій функції, а не в каналі:
+ * канал не знає про типи подій (§7.3).
  */
 export interface NotificationView {
   type: NotificationType
@@ -69,6 +70,15 @@ function digestSubject(view: NotificationView): string {
 }
 
 function loanLink(view: NotificationView): string | null {
+  // Stage 10 (10i.3): відповідь гостя веде на екран гостьових позик власника (запит, а не зареєстрована позика).
+  if (isGuestResponseNotificationType(view.type)) {
+    const confirmationId = view.payload.confirmationId
+
+    return confirmationId === undefined
+      ? `${view.webOrigin}/loans/guest`
+      : `${view.webOrigin}/loans/guest?confirmationId=${encodeURIComponent(confirmationId)}`
+  }
+
   const loanId = view.payload.loanId
 
   return loanId === undefined
@@ -134,6 +144,24 @@ function headline(view: NotificationView): string {
       return `${who} хоче додати вас у друзі`
     case 'FRIEND_ACCEPTED':
       return `Запит у друзі прийнято: ${who}`
+    // Stage 10 (10e): формулювання безособові й не стверджують непідтверджений факт — це запис власника,
+    // а не погоджена передача, доки позичальник не відповів.
+    case 'LOAN_RECORD_PROPOSED':
+      return `Записано передачу ${what}: ${who} вказує, що книжка вже у вас`
+    case 'LOAN_RECORD_AMENDED':
+      return `Виправлено запис про передачу ${what}`
+    case 'LOAN_RECORD_CONFIRMED':
+      return `Отримання ${what} підтверджено`
+    case 'LOAN_RECORD_DECLINED':
+      return `Запис про передачу ${what} відхилено`
+    case 'LOAN_RECORD_WITHDRAWN':
+      return `Запис про передачу ${what} відкликано`
+    // Stage 10 (10i.3): без нікнейма й email гостя — лише факт відповіді через посилання. Це відповідь після
+    // підтвердження контролю введеного гостем email, а не доведена особа (§0.12 п. 4).
+    case 'GUEST_LOAN_RECEIVED':
+      return `Гість підтвердив отримання ${what}`
+    case 'GUEST_LOAN_DENIED':
+      return `Гість заперечує отримання ${what}`
   }
 }
 
@@ -152,6 +180,19 @@ function callToAction(view: NotificationView): string {
       return 'Поверніть книжку або домовтеся про новий термін.'
     case 'FRIEND_REQUESTED':
       return 'Прийміть або відхиліть запит у друзі.'
+    case 'LOAN_RECORD_PROPOSED':
+      return 'Підтвердьте, що отримали книжку, або відхиліть запис. Доки ви не відповіли, книжка недоступна іншим.'
+    case 'LOAN_RECORD_AMENDED':
+      return 'Перегляньте нові дати й підтвердьте отримання або відхиліть запис.'
+    case 'LOAN_RECORD_DECLINED':
+      return 'Книжка знову вільна.'
+    case 'LOAN_RECORD_CONFIRMED':
+      return 'Книжка тепер у позичальника.'
+    case 'GUEST_LOAN_RECEIVED':
+      return 'Книжка тепер позначена як передана гостю з підтвердженням гостя.'
+    case 'GUEST_LOAN_DENIED':
+      return 'Це розбіжність, а не повернення: примірник лишається недоступним, доки ви не вирішите, що з нею робити.'
+    case 'LOAN_RECORD_WITHDRAWN':
     case 'LOAN_REJECTED':
     case 'LOAN_CANCELLED':
     case 'LOAN_RETURNED':
@@ -174,7 +215,35 @@ function link(view: NotificationView): string {
   return loanLink(view) ?? `${view.webOrigin}/notifications`
 }
 
-export function renderNotification(view: NotificationView): RenderedNotification {
+/** Загальні тема й посилання листа про відповідь гостя: без книжки, результату, гостя чи id запиту. */
+export const GENERIC_EMAIL_SUBJECT = 'У вас нове повідомлення в BookSwap'
+
+function renderGenericEmail(webOrigin: string): RenderedNotification {
+  return {
+    subject: GENERIC_EMAIL_SUBJECT,
+    body: [
+      GENERIC_EMAIL_SUBJECT,
+      `Щоб його прочитати, увійдіть у BookSwap: ${webOrigin}/login`,
+    ].join('\n\n'),
+    actions: [],
+  }
+}
+
+/**
+ * `channel` важливий лише для відповідей гостя. Для них: IN_APP — змістовний текст, EMAIL — строго
+ * загальний, TELEGRAM — не існує (рядок такої доставки не створюється; спроба відрендерити — помилка).
+ */
+export function renderNotification(
+  view: NotificationView,
+  channel: Channel = 'IN_APP',
+): RenderedNotification {
+  if (isGuestResponseNotificationType(view.type)) {
+    if (channel === 'EMAIL') return renderGenericEmail(view.webOrigin)
+    if (channel === 'TELEGRAM') {
+      throw new Error(`Тип ${view.type} не надсилається в Telegram`)
+    }
+  }
+
   const subject = headline(view)
   const lines = [subject, callToAction(view), link(view)].filter((line) => line !== '')
 

@@ -1,31 +1,20 @@
 export const THEME_STORAGE_KEY = 'bookswap-theme'
 
-export const THEMES = ['light', 'dark', 'system'] as const
+export const THEMES = ['light', 'dark'] as const
 
 export type Theme = (typeof THEMES)[number]
-export type ResolvedTheme = Exclude<Theme, 'system'>
+
+export const DEFAULT_THEME: Theme = 'light'
 
 export function isTheme(value: unknown): value is Theme {
   return typeof value === 'string' && THEMES.includes(value as Theme)
 }
 
-export function resolveTheme(theme: Theme, prefersDark: boolean): ResolvedTheme {
-  if (theme === 'system') {
-    return prefersDark ? 'dark' : 'light'
-  }
-
-  return theme
-}
-
-export function applyTheme(root: HTMLElement, theme: Theme, prefersDark: boolean): ResolvedTheme {
-  const resolvedTheme = resolveTheme(theme, prefersDark)
-
-  root.classList.toggle('dark', resolvedTheme === 'dark')
-  root.classList.toggle('light', resolvedTheme === 'light')
+export function applyTheme(root: HTMLElement, theme: Theme): void {
+  root.classList.toggle('dark', theme === 'dark')
+  root.classList.toggle('light', theme === 'light')
   root.dataset.theme = theme
-  root.style.colorScheme = resolvedTheme
-
-  return resolvedTheme
+  root.style.colorScheme = theme
 }
 
 /**
@@ -36,21 +25,17 @@ export const THEME_INITIALIZER_SCRIPT = `
   (() => {
     try {
       const storedTheme = localStorage.getItem('${THEME_STORAGE_KEY}');
-      const theme = ['light', 'dark', 'system'].includes(storedTheme)
+      const theme = ${JSON.stringify(THEMES)}.includes(storedTheme)
         ? storedTheme
-        : 'system';
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const resolvedTheme = theme === 'system'
-        ? (prefersDark ? 'dark' : 'light')
-        : theme;
+        : '${DEFAULT_THEME}';
       const root = document.documentElement;
 
-      root.classList.toggle('dark', resolvedTheme === 'dark');
-      root.classList.toggle('light', resolvedTheme === 'light');
+      root.classList.toggle('dark', theme === 'dark');
+      root.classList.toggle('light', theme === 'light');
       root.dataset.theme = theme;
-      root.style.colorScheme = resolvedTheme;
+      root.style.colorScheme = theme;
     } catch {
-      document.documentElement.classList.add('light');
+      document.documentElement.classList.add('${DEFAULT_THEME}');
     }
   })();
 `

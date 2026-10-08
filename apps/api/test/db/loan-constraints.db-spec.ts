@@ -81,6 +81,48 @@ describe('CHECK-обмеження позичання (§5.3)', () => {
       )
     })
 
+    it('RESERVED, яку тримає контакт-гість, — коректний стан (Stage 10, 10i.1: передано, не підтверджено)', async () => {
+      const graph = await createGraph(prisma)
+      const contact = await prisma.externalBorrower.create({
+        data: { ownerId: graph.ownerId, alias: 'Гість' },
+      })
+
+      const copy = await prisma.copy.update({
+        where: { id: graph.copyId },
+        data: { status: 'RESERVED', currentHolderId: null, heldByContactId: contact.id },
+      })
+
+      expect(copy.status).toBe('RESERVED')
+      expect(copy.heldByContactId).toBe(contact.id)
+    })
+
+    it('RESERVED без тримача взагалі (NULL/NULL) не проходить — виняток лише для контакту', async () => {
+      const graph = await createGraph(prisma)
+
+      await expectRejection(
+        prisma.copy.update({
+          where: { id: graph.copyId },
+          data: { status: 'RESERVED', currentHolderId: null },
+        }),
+        /copy_away_is_lent_or_unavailable/,
+      )
+    })
+
+    it('RESERVED і користувач-тримач, і контакт одразу — copy_single_holder', async () => {
+      const graph = await createGraph(prisma)
+      const contact = await prisma.externalBorrower.create({
+        data: { ownerId: graph.ownerId, alias: 'Гість' },
+      })
+
+      await expectRejection(
+        prisma.copy.update({
+          where: { id: graph.copyId },
+          data: { status: 'RESERVED', heldByContactId: contact.id },
+        }),
+        /copy_single_holder/,
+      )
+    })
+
     it('LENT_OUT із власником-тримачем не проходить', async () => {
       const graph = await createGraph(prisma)
 

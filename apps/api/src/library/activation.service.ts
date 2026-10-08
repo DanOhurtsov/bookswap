@@ -34,7 +34,7 @@ export class ActivationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async progressOf(ownerId: string): Promise<ActivationResponse> {
-    const ownedCopyCount = await this.prisma.copy.count({ where: { ownerId } })
+    const ownedCopyCount = await this.prisma.copy.count({ where: { ownerId, archivedAt: null } })
 
     return {
       ownedCopyCount,

@@ -1,10 +1,21 @@
 import { Injectable } from '@nestjs/common'
 import type { BookLookupSource } from '@bookswap/shared'
-import { externalSearchCacheMaxEntries, externalSearchCacheTtlMs } from './external-search.config'
+import {
+  externalSearchCacheMaxEntries,
+  externalSearchCacheTtlMs,
+  externalSuggestCacheMaxEntries,
+} from './external-search.config'
 import type { ExternalSearchBlockResult } from './external-search-provider'
 
 /**
- * The cache key: source + normalized query + block index + block size.
+ * `FULL` is the paged search, `SUGGEST` the capped auto-suggest. The mode is part of the key: a
+ * suggestion is ONE field-restricted query, a full block is up to three, so the shorter answer must
+ * never be served in place of the longer one.
+ */
+export type ExternalSearchMode = 'FULL' | 'SUGGEST'
+
+/**
+ * The cache key: source + mode + normalized query + block index + block size.
  *
  * All four parts are required. The source, because "Harry Potter" in Open
  * Library and in Google Books are different answers. The block index, because
@@ -23,10 +34,11 @@ export function externalSearchCacheKey(
   query: string,
   blockIndex: number,
   blockSize: number,
+  mode: ExternalSearchMode = 'FULL',
 ): string {
   const normalized = query.normalize('NFKC').toLocaleLowerCase().replace(/\s+/gu, ' ').trim()
 
-  return [source, String(blockSize), String(blockIndex), normalized].join('\0')
+  return [mode, source, String(blockSize), String(blockIndex), normalized].join('\0')
 }
 
 interface CacheEntry {
@@ -126,16 +138,25 @@ export class ExternalSearchCache {
   }
 
   private write(key: string, value: ExternalSearchBlockResult): void {
-    const max = externalSearchCacheMaxEntries()
+    const suggest = key.startsWith('SUGGEST\0')
+    const max = suggest ? externalSuggestCacheMaxEntries() : externalSearchCacheMaxEntries()
 
     this.entries.delete(key)
     this.entries.set(key, { value, expiresAt: Date.now() + externalSearchCacheTtlMs() })
 
-    while (this.entries.size > max) {
-      const oldest = this.entries.keys().next()
-      if (oldest.done === true) break
+    // Each mode is evicted against its own cap, oldest first: `Map` keeps insertion order.
+    let count = 0
 
-      this.entries.delete(oldest.value)
+    for (const existing of this.entries.keys()) {
+      if (existing.startsWith('SUGGEST\0') === suggest) count += 1
+    }
+
+    for (const existing of this.entries.keys()) {
+      if (count <= max) break
+      if (existing.startsWith('SUGGEST\0') !== suggest) continue
+
+      this.entries.delete(existing)
+      count -= 1
     }
   }
 

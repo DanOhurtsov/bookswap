@@ -110,7 +110,7 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(row?.threshold).toBe('0.3')
   })
 
-  it('one_active_loan_per_copy — унікальний частковий індекс саме на двох статусах (§5.3)', async () => {
+  it('one_active_loan_per_copy — унікальний частковий індекс на трьох ексклюзивних статусах (§5.3, M5)', async () => {
     const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'one_active_loan_per_copy'
     `
@@ -120,6 +120,9 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[0]?.indexdef).toMatch(/"copyId"/)
     expect(rows[0]?.indexdef).toMatch(/APPROVED/)
     expect(rows[0]?.indexdef).toMatch(/HANDED_OVER/)
+    expect(rows[0]?.indexdef).toMatch(/PENDING_CONFIRMATION/)
+    // REQUESTED навмисно не входить: §5.2 дозволяє кільком людям одночасний запит.
+    expect(rows[0]?.indexdef).not.toMatch(/REQUESTED/)
   })
 
   /**
@@ -178,8 +181,13 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
       ORDER BY conname
     `
 
-    expect(rows.map((row) => row.conname)).toEqual(['loan_borrower_not_owner'])
-    expect(rows[0]?.definition).toMatch(/"borrowerId" <> "ownerId"/)
+    // Stage 10 (10a) додав два CHECK-и; `loan_borrower_not_owner` не змінено.
+    expect(rows.map((row) => row.conname)).toEqual([
+      'loan_borrower_kind_valid',
+      'loan_borrower_not_owner',
+      'loan_requested_has_request_time',
+    ])
+    expect(rows[1]?.definition).toMatch(/"borrowerId" <> "ownerId"/)
   })
 
   /**
@@ -201,6 +209,8 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
       'copy_available_is_home',
       'copy_away_is_lent_or_unavailable',
       'copy_lent_out_is_away',
+      // Stage 10 (10a, T1-a): тримач — користувач або контакт, не обидва.
+      'copy_single_holder',
     ])
 
     // 1. Вільна книжка завжди вдома.
@@ -208,13 +218,64 @@ describe('обʼєкти схеми поза Prisma Schema', () => {
     expect(rows[0]?.definition).toMatch(/"currentHolderId" = "ownerId"/)
 
     // 2. Не вдома — лише LENT_OUT або UNAVAILABLE. RESERVED сюди не входить, тож
-    //    «домовлено» автоматично означає «ще вдома» (§5.2).
+    //    «домовлено» автоматично означає «ще вдома» (§5.2) — ЄДИНИЙ виняток (Stage 10, 10i.1):
+    //    RESERVED поза домом дозволений лише тоді, коли книжку тримає контакт-гість
+    //    (`heldByContactId IS NOT NULL`) — «фізично передано, гість ще не підтвердив».
     expect(rows[1]?.definition).toMatch(/LENT_OUT/)
     expect(rows[1]?.definition).toMatch(/UNAVAILABLE/)
-    expect(rows[1]?.definition).not.toMatch(/RESERVED/)
+    expect(rows[1]?.definition).toMatch(
+      /RESERVED'::"CopyStatus"\) AND \("heldByContactId" IS NOT NULL\)/,
+    )
 
     // 3. Зворотний бік: LENT_OUT означає, що книжка фізично в іншої людини.
-    expect(rows[2]?.definition).toMatch(/"currentHolderId" <> "ownerId"/)
+    //    Stage 10: «не вдома» = NOT(home), де home враховує NULL-тримача (COALESCE) і контакт.
+    expect(rows[2]?.definition).toMatch(/NOT/)
+    expect(rows[2]?.definition).toMatch(/COALESCE/)
+    expect(rows[2]?.definition).toMatch(/"heldByContactId" IS NULL/)
+    expect(rows[3]?.definition).toMatch(/"currentHolderId" IS NULL/)
+  })
+
+  it('Stage 10 (10i.1): CHECK-обмеження ExternalBorrower і GuestLoanConfirmation існують', async () => {
+    const borrower = await prisma.$queryRaw<{ conname: string; definition: string }[]>`
+      SELECT conname, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"ExternalBorrower"'::regclass AND contype = 'c'
+      ORDER BY conname
+    `
+
+    expect(borrower.map((row) => row.conname)).toEqual([
+      'external_borrower_guest_identity_all_or_none',
+    ])
+    expect(borrower[0]?.definition).toMatch(/"guestNickname" IS NULL/)
+    expect(borrower[0]?.definition).toMatch(/"guestEmailVerifiedAt" IS NULL/)
+
+    const confirmation = await prisma.$queryRaw<{ conname: string; definition: string }[]>`
+      SELECT conname, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = '"GuestLoanConfirmation"'::regclass AND contype = 'c'
+      ORDER BY conname
+    `
+
+    // 10i.1 + 10i.2 (M9d): посилання, виклик перевірки email, код, доказ, лічильники.
+    expect(confirmation.map((row) => row.conname)).toEqual([
+      'guest_confirmation_challenge_consistent',
+      'guest_confirmation_challenge_needs_link',
+      'guest_confirmation_code_all_or_none',
+      'guest_confirmation_code_nonce',
+      'guest_confirmation_code_xor_proof',
+      'guest_confirmation_counters_non_negative',
+      'guest_confirmation_link_all_or_none',
+      'guest_confirmation_link_only_open',
+      'guest_confirmation_link_ttl',
+      'guest_confirmation_proof_all_or_none',
+      'guest_loan_confirmation_resolved_at',
+    ])
+
+    const byName = new Map(confirmation.map((row) => [row.conname, row.definition]))
+
+    expect(byName.get('guest_loan_confirmation_resolved_at')).toMatch(/"resolvedAt" IS NULL/)
+    expect(byName.get('guest_confirmation_link_ttl')).toMatch(/'7 days'::interval/)
+    expect(byName.get('guest_confirmation_link_only_open')).toMatch(/"linkTokenHash" IS NULL/)
   })
 
   it('blockedById має зовнішній ключ на User — від нього залежить право (§6.2)', async () => {

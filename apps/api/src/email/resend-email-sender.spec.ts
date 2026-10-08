@@ -56,6 +56,13 @@ describe('ResendEmailSender', () => {
     jest.restoreAllMocks()
   })
 
+  it('запечатаний лист гостьового підтвердження (10i.2, D2) не йде назовні: відмова без fetch', async () => {
+    await expect(
+      new ResendEmailSender(config()).send({ ...message, sealed: true }),
+    ).rejects.toThrow(/Запечатаний лист/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('надсилає POST на ендпоінт Resend з Authorization: Bearer <ключ>', async () => {
     fetchMock.mockResolvedValue(okResponse())
 

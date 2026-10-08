@@ -10,7 +10,7 @@ import { Providers } from './query-client'
 import { SessionProvider, useSession } from './use-session'
 import LoginPage from '../(pages)/login/page'
 import RegisterPage from '../(pages)/register/page'
-import ProfilePage from '../(pages)/profile/page'
+import { NavBarAvatar } from '@/components/NavBar/NavBarAvatar'
 
 /**
  * §8e-3 follow-up: the REAL `useSession`/`SessionProvider` (not mocked) —
@@ -233,6 +233,33 @@ it('реєстрація через реальну RegisterPage переводи
   expect(sessionCalls).toHaveLength(1)
 })
 
+it.each([
+  ['LoginPage', LoginPage, 'Email'],
+  ['RegisterPage', RegisterPage, 'Email'],
+])(
+  '%s: уже авторизований користувач перенаправляється на / без форми',
+  async (_name, Page, fieldLabel) => {
+    mockApiRequest.mockImplementation((path: string) => {
+      if (path === '/auth/session') {
+        return Promise.resolve({ user: { id: 'user-a', displayName: 'A' } })
+      }
+
+      return Promise.reject(new Error(`unexpected apiRequest ${path}`))
+    })
+
+    render(
+      <SessionProvider>
+        <Page />
+      </SessionProvider>,
+    )
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/')
+    })
+    expect(screen.queryByLabelText(fieldLabel)).not.toBeInTheDocument()
+  },
+)
+
 it('затриманий GET, що завершується ПІСЛЯ login, не перезаписує новіший стан', async () => {
   const user = userEvent.setup()
   const delayedSessionGet = defer<{ user: { id: string; displayName: string } }>()
@@ -349,19 +376,66 @@ it('невдалий logout не переводить у guest і показує
     return Promise.reject(new Error(`unexpected apiRequest ${path}`))
   })
 
+  function AvatarHarness() {
+    const { state } = useSession()
+
+    return state.status === 'authenticated' ? <NavBarAvatar user={state.user} /> : <p>Гість</p>
+  }
+
   render(
     <SessionProvider>
-      <ProfilePage />
+      <AvatarHarness />
     </SessionProvider>,
   )
 
-  expect(await screen.findByText('a@example.com')).toBeInTheDocument()
-
-  await user.click(screen.getByRole('button', { name: 'Вийти' }))
+  await user.click(await screen.findByRole('button', { name: /Відкрити меню профілю/ }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Вийти' }))
 
   expect(await screen.findByText('бум')).toBeInTheDocument()
-  // Still on the profile page, still showing the authenticated user — a
-  // failed logout must not look like a confirmed one.
-  expect(screen.getByText('a@example.com')).toBeInTheDocument()
+  // Still showing the authenticated user — a failed logout must not look
+  // like a confirmed one.
+  expect(screen.queryByText('Гість')).not.toBeInTheDocument()
+  expect(screen.getByRole('menuitem', { name: 'Вийти' })).toBeInTheDocument()
   expect(mockReplace).not.toHaveBeenCalled()
+})
+
+it('успішний logout з меню аватара переводить у guest і веде на /login', async () => {
+  const user = userEvent.setup()
+
+  const me = {
+    id: 'user-a',
+    email: 'a@example.com',
+    emailVerified: true,
+    displayName: 'A',
+    avatarUrl: null,
+    bio: null,
+    libraryVisibility: 'FRIENDS',
+    showHolderNames: true,
+    createdAt: '2024-01-01T00:00:00.000Z',
+  }
+
+  mockApiRequest.mockImplementation((path: string) => {
+    if (path === '/auth/session') return Promise.resolve({ user: me })
+    if (path === '/auth/logout') return Promise.resolve(undefined)
+
+    return Promise.reject(new Error(`unexpected apiRequest ${path}`))
+  })
+
+  function AvatarHarness() {
+    const { state } = useSession()
+
+    return state.status === 'authenticated' ? <NavBarAvatar user={state.user} /> : <p>Гість</p>
+  }
+
+  render(
+    <SessionProvider>
+      <AvatarHarness />
+    </SessionProvider>,
+  )
+
+  await user.click(await screen.findByRole('button', { name: /Відкрити меню профілю/ }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Вийти' }))
+
+  expect(await screen.findByText('Гість')).toBeInTheDocument()
+  expect(mockReplace).toHaveBeenCalledWith('/login')
 })
