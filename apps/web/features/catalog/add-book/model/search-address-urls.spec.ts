@@ -1,5 +1,12 @@
 import { DEFAULT_SEARCH_PAGE_SIZE } from '@bookswap/shared'
-import { addressKey, autoHref, clearedHref, manualHref } from './search-address-urls'
+import {
+  addressKey,
+  autoHref,
+  backToSearchHref,
+  clearedHref,
+  manualFormHref,
+  manualHref,
+} from './search-address-urls'
 
 describe('addressKey', () => {
   it('distinguishes the mode for the same query', () => {
@@ -54,7 +61,14 @@ describe('clearedHref', () => {
 })
 
 describe('manualHref', () => {
-  const base = { isbn: undefined, autoActive: false, enabled: false, urlQuery: '', query: '' }
+  const base = {
+    parameters: new URLSearchParams(),
+    isbn: undefined,
+    autoActive: false,
+    enabled: false,
+    urlQuery: '',
+    query: '',
+  }
 
   it('opens an empty form when nothing is searched', () => {
     expect(manualHref(base)).toBe('/catalog/new?mode=manual')
@@ -82,5 +96,80 @@ describe('manualHref', () => {
     expect(
       manualHref({ ...base, autoActive: true, enabled: true, urlQuery: 'a b', query: 'a  b' }),
     ).toBe('/catalog/new?mode=manual&title=a+b')
+  })
+  it('carries the search context next to the prefill, not instead of it', () => {
+    const parameters = new URLSearchParams('q=kobzar&page=2&pageSize=20')
+
+    expect(
+      manualHref({ ...base, parameters, enabled: true, urlQuery: 'kobzar', query: 'kobzar' }),
+    ).toBe('/catalog/new?mode=manual&title=kobzar&q=kobzar&page=2&pageSize=20')
+  })
+})
+
+describe('manualFormHref', () => {
+  it('copies q, page, pageSize and auto as they are and nothing else', () => {
+    const current = new URLSearchParams('q=kob&auto=1&external=tok&keep=1&page=3&pageSize=20')
+
+    expect(manualFormHref(new URLSearchParams({ workId: 'w-1' }), current)).toBe(
+      '/catalog/new?mode=manual&workId=w-1&q=kob&page=3&pageSize=20&auto=1',
+    )
+  })
+
+  it('keeps repeated prefill parameters', () => {
+    const prefill = new URLSearchParams([
+      ['title', 'T'],
+      ['author', 'A'],
+      ['author', 'B'],
+    ])
+
+    expect(manualFormHref(prefill, new URLSearchParams())).toBe(
+      '/catalog/new?mode=manual&title=T&author=A&author=B',
+    )
+  })
+
+  it('does not mutate its inputs', () => {
+    const prefill = new URLSearchParams('title=T')
+    const current = new URLSearchParams('q=kobzar')
+
+    manualFormHref(prefill, current)
+
+    expect(prefill.toString()).toBe('title=T')
+    expect(current.toString()).toBe('q=kobzar')
+  })
+})
+
+describe('backToSearchHref', () => {
+  it('returns to the query, page and size, dropping the form parameters', () => {
+    const current = new URLSearchParams(
+      'mode=manual&title=edited&isbn=9783161484100&author=A&firstPubYear=1937&workId=w-1&q=kobzar&page=2&pageSize=20',
+    )
+
+    expect(backToSearchHref(current)).toBe('/catalog/new?q=kobzar&page=2&pageSize=20')
+  })
+
+  it('returns to suggestions when the form was opened from them', () => {
+    expect(backToSearchHref(new URLSearchParams('mode=manual&title=kob&q=kob&auto=1'))).toBe(
+      '/catalog/new?q=kob&auto=1',
+    )
+  })
+
+  it('returns to the query, not to the edited title', () => {
+    expect(backToSearchHref(new URLSearchParams('mode=manual&title=Інша&q=кобзар'))).toBe(
+      `/catalog/new?${new URLSearchParams({ q: 'кобзар' }).toString()}`,
+    )
+  })
+
+  it('opened directly, returns to an empty search', () => {
+    expect(backToSearchHref(new URLSearchParams('mode=manual'))).toBe('/catalog/new?q=')
+  })
+
+  it('is a round trip with manualFormHref', () => {
+    const search = new URLSearchParams('q=kobzar&page=3&pageSize=20')
+
+    expect(
+      backToSearchHref(
+        new URLSearchParams(manualFormHref(new URLSearchParams('title=x'), search).split('?')[1]),
+      ),
+    ).toBe(`/catalog/new?${search.toString()}`)
   })
 })
