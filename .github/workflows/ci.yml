@@ -122,6 +122,12 @@ jobs:
       - name: Згенерувати Prisma Client
         run: pnpm db:generate
 
+      # @bookswap/shared is consumed from its build (dist). The other jobs get it from turbo's ^build, but
+      # this job calls the package script directly, so without this step neither the API under test nor
+      # `next dev` can resolve the package.
+      - name: Зібрати спільний пакет
+        run: pnpm --filter @bookswap/shared build
+
       # Версія браузера визначається закріпленою версією playwright-core (apps/api/package.json).
       - name: Chromium і його системні залежності
         run: pnpm --filter @bookswap/api exec playwright-core install --with-deps chromium
