@@ -145,15 +145,19 @@ async function login(page: Page, owner: Owner): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith('/login'))
 }
 
-/** Власник у браузері: бібліотека → «Позичити гостю» → запит підтвердження → сторінка запиту. */
+/** Owner flow: shelf action menu → guest-loan dialog → confirmation request → request page. */
 async function ownerCreatesRequest(page: Page, owner: Owner): Promise<string> {
   await page.goto(`${webOrigin}/library`)
   await settle(page)
-  await page.getByRole('button', { name: 'Позичити гостю' }).click()
-  await page.locator(`#guest-contact-${owner.copyId}`).selectOption({ label: owner.alias })
-  await page.locator(`#guest-handed-${owner.copyId}`).fill('2026-01-01')
-  await page.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }).click()
-  await page.getByRole('link', { name: 'Видати посилання гостю' }).click()
+  await page.getByRole('button', { name: `Дії з примірником «${owner.bookTitle}»` }).click()
+  await page.getByRole('menuitem', { name: 'Позичити гостю', exact: true }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'Позичити гостю', exact: true })
+
+  await dialog.locator(`#guest-contact-${owner.copyId}`).selectOption({ label: owner.alias })
+  await dialog.locator(`#guest-handed-${owner.copyId}`).fill('2026-01-01')
+  await dialog.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }).click()
+  await dialog.getByRole('link', { name: 'Видати посилання гостю' }).click()
   await page.waitForURL(/\/loans\/guest\?confirmationId=/)
   await settle(page)
 
