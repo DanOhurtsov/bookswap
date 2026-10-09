@@ -32,7 +32,7 @@ export function friendRequested(
   }
 }
 
-export type HandledCall = 'respond' | 'read'
+export type HandledCall = 'respond' | 'read' | 'read-all'
 
 interface Deferred {
   promise: Promise<void>
@@ -47,6 +47,8 @@ function deferred(): Deferred {
 
   return { promise, resolve }
 }
+
+const READ_AT = '2026-10-08T10:00:00.000Z'
 
 interface RequestOptions {
   method?: string
@@ -107,11 +109,22 @@ export function createFakeServer(initial: {
   function read(notificationId: string): unknown {
     state.notifications = state.notifications.map((notification) =>
       notification.id === notificationId && notification.readAt === null
-        ? { ...notification, readAt: '2026-10-08T10:00:00.000Z' }
+        ? { ...notification, readAt: READ_AT }
         : notification,
     )
 
     return { notification: state.notifications.find((item) => item.id === notificationId) }
+  }
+
+  /** Marks, never deletes: the history stays in the «all» list. */
+  function readAll(): unknown {
+    const updated = state.notifications.filter((notification) => notification.readAt === null)
+
+    state.notifications = state.notifications.map((notification) =>
+      notification.readAt === null ? { ...notification, readAt: READ_AT } : notification,
+    )
+
+    return { updated: updated.length }
   }
 
   function notificationList(unreadOnly: boolean): unknown {
@@ -139,6 +152,12 @@ export function createFakeServer(initial: {
       await intercept('read')
 
       return read(readMatch[1])
+    }
+
+    if (method === 'POST' && path === '/me/notifications/read-all') {
+      await intercept('read-all')
+
+      return readAll()
     }
 
     if (path === '/friends/requests') return { incoming: state.incoming, outgoing: [] }

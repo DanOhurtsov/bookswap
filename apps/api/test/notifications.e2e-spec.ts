@@ -3,6 +3,7 @@ import request from 'supertest'
 import {
   API_ERROR_CODES,
   apiErrorSchema,
+  friendRequestsResponseSchema,
   loanResponseSchema,
   notificationListResponseSchema,
   notificationResponseSchema,
@@ -349,6 +350,46 @@ describe('Сповіщення (e2e)', () => {
 
       // Нуль — це правда, а не помилка: гасити вже нічого.
       expect(readAllResponseSchema.parse(again.body).updated).toBe(0)
+    })
+
+    it('зберігає історію й не відповідає на запит у друзі замість людини', async () => {
+      const sender = await registerAccount(app, 'notif-sender')
+      const recipient = await registerAccount(app, 'notif-recipient')
+
+      await request(app.getHttpServer())
+        .post(url('/friends/requests'))
+        .set('Cookie', sender.cookie)
+        .send({ userId: recipient.id })
+        .expect(201)
+
+      const before = notificationListResponseSchema.parse((await list(recipient).expect(200)).body)
+
+      expect(before.notifications.map((notification) => notification.type)).toContain(
+        'FRIEND_REQUESTED',
+      )
+
+      await request(app.getHttpServer())
+        .post(url('/me/notifications/read-all'))
+        .set('Cookie', recipient.cookie)
+        .expect(200)
+
+      const after = notificationListResponseSchema.parse((await list(recipient).expect(200)).body)
+
+      // «Очистити» — це позначити, а не видалити: «усі» лишаються тими самими подіями.
+      expect(after.notifications.map((notification) => notification.id)).toEqual(
+        before.notifications.map((notification) => notification.id),
+      )
+      expect(after.notifications.every((notification) => notification.readAt !== null)).toBe(true)
+
+      const requests = await request(app.getHttpServer())
+        .get(url('/friends/requests'))
+        .set('Cookie', recipient.cookie)
+        .expect(200)
+
+      // Прочитаний запит лишається активним: відповісти на нього людина ще може (FRND-09).
+      expect(
+        friendRequestsResponseSchema.parse(requests.body).incoming.map((item) => item.user.id),
+      ).toEqual([sender.id])
     })
 
     it('не чіпає чужих сповіщень', async () => {
