@@ -2,6 +2,7 @@
 
 import '@testing-library/jest-dom'
 import { render, screen, within } from '@testing-library/react'
+import { withQueryClient } from '@/app/lib/test-query-client'
 import type { SessionState } from '@/app/lib/use-session'
 import NotificationsPage from './page'
 
@@ -73,7 +74,7 @@ const row = (text: string): HTMLElement => {
 
 describe('NotificationsPage: відповіді гостя (Stage 10, 10i.3)', () => {
   it('підписи двох нових типів без нікнейма/email; посилання веде до запиту підтвердження, а не до зареєстрованого позичання', () => {
-    render(<NotificationsPage />)
+    render(withQueryClient(<NotificationsPage />))
 
     const received = row('Гість підтвердив отримання книжки')
     const denied = row('Гість заперечує отримання книжки')
@@ -90,7 +91,7 @@ describe('NotificationsPage: відповіді гостя (Stage 10, 10i.3)', (
   })
 
   it('звичайні сповіщення про позики не зачеплені: посилання на /loans?loanId=', () => {
-    render(<NotificationsPage />)
+    render(withQueryClient(<NotificationsPage />))
 
     expect(
       within(row('У вас просять книжку')).getByRole('link', { name: 'Відкрити позичання' }),

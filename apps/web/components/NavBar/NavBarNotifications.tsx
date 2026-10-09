@@ -17,6 +17,11 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  FriendRequestNotification,
+  useFriendRequestActions,
+  type FriendRequestActions,
+} from '@/features/friend-requests/index.client'
 
 export const NavBarNotifications = () => {
   const [open, setOpen] = useState(false)
@@ -80,6 +85,9 @@ function NotificationsPanel({
   const [failure, setFailure] = useState<string>()
 
   const unreadCount = resource.state.status === 'ready' ? resource.state.data.unreadCount : 0
+  const friendRequests = useFriendRequestActions(
+    resource.state.status === 'ready' ? resource.state.data.notifications : undefined,
+  )
 
   async function run(key: string, action: () => Promise<void>): Promise<void> {
     setFailure(undefined)
@@ -193,6 +201,7 @@ function NotificationsPanel({
                 notification={notification}
                 busy={busyKey !== undefined}
                 markingRead={busyKey === `read:${notification.id}`}
+                friendRequests={friendRequests}
                 onRead={() => markRead(notification.id)}
                 onNavigate={onNavigate}
               />
@@ -217,12 +226,14 @@ function NotificationRow({
   notification,
   busy,
   markingRead,
+  friendRequests,
   onRead,
   onNavigate,
 }: {
   notification: Notification
   busy: boolean
   markingRead: boolean
+  friendRequests: FriendRequestActions
   onRead: () => void
   onNavigate: () => void
 }) {
@@ -248,6 +259,10 @@ function NotificationRow({
           </Button>
         )}
       </div>
+
+      {notification.type === 'FRIEND_REQUESTED' && (
+        <FriendRequestNotification notification={notification} actions={friendRequests} />
+      )}
 
       {loanId !== undefined && (
         <Link

@@ -17,6 +17,7 @@ const KNOWN_FEATURES = [
   'features/guest-loans',
   'features/reading-status',
   'features/profile',
+  'features/friend-requests',
 ]
 
 export default [
