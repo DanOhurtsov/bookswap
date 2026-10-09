@@ -10,9 +10,13 @@ import {
   useFriendRequestActions,
   type FriendRequestActions,
 } from '@/features/friend-requests/index.client'
-import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
+import { ApiRequestError, describeError } from '../../lib/api'
 import { NOTIFICATION_TYPE_LABELS, formatDate } from '../../lib/labels'
-import { useNotifications } from '../../lib/use-notifications'
+import {
+  markAllNotificationsRead,
+  markNotificationRead,
+  useNotifications,
+} from '../../lib/use-notifications'
 import { useSession } from '../../lib/use-session'
 
 /**
@@ -90,15 +94,9 @@ function NotificationsScreen() {
     }
   }
 
-  const markRead = (id: string): Promise<void> =>
-    run(`read:${id}`, async () => {
-      await apiRequest(`/me/notifications/${id}/read`, { method: 'PATCH' })
-    })
+  const markRead = (id: string): Promise<void> => run(`read:${id}`, () => markNotificationRead(id))
 
-  const readAll = (): Promise<void> =>
-    run('read-all', async () => {
-      await apiRequest('/me/notifications/read-all', { method: 'POST' })
-    })
+  const readAll = (): Promise<void> => run('read-all', markAllNotificationsRead)
 
   const unreadCount = state.status === 'ready' ? state.data.unreadCount : 0
 

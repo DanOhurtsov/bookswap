@@ -4,9 +4,13 @@ import Link from 'next/link'
 import { useState } from 'react'
 import type { Notification } from '@bookswap/shared'
 import { BellIcon, CheckCheckIcon, SettingsIcon } from 'lucide-react'
-import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
+import { ApiRequestError, describeError } from '@/app/lib/api'
 import { NOTIFICATION_TYPE_LABELS, formatDate } from '@/app/lib/labels'
-import { useNotifications } from '@/app/lib/use-notifications'
+import {
+  markAllNotificationsRead,
+  markNotificationRead,
+  useNotifications,
+} from '@/app/lib/use-notifications'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -104,11 +108,11 @@ function NotificationsPanel({
   }
 
   function markRead(id: string): void {
-    void run(`read:${id}`, () => apiRequest(`/me/notifications/${id}/read`, { method: 'PATCH' }))
+    void run(`read:${id}`, () => markNotificationRead(id))
   }
 
   function readAll(): void {
-    void run('read-all', () => apiRequest('/me/notifications/read-all', { method: 'POST' }))
+    void run('read-all', markAllNotificationsRead)
   }
 
   return (
