@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useMemo } from 'react'
 import type { LibraryImportDraftResponse } from '@bookswap/shared'
+import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import { ActivationChecklist } from '@/features/library/activation/index.client'
 import {
   IMPORT_ROW_FILTERS,
@@ -100,19 +101,20 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
       />
 
       <nav className="actions import-filters" aria-label="Фільтр рядків">
-        {IMPORT_ROW_FILTERS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={`import-action${filter === value ? '' : ' button--ghost'}`}
-            aria-pressed={filter === value}
-            onClick={() => {
-              onFilterChange(value)
-            }}
-          >
-            {IMPORT_ROW_FILTER_LABELS[value]} ({countImportRows(draft, value)})
-          </button>
-        ))}
+        <ToggleTabs>
+          {IMPORT_ROW_FILTERS.map((value) => (
+            <ToggleTab
+              key={value}
+              className="import-action"
+              pressed={filter === value}
+              onClick={() => {
+                onFilterChange(value)
+              }}
+            >
+              {IMPORT_ROW_FILTER_LABELS[value]} ({countImportRows(draft, value)})
+            </ToggleTab>
+          ))}
+        </ToggleTabs>
       </nav>
 
       {rows.length === 0 ? (

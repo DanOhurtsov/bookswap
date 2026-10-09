@@ -21,6 +21,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import {
   FriendRequestNotification,
   useFriendRequestActions,
@@ -135,25 +136,15 @@ function NotificationsPanel({
           </Button>
         </div>
 
-        <div className="mt-3 flex items-center gap-2" aria-label="Вигляд сповіщень">
-          <Button
-            type="button"
-            size="sm"
-            variant={unreadOnly ? 'ghost' : 'secondary'}
-            aria-pressed={!unreadOnly}
-            onClick={() => onUnreadOnlyChange(false)}
-          >
-            Усі
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={unreadOnly ? 'secondary' : 'ghost'}
-            aria-pressed={unreadOnly}
-            onClick={() => onUnreadOnlyChange(true)}
-          >
-            Непрочитані{unreadCount > 0 && ` (${unreadCount})`}
-          </Button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <ToggleTabs aria-label="Вигляд сповіщень">
+            <ToggleTab pressed={!unreadOnly} onClick={() => onUnreadOnlyChange(false)}>
+              Усі
+            </ToggleTab>
+            <ToggleTab pressed={unreadOnly} onClick={() => onUnreadOnlyChange(true)}>
+              Непрочитані{unreadCount > 0 && ` (${unreadCount})`}
+            </ToggleTab>
+          </ToggleTabs>
           <Button
             type="button"
             size="sm"
