@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { isGuestResponseNotificationType, type Notification } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
+import {
+  FriendRequestNotification,
+  useFriendRequestActions,
+  type FriendRequestActions,
+} from '@/features/friend-requests/index.client'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
 import { NOTIFICATION_TYPE_LABELS, formatDate } from '../../lib/labels'
 import { useNotifications } from '../../lib/use-notifications'
@@ -66,6 +71,9 @@ function NotificationsScreen() {
   const [busyKey, setBusyKey] = useState<string>()
 
   const { state, reload } = useNotifications(unreadOnly)
+  const friendRequests = useFriendRequestActions(
+    state.status === 'ready' ? state.data.notifications : undefined,
+  )
 
   async function run(key: string, action: () => Promise<void>): Promise<void> {
     setFailure(undefined)
@@ -143,6 +151,7 @@ function NotificationsScreen() {
               key={notification.id}
               notification={notification}
               busyKey={busyKey}
+              friendRequests={friendRequests}
               onRead={() => void markRead(notification.id)}
             />
           ))}
@@ -161,10 +170,12 @@ function NotificationsScreen() {
 function NotificationRow({
   notification,
   busyKey,
+  friendRequests,
   onRead,
 }: {
   notification: Notification
   busyKey: string | undefined
+  friendRequests: FriendRequestActions
   onRead: () => void
 }) {
   const unread = notification.readAt === null
@@ -208,6 +219,10 @@ function NotificationRow({
           </button>
         )}
       </div>
+
+      {notification.type === 'FRIEND_REQUESTED' && (
+        <FriendRequestNotification notification={notification} actions={friendRequests} />
+      )}
     </li>
   )
 }

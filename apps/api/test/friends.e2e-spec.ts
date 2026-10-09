@@ -9,6 +9,7 @@ import {
   friendListResponseSchema,
   friendRequestsResponseSchema,
   friendshipStateResponseSchema,
+  notificationListResponseSchema,
   userSearchResponseSchema,
   type FriendRelation,
 } from '@bookswap/shared'
@@ -784,6 +785,241 @@ describe('Дружба (e2e)', () => {
         .expect(204)
 
       expect((await prisma.loan.findUnique({ where: { id: loan.id } }))?.status).toBe('APPROVED')
+    })
+  })
+
+  /**
+   * BS-103: відповідь просто зі сповіщення. Клієнт бере `payload.friendshipId` із
+   * FRIEND_REQUESTED, звіряє його з `GET /friends/requests` і шле `PATCH /friends/requests/:id`,
+   * а потім `PATCH /me/notifications/:id/read`. Тут перевіряється, що сервер для цього шляху
+   * сам тримає права й стейт-машину — клієнтові нічого не треба вирішувати замість нього.
+   */
+  describe('відповідь на запит зі сповіщення (BS-103)', () => {
+    async function inboxOf(account: Account) {
+      const response = await request(app.getHttpServer())
+        .get(url('/me/notifications'))
+        .set('Cookie', account.cookie)
+        .expect(200)
+
+      return notificationListResponseSchema.parse(response.body)
+    }
+
+    /** Надсилає запит і повертає сповіщення отримувача разом з його payload. */
+    async function requestWithNotification(from: Account, to: Account) {
+      await sendRequest(from, to).expect(201)
+
+      const notification = (await inboxOf(to)).notifications.find(
+        (item) => item.type === 'FRIEND_REQUESTED' && item.payload.actorId === from.id,
+      )
+
+      if (notification?.payload.friendshipId === undefined) {
+        throw new Error('FRIEND_REQUESTED не дійшло до отримувача')
+      }
+
+      return { notification, friendshipId: notification.payload.friendshipId }
+    }
+
+    function markRead(account: Account, notificationId: string): request.Test {
+      return request(app.getHttpServer())
+        .patch(url(`/me/notifications/${notificationId}/read`))
+        .set('Cookie', account.cookie)
+    }
+
+    async function statusOf(friendshipId: string) {
+      return (await prisma.friendship.findUnique({ where: { id: friendshipId } }))?.status
+    }
+
+    it('friendshipId зі сповіщення — це той самий вхідний запит, а ініціатор у ньому лише публічний', async () => {
+      const [marta, oles] = await pair()
+      const { friendshipId } = await requestWithNotification(marta, oles)
+
+      const response = await request(app.getHttpServer())
+        .get(url('/friends/requests'))
+        .set('Cookie', oles.cookie)
+        .expect(200)
+      const incoming = friendRequestsResponseSchema
+        .parse(response.body)
+        .incoming.find((item) => item.id === friendshipId)
+
+      // §9: сирий body, не результат zod (той зрізав би зайві поля і сховав би витік).
+      const raw = (response.body as { incoming: { id: string; user: unknown }[] }).incoming.find(
+        (item) => item.id === friendshipId,
+      )
+
+      expect(incoming?.user.id).toBe(marta.id)
+      expect(raw?.user).toEqual({ id: marta.id, displayName: marta.displayName, avatarUrl: null })
+    })
+
+    it('прийняття: ACCEPTED у базі, сповіщення прочитане, але лишається в історії', async () => {
+      const [marta, oles] = await pair()
+      const { notification, friendshipId } = await requestWithNotification(marta, oles)
+      const unreadBefore = (await inboxOf(oles)).unreadCount
+
+      const response = await respond(oles, friendshipId, 'accept').expect(200)
+
+      expect(friendshipStateResponseSchema.parse(response.body).relation).toBe('FRIENDS')
+      expect(await statusOf(friendshipId)).toBe('ACCEPTED')
+
+      await markRead(oles, notification.id).expect(200)
+
+      const inbox = await inboxOf(oles)
+
+      expect(inbox.unreadCount).toBe(unreadBefore - 1)
+      expect(inbox.notifications.find((item) => item.id === notification.id)?.readAt).not.toBeNull()
+      expect((await requestsOf(oles)).incoming.map((item) => item.id)).not.toContain(friendshipId)
+    })
+
+    it('відхилення: DECLINED у базі, запит зникає зі вхідних, друзями не стають', async () => {
+      const [marta, oles] = await pair()
+      const { friendshipId } = await requestWithNotification(marta, oles)
+
+      const response = await respond(oles, friendshipId, 'decline').expect(200)
+
+      expect(friendshipStateResponseSchema.parse(response.body).relation).toBe('NONE')
+      expect(await statusOf(friendshipId)).toBe('DECLINED')
+      expect((await requestsOf(oles)).incoming.map((item) => item.id)).not.toContain(friendshipId)
+      expect(await friendIdsOf(oles)).not.toContain(marta.id)
+    })
+
+    it('прочитане сповіщення не забирає права відповісти: readAt — лише прочитання', async () => {
+      const [marta, oles] = await pair()
+      const { notification, friendshipId } = await requestWithNotification(marta, oles)
+
+      await markRead(oles, notification.id).expect(200)
+      await respond(oles, friendshipId, 'accept').expect(200)
+
+      expect(await statusOf(friendshipId)).toBe('ACCEPTED')
+    })
+
+    it('actorId замість friendshipId нічого не змінює — 404', async () => {
+      const [marta, oles] = await pair()
+      const { friendshipId } = await requestWithNotification(marta, oles)
+
+      await respond(oles, marta.id, 'accept').expect(404)
+
+      expect(await statusOf(friendshipId)).toBe('PENDING')
+    })
+
+    it('контроль доступу: ініціатор — 403, стороння людина — 404, без сесії — 401', async () => {
+      const [marta, oles] = await pair()
+      const stranger = await register('Сторонній')
+      const { notification, friendshipId } = await requestWithNotification(marta, oles)
+
+      for (const action of ['accept', 'decline'] as const) {
+        const own = await respond(marta, friendshipId, action).expect(403)
+
+        expect(apiErrorSchema.parse(own.body).code).toBe(API_ERROR_CODES.FORBIDDEN)
+        await respond(stranger, friendshipId, action).expect(404)
+      }
+
+      await request(app.getHttpServer())
+        .patch(url(`/friends/requests/${friendshipId}`))
+        .send({ action: 'accept' })
+        .expect(401)
+
+      // Чуже сповіщення не позначається прочитаним і не підтверджує, що воно існує.
+      await markRead(stranger, notification.id).expect(404)
+
+      expect(await statusOf(friendshipId)).toBe('PENDING')
+      expect(
+        (await inboxOf(oles)).notifications.find((item) => item.id === notification.id)?.readAt,
+      ).toBeNull()
+    })
+
+    it.each([
+      ['accept', 'accept', 'ACCEPTED'],
+      ['accept', 'decline', 'ACCEPTED'],
+      ['decline', 'accept', 'DECLINED'],
+      ['decline', 'decline', 'DECLINED'],
+    ] as const)(
+      'повторна дія після %s (%s) — 409, стан лишається %s',
+      async (first, second, status) => {
+        const [marta, oles] = await pair()
+        const { friendshipId } = await requestWithNotification(marta, oles)
+
+        await respond(oles, friendshipId, first).expect(200)
+
+        const repeated = await respond(oles, friendshipId, second).expect(409)
+
+        expect(apiErrorSchema.parse(repeated.body).code).toBe(
+          API_ERROR_CODES.FRIENDSHIP_INVALID_TRANSITION,
+        )
+        expect(await statusOf(friendshipId)).toBe(status)
+      },
+    )
+
+    it.each([
+      ['accept', 'accept'],
+      ['accept', 'decline'],
+    ] as const)(
+      'конкурентні %s і %s: рівно одна дія проходить, друга — 409, жодної 5xx',
+      async (one, other) => {
+        const [marta, oles] = await pair()
+        const { friendshipId } = await requestWithNotification(marta, oles)
+
+        const responses = await Promise.all([
+          respond(oles, friendshipId, one),
+          respond(oles, friendshipId, other),
+        ])
+        const winners = responses.filter((response) => response.status === 200)
+        const losers = responses.filter((response) => response.status !== 200)
+
+        expect(winners).toHaveLength(1)
+        expect(losers.map((response) => response.status)).toEqual([409])
+        expect([API_ERROR_CODES.CONFLICT, API_ERROR_CODES.FRIENDSHIP_INVALID_TRANSITION]).toContain(
+          apiErrorSchema.parse(losers[0]?.body).code,
+        )
+
+        const relation = friendshipStateResponseSchema.parse(winners[0]?.body).relation
+
+        expect(await statusOf(friendshipId)).toBe(relation === 'FRIENDS' ? 'ACCEPTED' : 'DECLINED')
+        // Подяка ініціаторові — не більше однієї, хоч би скільки разів натиснули.
+        expect(await notificationsFor(marta.id, 'FRIEND_ACCEPTED')).toHaveLength(
+          relation === 'FRIENDS' ? 1 : 0,
+        )
+      },
+    )
+
+    it('відкликаний запит — 404, і новий запит тієї самої пари старим id не приймається', async () => {
+      const [marta, oles] = await pair()
+      const { friendshipId } = await requestWithNotification(marta, oles)
+
+      await request(app.getHttpServer())
+        .delete(url(`/friends/${oles.id}`))
+        .set('Cookie', marta.cookie)
+        .expect(204)
+
+      await respond(oles, friendshipId, 'accept').expect(404)
+      expect(await rowOf(marta, oles)).toBeNull()
+    })
+
+    it('заблокована пара — 403 FRIENDSHIP_BLOCKED, запит більше не серед вхідних', async () => {
+      const [marta, oles] = await pair()
+      const { friendshipId } = await requestWithNotification(marta, oles)
+
+      await request(app.getHttpServer())
+        .post(url(`/friends/${marta.id}/block`))
+        .set('Cookie', oles.cookie)
+        .expect(204)
+
+      const response = await respond(oles, friendshipId, 'accept').expect(403)
+
+      expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.FRIENDSHIP_BLOCKED)
+      expect(await statusOf(friendshipId)).toBe('BLOCKED')
+      expect((await requestsOf(oles)).incoming.map((item) => item.id)).not.toContain(friendshipId)
+    })
+
+    it('видалений акаунт ініціатора — 404, а сповіщення отримувача лишається в історії', async () => {
+      const [marta, oles] = await pair()
+      const { notification, friendshipId } = await requestWithNotification(marta, oles)
+
+      // Ендпоінта видалення акаунта немає; каскад у схемі — те, що його замінить.
+      await prisma.user.delete({ where: { id: marta.id } })
+
+      await respond(oles, friendshipId, 'accept').expect(404)
+      expect((await requestsOf(oles)).incoming.map((item) => item.id)).not.toContain(friendshipId)
+      expect((await inboxOf(oles)).notifications.map((item) => item.id)).toContain(notification.id)
+      await markRead(oles, notification.id).expect(200)
     })
   })
 })

@@ -1,6 +1,7 @@
 'use client'
 
 import { notificationListResponseSchema, type NotificationListResponse } from '@bookswap/shared'
+import { useReloadOnResourceChange } from './resource-sync'
 import { useApiResource, type Resource } from './use-resource'
 
 /**
@@ -13,8 +14,14 @@ import { useApiResource, type Resource } from './use-resource'
 export type NotificationsResource = Resource<NotificationListResponse>
 
 export function useNotifications(unreadOnly: boolean): NotificationsResource {
-  return useApiResource(
+  const resource = useApiResource(
     `/me/notifications${unreadOnly ? '?unread=true' : ''}`,
     notificationListResponseSchema,
   )
+
+  // The navbar badge and the notifications page are separate instances: a notification marked
+  // read in one must update the other's list and `unreadCount`.
+  useReloadOnResourceChange('notifications', resource.reload)
+
+  return resource
 }

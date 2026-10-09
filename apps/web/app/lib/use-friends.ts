@@ -8,6 +8,7 @@ import {
   type FriendRequest,
 } from '@bookswap/shared'
 import { apiRequest, describeError } from './api'
+import { useReloadOnResourceChange } from './resource-sync'
 
 /**
  * Ті самі три стани, що й у `useSession`: «ще вантажу» і «порожньо» — різні речі,
@@ -64,6 +65,9 @@ export function useFriends(): { state: FriendsState; reload: () => void } {
   const reload = useCallback(() => {
     setNonce((value) => value + 1)
   }, [])
+
+  // A friend request answered elsewhere (the notifications panel) changes both lists here.
+  useReloadOnResourceChange('friends', reload)
 
   return { state, reload }
 }
