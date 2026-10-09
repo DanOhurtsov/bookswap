@@ -17,6 +17,7 @@ import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { RecordedLoanActions } from '@/components/RecordedLoanActions'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
 import {
   CONDITION_LABELS,
@@ -195,74 +196,76 @@ function LoanListView({ user }: { user: Me }) {
 
   return (
     <Shell>
-      <nav className="actions" aria-label="Бік позичання">
-        {LOAN_ROLES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={role === value ? undefined : 'button--ghost'}
-            aria-pressed={role === value}
-            aria-current={role === value ? 'page' : undefined}
-            onClick={() => {
-              selectRole(value)
-            }}
-          >
-            {ROLE_LABELS[value]}
-          </button>
-        ))}
-      </nav>
-
-      <form
-        className="search"
-        onSubmit={(event) => {
-          event.preventDefault()
+      <Tabs
+        className="gap-8"
+        value={role}
+        onValueChange={(next) => {
+          const selected = LOAN_ROLES.find((value) => value === next)
+          if (selected !== undefined) selectRole(selected)
         }}
-        noValidate
       >
-        <SelectField
-          id="filter-loan-status"
-          label="Статус"
-          value={statusFilter}
-          onChange={(event) => {
-            setStatusFilter(event.target.value)
-          }}
-        >
-          <option value="">будь-який</option>
-          {LOAN_STATUS.map((value) => (
-            <option key={value} value={value}>
-              {LOAN_STATUS_LABELS[value]}
-            </option>
+        <TabsList variant="line" aria-label="Бік позичання">
+          {LOAN_ROLES.map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {ROLE_LABELS[value]}
+            </TabsTrigger>
           ))}
-        </SelectField>
-      </form>
+        </TabsList>
 
-      <FormStatus error={actions.failure} />
+        <TabsContent value={role}>
+          <form
+            className="search"
+            onSubmit={(event) => {
+              event.preventDefault()
+            }}
+            noValidate
+          >
+            <SelectField
+              id="filter-loan-status"
+              label="Статус"
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value)
+              }}
+            >
+              <option value="">будь-який</option>
+              {LOAN_STATUS.map((value) => (
+                <option key={value} value={value}>
+                  {LOAN_STATUS_LABELS[value]}
+                </option>
+              ))}
+            </SelectField>
+          </form>
 
-      {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
-      {state.status === 'error' && <FormStatus error={new Error(state.message)} />}
+          <FormStatus error={actions.failure} />
 
-      {state.status === 'ready' && state.data.loans.length === 0 && (
-        <p className="empty">
-          {role === 'owner'
-            ? 'Вашими книжками поки ніхто не цікавився. Якщо ви вже віддали книжку другові, запишіть це в бібліотеці.'
-            : 'Ви поки нічого не позичали й не просили. Загляньте в бібліотеку друга.'}
-        </p>
-      )}
+          {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
+          {state.status === 'error' && <FormStatus error={new Error(state.message)} />}
 
-      {state.status === 'ready' && (
-        <ul className="books">
-          {state.data.loans.map((loan) => (
-            <LoanCard
-              key={loan.id}
-              loan={loan}
-              userId={user.id}
-              busyKey={actions.busyKey}
-              onAct={actions.act}
-              onConfirm={actions.setConfirmation}
-            />
-          ))}
-        </ul>
-      )}
+          {state.status === 'ready' && state.data.loans.length === 0 && (
+            <p className="empty">
+              {role === 'owner'
+                ? 'Вашими книжками поки ніхто не цікавився. Якщо ви вже віддали книжку другові, запишіть це в бібліотеці.'
+                : 'Ви поки нічого не позичали й не просили. Загляньте в бібліотеку друга.'}
+            </p>
+          )}
+
+          {state.status === 'ready' && (
+            <ul className="books">
+              {state.data.loans.map((loan) => (
+                <LoanCard
+                  key={loan.id}
+                  loan={loan}
+                  userId={user.id}
+                  busyKey={actions.busyKey}
+                  onAct={actions.act}
+                  onConfirm={actions.setConfirmation}
+                />
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <LoanDialog actions={actions} />
       <LoanFooter />

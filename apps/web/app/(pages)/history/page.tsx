@@ -9,6 +9,7 @@ import { FormStatus } from '@/components/Form/FormStatus'
 import { useSession } from '@/app/lib/use-session'
 import { useMyHistory } from '@/app/lib/use-history'
 import { HistoryEntryLine } from '@/components/HistoryEntryLine'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 /**
  * §6.6, «Моя історія»: що я брав і що в мене брали.
@@ -60,7 +61,9 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-type View = 'borrowed' | 'lent'
+const VIEWS = ['borrowed', 'lent'] as const
+
+type View = (typeof VIEWS)[number]
 
 const VIEW_LABELS: Readonly<Record<View, string>> = {
   borrowed: 'Що я брав',
@@ -73,44 +76,47 @@ function HistoryScreen() {
 
   return (
     <Shell>
-      <nav className="actions" aria-label="Вигляд історії">
-        {(['borrowed', 'lent'] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={view === value ? undefined : 'button--ghost'}
-            aria-pressed={view === value}
-            onClick={() => {
-              setView(value)
-            }}
-          >
-            {VIEW_LABELS[value]}
-          </button>
-        ))}
-      </nav>
-
-      {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
-      {state.status === 'error' && <FormStatus error={new Error(state.message)} />}
-
-      {state.status === 'ready' && state.data[view].length === 0 && (
-        <p className="empty">
-          {view === 'borrowed' ? 'Ви поки нічого не брали.' : 'У вас поки нічого не брали.'}
-        </p>
-      )}
-
-      {state.status === 'ready' && (
-        <ul className="books">
-          {state.data[view].map((item, index) => (
-            // Stage 10 (10f.3): гостьовий факт (`entry.names === false`) не має `loanId` —
-            // анонімний запис не несе жодного ідентифікатора, за яким можна було б корелювати
-            // два різні зрізи історії (те саме правило, що для чужої історії, §6.6).
-            <HistoryCard
-              key={item.entry.names ? item.entry.loanId : `guest-${String(index)}`}
-              item={item}
-            />
+      <Tabs
+        className="gap-8"
+        value={view}
+        onValueChange={(next) => {
+          const selected = VIEWS.find((value) => value === next)
+          if (selected !== undefined) setView(selected)
+        }}
+      >
+        <TabsList variant="line" aria-label="Вигляд історії">
+          {VIEWS.map((value) => (
+            <TabsTrigger key={value} value={value}>
+              {VIEW_LABELS[value]}
+            </TabsTrigger>
           ))}
-        </ul>
-      )}
+        </TabsList>
+
+        <TabsContent value={view}>
+          {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
+          {state.status === 'error' && <FormStatus error={new Error(state.message)} />}
+
+          {state.status === 'ready' && state.data[view].length === 0 && (
+            <p className="empty">
+              {view === 'borrowed' ? 'Ви поки нічого не брали.' : 'У вас поки нічого не брали.'}
+            </p>
+          )}
+
+          {state.status === 'ready' && (
+            <ul className="books">
+              {state.data[view].map((item, index) => (
+                // Stage 10 (10f.3): a guest fact (`entry.names === false`) has no `loanId` — an
+                // anonymous entry carries no identifier that could correlate two different slices
+                // of history (the same rule as for someone else's history, §6.6).
+                <HistoryCard
+                  key={item.entry.names ? item.entry.loanId : `guest-${String(index)}`}
+                  item={item}
+                />
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <p className="form__aside">
         <Link href="/loans">Позичання</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}

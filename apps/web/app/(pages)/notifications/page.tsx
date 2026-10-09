@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { isGuestResponseNotificationType, type Notification } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
+import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import {
   FriendRequestNotification,
   useFriendRequestActions,
@@ -102,27 +103,26 @@ function NotificationsScreen() {
 
   return (
     <Shell>
-      <nav className="actions" aria-label="Вигляд сповіщень">
-        <button
-          type="button"
-          className={unreadOnly ? 'button--ghost' : undefined}
-          aria-pressed={!unreadOnly}
-          onClick={() => {
-            setUnreadOnly(false)
-          }}
-        >
-          Усі
-        </button>
-        <button
-          type="button"
-          className={unreadOnly ? undefined : 'button--ghost'}
-          aria-pressed={unreadOnly}
-          onClick={() => {
-            setUnreadOnly(true)
-          }}
-        >
-          Непрочитані{unreadCount > 0 && <span className="badge badge--count">{unreadCount}</span>}
-        </button>
+      <nav className="actions items-center" aria-label="Вигляд сповіщень">
+        <ToggleTabs>
+          <ToggleTab
+            pressed={!unreadOnly}
+            onClick={() => {
+              setUnreadOnly(false)
+            }}
+          >
+            Усі
+          </ToggleTab>
+          <ToggleTab
+            pressed={unreadOnly}
+            onClick={() => {
+              setUnreadOnly(true)
+            }}
+          >
+            Непрочитані
+            {unreadCount > 0 && <span className="badge badge--count">{unreadCount}</span>}
+          </ToggleTab>
+        </ToggleTabs>
         <button
           type="button"
           className="button--ghost"

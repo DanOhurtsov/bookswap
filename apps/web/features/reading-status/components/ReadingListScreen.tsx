@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import type { ReadingListItem } from '@bookswap/shared'
 import { AuthorLine, Chip } from '@/components/BookParts'
+import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import { READING_STATUS_LABELS, WAS_BORROWED_LABEL } from '@/app/lib/labels'
 import { useReadingList, type ReadingListFilter } from '../model/use-reading-list'
 
@@ -30,19 +31,19 @@ export function ReadingListScreen() {
       <p className="lede">Список бачите лише ви. Статус змінюється на сторінці твору.</p>
 
       <nav className="actions" aria-label="Фільтр списку читання">
-        {FILTERS.map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            className={filter === option.value ? undefined : 'button--ghost'}
-            aria-pressed={filter === option.value}
-            onClick={() => {
-              if (filter !== option.value) setFilter(option.value)
-            }}
-          >
-            {option.label}
-          </button>
-        ))}
+        <ToggleTabs>
+          {FILTERS.map((option) => (
+            <ToggleTab
+              key={option.label}
+              pressed={filter === option.value}
+              onClick={() => {
+                if (filter !== option.value) setFilter(option.value)
+              }}
+            >
+              {option.label}
+            </ToggleTab>
+          ))}
+        </ToggleTabs>
       </nav>
 
       {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
