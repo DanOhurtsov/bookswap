@@ -41,7 +41,7 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
       {/* Below `lg` the inline row no longer fits next to the logo and the account controls. */}
       <nav className="hidden items-center gap-4 lg:flex">
         {links.map((link) => (
-          <Link key={link.href} href={link.href}>
+          <Link key={link.href} href={link.href} className="link-underline">
             {link.label}
           </Link>
         ))}
@@ -62,7 +62,7 @@ const GuestNav = () => {
       <div className="flex items-center gap-2">
         <nav className="flex items-center gap-4">
           {NAVBAR_LINKS_GUEST.map((link) => (
-            <Link key={link.href} href={link.href}>
+            <Link key={link.href} href={link.href} className="link-underline">
               {link.label}
             </Link>
           ))}

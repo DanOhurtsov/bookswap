@@ -206,6 +206,51 @@ button:not([data-ui='button']):disabled {
   color: var(--bookswap-muted);
 }
 
+/* --- Links ---------------------------------------------------------------- */
+
+/*
+ * Animated underline for standalone text links (navigation, text actions).
+ *
+ * The line is a background, not `text-decoration` or a pseudo-element: a background
+ * follows the text across line breaks, so a long link still wraps normally, and it
+ * takes no space, so the link never moves or resizes. Anchored to the right edge,
+ * growing the width from 0 to 100% draws the line from right to left, and shrinking
+ * it back retracts it the same way.
+ *
+ * Put the class on the link itself, or on the text span inside a link that also
+ * holds an icon — then only the text is underlined. Not for links that already
+ * carry a permanent underline: in running text that underline is what tells a link
+ * from the words around it.
+ */
+.link-underline {
+  text-decoration-line: none;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 100% 100%;
+  background-size: 0% 1px;
+  transition: background-size 200ms ease-out;
+}
+
+/* Touch screens report a hover after a tap and keep it — the line would stay stuck. */
+@media (hover: hover) {
+  .link-underline:hover,
+  a:hover > .link-underline {
+    background-size: 100% 1px;
+  }
+}
+
+/* Keyboard focus gets the same line; the focus-visible outline above stays as is. */
+.link-underline:focus-visible,
+a:focus-visible > .link-underline {
+  background-size: 100% 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-underline {
+    transition: none;
+  }
+}
+
 /* --- Повідомлення --------------------------------------------------------- */
 .alert {
   margin: 0 0 1.5rem;

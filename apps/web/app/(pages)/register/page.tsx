@@ -135,7 +135,7 @@ function RegisterPageForm() {
         Уже маєте акаунт?{' '}
         <Link
           href={`/login${returnToQuery(returnTo)}`}
-          className="hover:underline text-(--bookswap-accent)"
+          className="link-underline text-(--bookswap-accent)"
         >
           Увійти
         </Link>

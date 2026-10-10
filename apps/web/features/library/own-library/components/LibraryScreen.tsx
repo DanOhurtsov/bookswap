@@ -86,8 +86,12 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
       {checklist}
 
       <div className="actions">
-        <Link href="/catalog/new">Додати книжку</Link>
-        <Link href="/library/imports">Імпорт із CSV</Link>
+        <Link href="/catalog/new" className="link-underline">
+          Додати книжку
+        </Link>
+        <Link href="/library/imports" className="link-underline">
+          Імпорт із CSV
+        </Link>
       </div>
 
       <nav className="mb-10">

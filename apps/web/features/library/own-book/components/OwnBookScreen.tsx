@@ -105,7 +105,9 @@ function OwnBookContent({ entryId }: { entryId: string }) {
   return (
     <Shell>
       <p className="form__aside">
-        <Link href="/library">← До моєї бібліотеки</Link>
+        <Link href="/library" className="link-underline">
+          ← До моєї бібліотеки
+        </Link>
       </p>
 
       <h1>{view.title}</h1>
@@ -130,7 +132,9 @@ function OwnBookContent({ entryId }: { entryId: string }) {
       <ReadingStatusPanel workId={view.workId} />
 
       <p className="form__aside">
-        <Link href={view.workHref}>Загальна сторінка книги</Link>
+        <Link href={view.workHref} className="link-underline">
+          Загальна сторінка книги
+        </Link>
       </p>
     </Shell>
   )
