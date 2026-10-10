@@ -50,7 +50,9 @@ export function ContactsScreen() {
       <p className="form__aside">Контакти бачите лише ви.</p>
 
       <div className="actions">
-        <Link href="/loans/guest">Гостьові позики</Link>
+        <Link href="/loans/guest" className="link-underline">
+          Гостьові позики
+        </Link>
       </div>
 
       {state.status === 'loading' && <p className="status status--pending">Завантажую контакти…</p>}

@@ -49,7 +49,9 @@ export function AddBookManualScreen({
         Обов’язкова лише назва. Решту можна не знати — її можна уточнити пізніше.
       </p>
       <p>
-        <Link href={backToSearchHref(parameters)}>← До пошуку</Link>
+        <Link href={backToSearchHref(parameters)} className="link-underline">
+          ← До пошуку
+        </Link>
       </p>
 
       {presetWork.status === 'error' && (

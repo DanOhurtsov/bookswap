@@ -114,13 +114,13 @@ function LoginPageForm() {
       </form>
 
       <p className="form__aside">
-        <Link href="/forgot-password" className="hover:underline text-(--bookswap-accent)">
+        <Link href="/forgot-password" className="link-underline text-(--bookswap-accent)">
           Забули пароль?
         </Link>{' '}
         ·{' '}
         <Link
           href={`/register${returnToQuery(returnTo)}`}
-          className="hover:underline text-(--bookswap-accent)"
+          className="link-underline text-(--bookswap-accent)"
         >
           Зареєструватися
         </Link>

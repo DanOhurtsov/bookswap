@@ -234,7 +234,7 @@ export function AddBookSearchScreen({
           : 'Щоб шукати, введіть назву, автора або ISBN.'}{' '}
         <Link
           href={manualHref({ parameters, isbn, autoActive, enabled, urlQuery, query })}
-          className="hover:underline text-(--bookswap-accent)"
+          className="link-underline text-(--bookswap-accent)"
         >
           Додати вручну
         </Link>

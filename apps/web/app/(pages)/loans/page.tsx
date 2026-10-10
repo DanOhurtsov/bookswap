@@ -362,7 +362,9 @@ function GuestLoansLink() {
 
   return (
     <div className="actions">
-      <Link href="/loans/guest">Гостьові позики</Link>
+      <Link href="/loans/guest" className="link-underline">
+        Гостьові позики
+      </Link>
     </div>
   )
 }

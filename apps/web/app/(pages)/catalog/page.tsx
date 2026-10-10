@@ -317,7 +317,9 @@ function CatalogDiscovery() {
 
       <p className="form__aside">
         Не знайшли книжку?{' '}
-        <Link href={`/catalog/new?q=${encodeURIComponent(submitted)}`}>Додати свою книжку</Link>
+        <Link href={`/catalog/new?q=${encodeURIComponent(submitted)}`} className="link-underline">
+          Додати свою книжку
+        </Link>
       </p>
     </Shell>
   )

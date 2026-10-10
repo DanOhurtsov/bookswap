@@ -224,7 +224,9 @@ export default function WorkPage() {
           </ul>
         )}
         <p>
-          <Link href={`/catalog/new?workId=${work.id}`}>Додати переклад або видання</Link>
+          <Link href={`/catalog/new?workId=${work.id}`} className="link-underline">
+            Додати переклад або видання
+          </Link>
         </p>
       </section>
 

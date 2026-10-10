@@ -101,7 +101,9 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
       />
 
       <p>
-        <Link href="/library/imports">Надіслати інший файл</Link>
+        <Link href="/library/imports" className="link-underline">
+          Надіслати інший файл
+        </Link>
       </p>
 
       <nav className="actions import-filters" aria-label="Фільтр рядків">
@@ -163,7 +165,9 @@ function CommittedNotice({ draft }: { draft: LibraryImportDraftResponse }) {
       <ActivationChecklist />
 
       <p className="form__aside">
-        <Link href="/library">Моя бібліотека</Link>
+        <Link href="/library" className="link-underline">
+          Моя бібліотека
+        </Link>
       </p>
     </div>
   )
