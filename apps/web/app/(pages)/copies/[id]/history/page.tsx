@@ -64,9 +64,6 @@ export default function CopyHistoryPage() {
     return (
       <Shell>
         <FormStatus error={new Error(state.message)} />
-        <p className="form__aside">
-          <Link href="/library">Моя бібліотека</Link> · <Link href="/loans">Позичання</Link>
-        </p>
       </Shell>
     )
   }
@@ -103,11 +100,6 @@ export default function CopyHistoryPage() {
           )}
         </li>
       </ul>
-
-      <p className="form__aside">
-        <Link href="/loans">Позичання</Link> · <Link href="/history">Моя історія</Link> ·{' '}
-        <Link href="/library">Моя бібліотека</Link>
-      </p>
     </Shell>
   )
 }

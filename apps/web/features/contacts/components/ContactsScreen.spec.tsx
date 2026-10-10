@@ -181,6 +181,19 @@ describe('ContactsScreen', () => {
     expect(screen.getByRole('button', { name: 'Додати контакт' })).toBeInTheDocument()
   })
 
+  it('BS-104: links to guest loans from the main content, also when the list failed to load', async () => {
+    apiRequest.mockRejectedValueOnce(
+      new ApiRequestError(500, { code: 'INTERNAL_ERROR', message: 'Збій сервера' }),
+    )
+    render(<ContactsScreen />)
+
+    await screen.findByRole('alert')
+    expect(screen.getByRole('link', { name: 'Гостьові позики' })).toHaveAttribute(
+      'href',
+      '/loans/guest',
+    )
+  })
+
   it('does not call the API and shows an error when the owner has not made the statement', async () => {
     render(<ContactsScreen />)
     await screen.findByText('Контактів поки немає.')

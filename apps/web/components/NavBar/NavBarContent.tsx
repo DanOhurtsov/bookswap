@@ -4,6 +4,7 @@ import { type SessionState } from '@/app/lib/use-session'
 import { NAVBAR_LINK_CONTACTS, NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST } from '@/constants/navigation'
 import { NavBarAvatar } from '@/components/NavBar/NavBarAvatar'
 import { NavBarLogo } from '@/components/NavBar/NavBarLogo'
+import { NavBarMenu } from '@/components/NavBar/NavBarMenu'
 import { NavBarNotifications } from '@/components/NavBar/NavBarNotifications'
 import { ThemeToggleButton } from '@/components/ThemeToggle'
 
@@ -33,8 +34,12 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
 
   return (
     <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
-      <NavBarLogo />
-      <nav className="flex items-center gap-4">
+      <div className="flex items-center gap-2">
+        <NavBarMenu links={links} className="lg:hidden" />
+        <NavBarLogo />
+      </div>
+      {/* Below `lg` the inline row no longer fits next to the logo and the account controls. */}
+      <nav className="hidden items-center gap-4 lg:flex">
         {links.map((link) => (
           <Link key={link.href} href={link.href}>
             {link.label}

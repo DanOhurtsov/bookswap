@@ -319,10 +319,6 @@ function CatalogDiscovery() {
         Не знайшли книжку?{' '}
         <Link href={`/catalog/new?q=${encodeURIComponent(submitted)}`}>Додати свою книжку</Link>
       </p>
-      <p className="form__aside">
-        <Link href="/library">Моя бібліотека</Link> · <Link href="/friends">Друзі</Link> ·{' '}
-        <Link href="/">На головну</Link>
-      </p>
     </Shell>
   )
 }

@@ -223,15 +223,12 @@ export default function WorkPage() {
             ))}
           </ul>
         )}
+        <p>
+          <Link href={`/catalog/new?workId=${work.id}`}>Додати переклад або видання</Link>
+        </p>
       </section>
 
       <WorkHistorySection workId={workId} />
-
-      <p className="form__aside">
-        <Link href={`/catalog/new?workId=${work.id}`}>Додати переклад або видання</Link> ·{' '}
-        <Link href="/catalog">До каталогу</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}
-        <Link href="/wishlist">Вішлист</Link>
-      </p>
     </main>
   )
 }

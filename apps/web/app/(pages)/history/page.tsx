@@ -117,11 +117,6 @@ function HistoryScreen() {
           )}
         </TabsContent>
       </Tabs>
-
-      <p className="form__aside">
-        <Link href="/loans">Позичання</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}
-        <Link href="/notifications">Сповіщення</Link> · <Link href="/">На головну</Link>
-      </p>
     </Shell>
   )
 }

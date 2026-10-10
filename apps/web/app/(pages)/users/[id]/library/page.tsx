@@ -115,11 +115,6 @@ export default function FriendLibraryPage() {
           ))}
         </ul>
       )}
-
-      <p className="form__aside">
-        <Link href="/friends">До друзів</Link> · <Link href="/loans">Позичання</Link> ·{' '}
-        <Link href="/catalog">Каталог</Link> · <Link href="/library">Моя бібліотека</Link>
-      </p>
     </Shell>
   )
 }

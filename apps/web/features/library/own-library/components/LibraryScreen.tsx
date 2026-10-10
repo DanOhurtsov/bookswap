@@ -85,6 +85,11 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
     <Shell>
       {checklist}
 
+      <div className="actions">
+        <Link href="/catalog/new">Додати книжку</Link>
+        <Link href="/library/imports">Імпорт із CSV</Link>
+      </div>
+
       <nav className="mb-10">
         <Tabs
           value={view}
@@ -107,11 +112,6 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
       ) : (
         <OwnShelf view={view} filters={filters} onApplyFilters={applyFilters} />
       )}
-
-      <p className="form__aside">
-        <Link href="/catalog/new">Додати книжку</Link> ·{' '}
-        <Link href="/library/imports">Імпорт із CSV</Link>
-      </p>
     </Shell>
   )
 }

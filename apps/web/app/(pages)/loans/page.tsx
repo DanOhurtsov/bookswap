@@ -196,6 +196,8 @@ function LoanListView({ user }: { user: Me }) {
 
   return (
     <Shell>
+      <GuestLoansLink />
+
       <Tabs
         className="gap-8"
         value={role}
@@ -268,7 +270,6 @@ function LoanListView({ user }: { user: Me }) {
       </Tabs>
 
       <LoanDialog actions={actions} />
-      <LoanFooter />
     </Shell>
   )
 }
@@ -328,7 +329,6 @@ function SingleLoanView({ user, loanId }: { user: Me; loanId: string }) {
       )}
 
       <LoanDialog actions={actions} />
-      <LoanFooter />
     </Shell>
   )
 }
@@ -353,24 +353,17 @@ function LoanDialog({ actions }: { actions: LoanActions }) {
   )
 }
 
-function LoanFooter() {
-  // Stage 10 (10f.3): маршрут існує лише за серверним features.guestLoans — той самий прапор, що
-  // ховає й саму сторінку `/loans/guest`.
+function GuestLoansLink() {
+  // Stage 10 (10f.3): the route exists only behind the server's features.guestLoans — the same
+  // flag that hides the `/loans/guest` page itself.
   const { state: session } = useSession()
-  const guestLoansEnabled =
-    session.status === 'authenticated' && session.features?.guestLoans === true
+
+  if (session.status !== 'authenticated' || session.features?.guestLoans !== true) return null
 
   return (
-    <p className="form__aside">
-      <Link href="/library">Моя бібліотека</Link> ·{' '}
-      {guestLoansEnabled && (
-        <>
-          <Link href="/loans/guest">Гостьові позики</Link> ·{' '}
-        </>
-      )}
-      <Link href="/history">Історія</Link> · <Link href="/notifications">Сповіщення</Link> ·{' '}
-      <Link href="/friends">Друзі</Link> · <Link href="/">На головну</Link>
-    </p>
+    <div className="actions">
+      <Link href="/loans/guest">Гостьові позики</Link>
+    </div>
   )
 }
 

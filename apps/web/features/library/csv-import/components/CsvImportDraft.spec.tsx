@@ -1227,3 +1227,14 @@ it('explains a refused cell by what was in it, not as a generic invalid value', 
   expect(await screen.findByText(/Excel зберіг у цій клітинці дату/)).toBeInTheDocument()
   expect(screen.queryByText('Некоректне значення поля «Кількість примірників».')).toBeNull()
 })
+
+it('BS-104: offers sending another file from the draft, not only from a footer', async () => {
+  mockApiRequest.mockResolvedValue(mixedDraft())
+
+  renderDraft()
+
+  expect(await screen.findByRole('link', { name: 'Надіслати інший файл' })).toHaveAttribute(
+    'href',
+    '/library/imports',
+  )
+})
