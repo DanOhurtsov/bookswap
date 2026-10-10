@@ -2,6 +2,7 @@ const NAVBAR_LINKS_AUTH = [
   { href: '/', label: 'Головна' },
   { href: '/catalog', label: 'Каталог' },
   { href: '/library', label: 'Моя бібліотека' },
+  { href: '/wishlist', label: 'Вішлист' },
   { href: '/loans', label: 'Позичання' },
   { href: '/friends', label: 'Друзі' },
   { href: '/history', label: 'Історія' },
@@ -17,7 +18,6 @@ const NAVBAR_LINKS_GUEST = [
 
 const NAVBAR_PROFILE_LINKS = [
   { href: '/profile', label: 'Профіль' },
-  { href: '/wishlist', label: 'Вішлист' },
   { href: '/reading-list', label: 'Список читання' },
 ]
 

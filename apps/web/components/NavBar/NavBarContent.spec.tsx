@@ -56,6 +56,7 @@ describe('NavContent', () => {
         '/register',
       )
       expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute('href', '/login')
+      expect(screen.queryByRole('link', { name: 'Вішлист' })).not.toBeInTheDocument()
       expect(screen.queryByTestId('profile-menu')).not.toBeInTheDocument()
     },
   )
@@ -65,6 +66,7 @@ describe('NavContent', () => {
 
     expect(screen.getByRole('link', { name: 'Головна' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Каталог' })).toHaveAttribute('href', '/catalog')
+    expect(screen.getByRole('link', { name: 'Вішлист' })).toHaveAttribute('href', '/wishlist')
     expect(screen.getByRole('link', { name: 'Позичання' })).toHaveAttribute('href', '/loans')
     expect(screen.getByRole('link', { name: 'Друзі' })).toHaveAttribute('href', '/friends')
     expect(screen.getByRole('link', { name: 'Історія' })).toHaveAttribute('href', '/history')
@@ -91,12 +93,21 @@ describe('NavContent', () => {
     [
       'guestLoans=true',
       { guestLoans: true },
-      ['Головна', 'Каталог', 'Моя бібліотека', 'Позичання', 'Друзі', 'Історія', 'Контакти'],
+      [
+        'Головна',
+        'Каталог',
+        'Моя бібліотека',
+        'Вішлист',
+        'Позичання',
+        'Друзі',
+        'Історія',
+        'Контакти',
+      ],
     ],
     [
       'features unknown',
       undefined,
-      ['Головна', 'Каталог', 'Моя бібліотека', 'Позичання', 'Друзі', 'Історія'],
+      ['Головна', 'Каталог', 'Моя бібліотека', 'Вішлист', 'Позичання', 'Друзі', 'Історія'],
     ],
   ])(
     'the compact menu (%s) offers the same links as the inline row',
@@ -115,6 +126,9 @@ describe('NavContent', () => {
       expect(
         within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Позичання' }),
       ).toHaveAttribute('href', '/loans')
+      expect(
+        within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Вішлист' }),
+      ).toHaveAttribute('href', '/wishlist')
     },
   )
 })
