@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Work, WorkAuthor } from '@bookswap/shared'
+import { NAVBAR_PROFILE_LINKS } from '@/constants/navigation'
 import WishlistPage from './page'
 
 /**
@@ -136,4 +137,8 @@ it('паралельне «Прибрати» на двох різних ряд�
   // A повертається (відкат ЛИШЕ своєї операції), B успішно видалений не воскресає.
   await screen.findByText('Твір А')
   expect(screen.queryByText('Твір Б')).not.toBeInTheDocument()
+})
+
+it('BS-104: сторінка доступна з меню профілю, а не лише з нижнього блоку сторінки твору', () => {
+  expect(NAVBAR_PROFILE_LINKS).toContainEqual({ href: '/wishlist', label: 'Вішлист' })
 })

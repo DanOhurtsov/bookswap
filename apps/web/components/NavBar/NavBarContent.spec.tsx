@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Me } from '@bookswap/shared'
 import type { SessionState } from '@/app/lib/use-session'
@@ -63,6 +64,8 @@ describe('NavContent', () => {
     renderState({ status: 'authenticated', user })
 
     expect(screen.getByRole('link', { name: 'Головна' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Каталог' })).toHaveAttribute('href', '/catalog')
+    expect(screen.getByRole('link', { name: 'Позичання' })).toHaveAttribute('href', '/loans')
     expect(screen.getByRole('link', { name: 'Друзі' })).toHaveAttribute('href', '/friends')
     expect(screen.getByRole('link', { name: 'Історія' })).toHaveAttribute('href', '/history')
     expect(screen.getByRole('button', { name: 'Notifications' })).toBeInTheDocument()
@@ -83,4 +86,35 @@ describe('NavContent', () => {
     if (visible) expect(link).toHaveAttribute('href', '/contacts')
     else expect(link).not.toBeInTheDocument()
   })
+
+  it.each([
+    [
+      'guestLoans=true',
+      { guestLoans: true },
+      ['Головна', 'Каталог', 'Моя бібліотека', 'Позичання', 'Друзі', 'Історія', 'Контакти'],
+    ],
+    [
+      'features unknown',
+      undefined,
+      ['Головна', 'Каталог', 'Моя бібліотека', 'Позичання', 'Друзі', 'Історія'],
+    ],
+  ])(
+    'the compact menu (%s) offers the same links as the inline row',
+    async (_name, features, labels) => {
+      renderState({
+        status: 'authenticated',
+        user,
+        ...(features === undefined ? {} : { features }),
+      })
+
+      await userEvent.click(screen.getByRole('button', { name: 'Відкрити меню навігації' }))
+
+      const items = await screen.findAllByRole('menuitem')
+
+      expect(items.map((item) => item.textContent)).toEqual(labels)
+      expect(
+        within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Позичання' }),
+      ).toHaveAttribute('href', '/loans')
+    },
+  )
 })

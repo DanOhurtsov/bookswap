@@ -155,12 +155,6 @@ function NotificationsScreen() {
           ))}
         </ul>
       )}
-
-      <p className="form__aside">
-        <Link href="/notifications/settings">Налаштування</Link> ·{' '}
-        <Link href="/loans">Позичання</Link> · <Link href="/history">Історія</Link> ·{' '}
-        <Link href="/library">Моя бібліотека</Link> · <Link href="/">На головну</Link>
-      </p>
     </Shell>
   )
 }

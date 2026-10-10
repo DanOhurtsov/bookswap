@@ -101,11 +101,6 @@ export default function WishlistPage() {
           ))}
         </ul>
       )}
-
-      <p className="form__aside">
-        <Link href="/catalog">Каталог</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}
-        <Link href="/">На головну</Link>
-      </p>
     </Shell>
   )
 }

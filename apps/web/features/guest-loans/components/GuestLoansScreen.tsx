@@ -45,7 +45,6 @@ function GuestLoansBody() {
       <>
         <SyntheticDataNotice />
         <SingleGuestConfirmationView confirmationId={confirmationId} />
-        <Footer />
       </>
     )
   }
@@ -129,8 +128,6 @@ function GuestLoanListView() {
           ))}
         </ul>
       )}
-
-      <Footer />
     </>
   )
 }
@@ -163,8 +160,6 @@ function SingleGuestLoanView({ loanId }: { loanId: string }) {
           <GuestLoanCard loan={state.data.loan} busyKey={actions.busyKey} onAct={actions.act} />
         </ul>
       )}
-
-      <Footer />
     </>
   )
 }
@@ -176,15 +171,6 @@ function SyntheticDataNotice() {
         <strong>Лише синтетичні тестові дані.</strong> Не вводьте справжні імена чи контакти людей.
       </p>
     </div>
-  )
-}
-
-function Footer() {
-  return (
-    <p className="form__aside">
-      <Link href="/contacts">Контакти</Link> · <Link href="/library">Моя бібліотека</Link> ·{' '}
-      <Link href="/loans">Позичання</Link> · <Link href="/">На головну</Link>
-    </p>
   )
 }
 

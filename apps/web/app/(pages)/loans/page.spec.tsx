@@ -21,7 +21,7 @@ jest.mock('next/navigation', () => ({
   useSearchParams: () => mockParameters,
 }))
 
-const mockSession: SessionState = {
+const SIGNED_IN: Extract<SessionState, { status: 'authenticated' }> = {
   status: 'authenticated',
   user: {
     id: 'user-me',
@@ -36,6 +36,8 @@ const mockSession: SessionState = {
   },
 }
 
+let mockSession: SessionState = SIGNED_IN
+
 jest.mock('@/app/lib/use-session', () => ({ useSession: () => ({ state: mockSession }) }))
 
 const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
@@ -48,6 +50,7 @@ beforeEach(() => {
   mockReplace.mockReset()
   mockPush.mockReset()
   mockParameters = new URLSearchParams()
+  mockSession = SIGNED_IN
 })
 
 describe('LoansPage: вкладки «Мої книжки» / «Я позичаю» (BS-87)', () => {
@@ -87,5 +90,31 @@ describe('LoansPage: вкладки «Мої книжки» / «Я позича�
 
     expect(mockReplace).toHaveBeenCalledWith('/loans?status=REQUESTED&role=borrower')
     expect(mockPush).not.toHaveBeenCalled()
+  })
+})
+
+describe('LoansPage: вхід у «Гостьові позики» (BS-104)', () => {
+  it('за ввімкненого guestLoans посилання стоїть над вкладками й веде на /loans/guest', async () => {
+    mockSession = { ...SIGNED_IN, features: { guestLoans: true } }
+
+    render(<LoansPage />)
+    await screen.findByText(/Вашими книжками поки ніхто не цікавився/)
+
+    expect(screen.getByRole('link', { name: 'Гостьові позики' })).toHaveAttribute(
+      'href',
+      '/loans/guest',
+    )
+  })
+
+  it.each([
+    ['guestLoans=false', { guestLoans: false }],
+    ['features unknown', undefined],
+  ])('без прапора (%s) посилання немає', async (_name, features) => {
+    mockSession = { ...SIGNED_IN, ...(features === undefined ? {} : { features }) }
+
+    render(<LoansPage />)
+    await screen.findByText(/Вашими книжками поки ніхто не цікавився/)
+
+    expect(screen.queryByRole('link', { name: 'Гостьові позики' })).not.toBeInTheDocument()
   })
 })

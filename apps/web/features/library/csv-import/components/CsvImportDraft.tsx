@@ -100,6 +100,10 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
         onCommit={state.commit}
       />
 
+      <p>
+        <Link href="/library/imports">Надіслати інший файл</Link>
+      </p>
+
       <nav className="actions import-filters" aria-label="Фільтр рядків">
         <ToggleTabs>
           {IMPORT_ROW_FILTERS.map((value) => (
@@ -140,11 +144,6 @@ function DraftBody({ draft, filter, state, onFilterChange }: DraftBodyProps) {
           ))}
         </ul>
       )}
-
-      <p className="form__aside">
-        <Link href="/library/imports">Надіслати інший файл</Link> ·{' '}
-        <Link href="/library">Моя бібліотека</Link>
-      </p>
     </>
   )
 }

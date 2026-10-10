@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import type {
   WishlistResponse,
@@ -121,5 +121,24 @@ describe('Сторінка твору: канонічний URL', () => {
 
     expect(await screen.findByRole('heading', { name: 'Канонічний' })).toBeInTheDocument()
     expect(replace).not.toHaveBeenCalled()
+  })
+})
+
+describe('Сторінка твору: додавання перекладу чи видання (BS-104)', () => {
+  it('посилання живе в розділі «Видання» й несе workId цього твору', async () => {
+    routeWorkId = 'work-new'
+    mockApiRequestWithRedirect.mockResolvedValue({
+      data: detail('work-new', 'Канонічний'),
+      redirected: false,
+    })
+
+    render(withQueryClient(<WorkPage />))
+
+    const editions = (await screen.findByRole('heading', { name: 'Видання' })).closest('section')
+
+    expect(editions).not.toBeNull()
+    expect(
+      within(editions as HTMLElement).getByRole('link', { name: 'Додати переклад або видання' }),
+    ).toHaveAttribute('href', '/catalog/new?workId=work-new')
   })
 })

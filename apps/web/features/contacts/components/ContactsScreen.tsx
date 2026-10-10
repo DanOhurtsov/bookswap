@@ -49,6 +49,10 @@ export function ContactsScreen() {
       <h2 id="contacts-heading">Мої контакти</h2>
       <p className="form__aside">Контакти бачите лише ви.</p>
 
+      <div className="actions">
+        <Link href="/loans/guest">Гостьові позики</Link>
+      </div>
+
       {state.status === 'loading' && <p className="status status--pending">Завантажую контакти…</p>}
 
       {state.status === 'error' && (
@@ -79,11 +83,6 @@ export function ContactsScreen() {
           )}
         </>
       )}
-
-      <p className="form__aside">
-        <Link href="/loans/guest">Гостьові позики</Link> ·{' '}
-        <Link href="/library">Моя бібліотека</Link> · <Link href="/">На головну</Link>
-      </p>
     </section>
   )
 }

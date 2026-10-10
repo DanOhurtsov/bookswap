@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
@@ -80,10 +79,6 @@ function Shell({ children }: { children: ReactNode }) {
     <main className="page">
       <h1>Налаштування сповіщень</h1>
       {children}
-      <p className="form__aside">
-        <Link href="/notifications">Сповіщення</Link> · <Link href="/profile">Профіль</Link> ·{' '}
-        <Link href="/">На головну</Link>
-      </p>
     </main>
   )
 }

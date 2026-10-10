@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useCallback, useState, type FormEvent } from 'react'
 import {
   friendshipStateResponseSchema,
@@ -212,18 +211,6 @@ function FriendsPageContent() {
           onUnblock={(userId) => void removeLink(userId)}
         />
       </div>
-
-      <nav className="flex flex-wrap gap-x-4 gap-y-2 border-t pt-5 text-sm text-muted-foreground">
-        <Link href="/profile" className="hover:text-foreground">
-          Профіль
-        </Link>
-        <Link href="/library" className="hover:text-foreground">
-          Моя бібліотека
-        </Link>
-        <Link href="/catalog" className="hover:text-foreground">
-          Каталог
-        </Link>
-      </nav>
 
       <ConfirmDialog
         open={confirmation !== undefined}
