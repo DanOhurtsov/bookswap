@@ -56,11 +56,20 @@ export class UpdateProfileDto {
 /**
  * §6.1: пошук за імʼям — частковий збіг, за email — ТІЛЬКИ точний.
  *
- * Два поля замість одного «шукати всюди» саме тому: адресу не можна підбирати
- * по літері, інакше ендпоінт стає засобом перевірки, хто тут зареєстрований.
- * Взаємовиключність перевіряє контролер — це правило про пару полів, а не про поле.
+ * `query` is the one field the interface sends: a partial name match, plus an exact address
+ * match when the whole value is a valid email. `q` and `email` stay for compatibility. None of
+ * them ever matches an address partially — otherwise the endpoint would tell who is registered,
+ * letter by letter. That exactly one of the three is present is checked by the controller: it is
+ * a rule about the set of fields, not about a field.
  */
 export class UserSearchDto {
+  @IsOptional()
+  @Transform(trimmed)
+  @IsString()
+  @MinLength(2, { message: 'Мінімум два символи' })
+  @MaxLength(PROFILE_LIMITS.emailMax, { message: 'Задовгий запит' })
+  query?: string
+
   @IsOptional()
   @Transform(trimmed)
   @IsString()

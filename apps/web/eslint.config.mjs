@@ -18,6 +18,7 @@ const KNOWN_FEATURES = [
   'features/reading-status',
   'features/profile',
   'features/friend-requests',
+  'features/user-search',
 ]
 
 export default [

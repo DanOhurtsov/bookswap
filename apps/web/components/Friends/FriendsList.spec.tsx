@@ -79,6 +79,15 @@ describe('FriendsList', () => {
     expect(screen.getByText('Тут поки нікого')).toBeInTheDocument()
   })
 
+  it('points an empty friends list to the people search', () => {
+    renderList()
+
+    const link = screen.getByRole('link', { name: 'Знайдіть людину' })
+
+    expect(link).toHaveAttribute('href', '/friends/search')
+    expect(link.closest('p')).toHaveTextContent('Знайдіть людину й надішліть запит у друзі.')
+  })
+
   it('shows incoming requests first with compact accept and decline actions', async () => {
     const user = userEvent.setup()
     const handlers = renderList({

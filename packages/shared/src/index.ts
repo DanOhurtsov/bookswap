@@ -156,6 +156,7 @@ export {
   meSchema,
   publicUserSchema,
   updateProfileRequestSchema,
+  userSearchQuerySchema,
   userSearchRequestSchema,
   userSearchResponseSchema,
   userSearchResultSchema,

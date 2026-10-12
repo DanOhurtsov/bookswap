@@ -1,7 +1,9 @@
+import Link from 'next/link'
 import type { Friend, FriendRequest, PublicUser } from '@bookswap/shared'
 import { ChevronDownIcon, SendIcon, UserRoundCheckIcon, UsersIcon } from 'lucide-react'
 import { FriendRequestRow } from '@/components/Friends/FriendRequestRow'
 import { FriendRow } from '@/components/Friends/FriendRow'
+import { USER_SEARCH_PATH } from '@/features/user-search/index.client'
 
 interface FriendsListProps {
   friends: Friend[]
@@ -99,7 +101,11 @@ function FriendsList({
             />
             <p className="font-medium">Тут поки нікого</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Знайдіть людину нижче й надішліть запит у друзі.
+              {/* Stands out from the muted sentence before hover; focus keeps the global ring. */}
+              <Link href={USER_SEARCH_PATH} className="link-underline font-medium text-foreground">
+                Знайдіть людину
+              </Link>{' '}
+              й надішліть запит у друзі.
             </p>
           </div>
         ) : (

@@ -1,4 +1,11 @@
-import { meSchema, updateProfileRequestSchema, userSearchRequestSchema } from './user'
+import {
+  PROFILE_LIMITS,
+  emailSchema,
+  meSchema,
+  updateProfileRequestSchema,
+  userSearchQuerySchema,
+  userSearchRequestSchema,
+} from './user'
 
 describe('updateProfileRequestSchema', () => {
   it('дозволяє часткове оновлення', () => {
@@ -55,6 +62,32 @@ describe('userSearchRequestSchema', () => {
 
   it('не шукає за одним символом — це вже перебір бази', () => {
     expect(userSearchRequestSchema.safeParse({ q: 'М' }).success).toBe(false)
+  })
+
+  it('приймає одне поле query й обрізає зовнішні пробіли', () => {
+    expect(userSearchRequestSchema.parse({ query: '  Мар  ' })).toEqual({ query: 'Мар' })
+  })
+
+  it('не поєднує query зі старими параметрами', () => {
+    expect(userSearchRequestSchema.safeParse({ query: 'Мар', q: 'Мар' }).success).toBe(false)
+    expect(userSearchRequestSchema.safeParse({ query: 'Мар', email: 'a@b.co' }).success).toBe(false)
+  })
+})
+
+describe('userSearchQuerySchema', () => {
+  it('вимагає щонайменше два символи після обрізання', () => {
+    expect(userSearchQuerySchema.safeParse(' М ').success).toBe(false)
+    expect(userSearchQuerySchema.safeParse('   ').success).toBe(false)
+    expect(userSearchQuerySchema.parse(' Ма ')).toBe('Ма')
+  })
+
+  it('вміщує email-адресу найбільшої допустимої довжини, але не довшу', () => {
+    const longest = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(58)}.ua`
+
+    expect(longest).toHaveLength(PROFILE_LIMITS.emailMax)
+    expect(emailSchema.safeParse(longest).success).toBe(true)
+    expect(userSearchQuerySchema.parse(longest)).toBe(longest)
+    expect(userSearchQuerySchema.safeParse(`${longest}a`).success).toBe(false)
   })
 })
 

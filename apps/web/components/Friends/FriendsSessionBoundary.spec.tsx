@@ -84,5 +84,12 @@ describe('FriendsSessionBoundary', () => {
     render(<FriendsSessionBoundary />)
 
     expect(screen.getByText('Готовий список друзів')).toBeInTheDocument()
+    // The full people search is one step from the friends lists, next to the page title — the
+    // page's only action there.
+    expect(screen.getByRole('link', { name: 'Знайти людей' })).toHaveAttribute(
+      'href',
+      '/friends/search',
+    )
+    expect(screen.queryByRole('button', { name: 'Додати друга' })).not.toBeInTheDocument()
   })
 })

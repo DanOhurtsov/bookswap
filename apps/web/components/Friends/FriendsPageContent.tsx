@@ -1,29 +1,20 @@
 'use client'
 
-import { useCallback, useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import {
   friendshipStateResponseSchema,
-  userSearchRequestSchema,
-  userSearchResponseSchema,
   type FriendRequest,
   type PublicUser,
-  type UserSearchResult,
 } from '@bookswap/shared'
 import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import { assertNever } from '@/app/lib/assert-never'
+import { announceResourceChanged } from '@/app/lib/resource-sync'
 import { useFriends } from '@/app/lib/use-friends'
-import { validate, type FieldErrors } from '@/app/lib/validation'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { FriendsList } from '@/components/Friends/FriendsList'
-import { FriendsSearch, type SearchMode } from '@/components/Friends/FriendsSearch'
 import { Button } from '@/components/ui/button'
 import { InviteManager } from '@/features/network/index.client'
 import { Skeleton } from '@/components/ui/skeleton'
-
-interface SearchQuery {
-  mode: SearchMode
-  value: string
-}
 
 interface Confirmation {
   title: string
@@ -37,29 +28,6 @@ function FriendsPageContent() {
   const [failure, setFailure] = useState<unknown>()
   const [busyKey, setBusyKey] = useState<string>()
   const [confirmation, setConfirmation] = useState<Confirmation>()
-  const [mode, setMode] = useState<SearchMode>('name')
-  const [query, setQuery] = useState('')
-  const [lastSearch, setLastSearch] = useState<SearchQuery>()
-  const [results, setResults] = useState<UserSearchResult[]>()
-  const [searching, setSearching] = useState(false)
-  const [errors, setErrors] = useState<FieldErrors>({})
-
-  const search = useCallback(async ({ mode: searchMode, value }: SearchQuery): Promise<void> => {
-    setSearching(true)
-
-    try {
-      const parameter = searchMode === 'name' ? 'q' : 'email'
-      const response = await apiRequest(`/users?${parameter}=${encodeURIComponent(value)}`, {
-        schema: userSearchResponseSchema,
-      })
-
-      setResults(response.results)
-    } catch (error) {
-      setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
-    } finally {
-      setSearching(false)
-    }
-  }, [])
 
   async function run(key: string, action: () => Promise<void>): Promise<void> {
     setFailure(undefined)
@@ -67,48 +35,14 @@ function FriendsPageContent() {
 
     try {
       await action()
-      reload()
-
-      if (lastSearch !== undefined) await search(lastSearch)
+      // Reloads the lists here and refreshes the relations in the header people search.
+      announceResourceChanged('friends')
     } catch (error) {
       setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
     } finally {
       setBusyKey(undefined)
       setConfirmation(undefined)
     }
-  }
-
-  function submitSearch(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault()
-    setFailure(undefined)
-
-    const result = validate(
-      userSearchRequestSchema,
-      mode === 'name' ? { q: query } : { email: query },
-    )
-
-    if (!result.ok) {
-      setErrors(result.errors)
-      return
-    }
-
-    setErrors({})
-
-    const value = mode === 'name' ? (result.data.q ?? '') : (result.data.email ?? '')
-    const nextSearch: SearchQuery = { mode, value }
-
-    setLastSearch(nextSearch)
-    void search(nextSearch)
-  }
-
-  const sendRequest = (userId: string): void => {
-    void run(`request:${userId}`, async () => {
-      await apiRequest('/friends/requests', {
-        method: 'POST',
-        body: { userId },
-        schema: friendshipStateResponseSchema,
-      })
-    })
   }
 
   const respond = (requestId: string, action: 'accept' | 'decline'): void => {
@@ -188,28 +122,6 @@ function FriendsPageContent() {
 
       <div className="border-t pt-7">
         <InviteManager />
-      </div>
-
-      <div className="border-t pt-7">
-        <FriendsSearch
-          mode={mode}
-          query={query}
-          results={results}
-          searching={searching}
-          errors={errors}
-          busyKey={busyKey}
-          incoming={state.incoming}
-          onModeChange={(nextMode) => {
-            setMode(nextMode)
-            setResults(undefined)
-            setErrors({})
-          }}
-          onQueryChange={setQuery}
-          onSubmit={submitSearch}
-          onRequest={sendRequest}
-          onAccept={(requestId) => respond(requestId, 'accept')}
-          onUnblock={(userId) => void removeLink(userId)}
-        />
       </div>
 
       <ConfirmDialog
