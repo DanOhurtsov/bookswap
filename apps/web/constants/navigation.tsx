@@ -6,7 +6,6 @@ const NAVBAR_LINKS_AUTH = [
   { href: '/', label: 'Головна' },
   { href: '/catalog', label: 'Каталог' },
   NAVBAR_LINK_LIBRARY,
-  { href: '/friends', label: 'Друзі' },
 ]
 
 // Shown only while the server reports guestLoans on (T9).
@@ -19,6 +18,7 @@ const NAVBAR_LINKS_GUEST = [
 
 const NAVBAR_PROFILE_LINKS = [
   { href: '/profile', label: 'Профіль' },
+  { href: '/friends', label: 'Друзі' },
   { href: '/reading-list', label: 'Список читання' },
 ]
 

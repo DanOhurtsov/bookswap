@@ -82,7 +82,8 @@ describe('NavContent', () => {
     expect(screen.getByRole('link', { name: 'Головна' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Каталог' })).toHaveAttribute('href', '/catalog')
     expect(screen.getByRole('link', { name: 'Моя бібліотека' })).toHaveAttribute('href', '/library')
-    expect(screen.getByRole('link', { name: 'Друзі' })).toHaveAttribute('href', '/friends')
+    // Reached through the profile menu now (NavBarAvatar.spec.tsx).
+    expect(screen.queryByRole('link', { name: 'Друзі' })).not.toBeInTheDocument()
     // Sections of «Моя бібліотека» now, reached through its own navigation.
     expect(screen.queryByRole('link', { name: 'Вішлист' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Позичання' })).not.toBeInTheDocument()
@@ -107,12 +108,8 @@ describe('NavContent', () => {
   })
 
   it.each([
-    [
-      'guestLoans=true',
-      { guestLoans: true },
-      ['Головна', 'Каталог', 'Моя бібліотека', 'Друзі', 'Контакти'],
-    ],
-    ['features unknown', undefined, ['Головна', 'Каталог', 'Моя бібліотека', 'Друзі']],
+    ['guestLoans=true', { guestLoans: true }, ['Головна', 'Каталог', 'Моя бібліотека', 'Контакти']],
+    ['features unknown', undefined, ['Головна', 'Каталог', 'Моя бібліотека']],
   ])(
     'the compact menu (%s) offers the same links as the inline row',
     async (_name, features, labels) => {
