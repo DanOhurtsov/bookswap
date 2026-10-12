@@ -78,6 +78,7 @@ const mockHistory = createHistory()
 let mockSession: SessionState = { status: 'loading' }
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/friends/search',
   useRouter: () => ({ replace: mockHistory.replace, push: mockHistory.push }),
   useSearchParams: () => {
     const { useSyncExternalStore } = jest.requireActual<typeof import('react')>('react')

@@ -1,6 +1,7 @@
 'use client'
 
 import type { ComponentProps } from 'react'
+import Link from 'next/link'
 import { Tabs as TabsPrimitive } from '@base-ui/react/tabs'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
@@ -84,16 +85,11 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   )
 }
 
-/**
- * Line-tab look for a row of toggle buttons. For switchers that are filters rather than tabs:
- * there are no panels, each button keeps `aria-pressed` and its own Tab stop.
- */
-function ToggleTabs({ className, ...props }: ComponentProps<'div'>) {
+// The trigger styles read orientation and variant from these two group ancestors.
+function LineTabsRow({ className, ...props }: ComponentProps<'div'>) {
   return (
-    // The trigger styles read orientation and variant from these two group ancestors.
     <div data-slot="tabs" data-orientation="horizontal" className="group/tabs flex">
       <div
-        role="group"
         data-slot="tabs-list"
         data-variant="line"
         className={cn(tabsListVariants({ variant: 'line' }), className)}
@@ -101,6 +97,14 @@ function ToggleTabs({ className, ...props }: ComponentProps<'div'>) {
       />
     </div>
   )
+}
+
+/**
+ * Line-tab look for a row of toggle buttons. For switchers that are filters rather than tabs:
+ * there are no panels, each button keeps `aria-pressed` and its own Tab stop.
+ */
+function ToggleTabs(props: ComponentProps<'div'>) {
+  return <LineTabsRow role="group" {...props} />
 }
 
 type ToggleTabProps = Omit<ComponentProps<'button'>, 'aria-pressed'> & { pressed: boolean }
@@ -119,4 +123,37 @@ function ToggleTab({ pressed, className, ...props }: ToggleTabProps) {
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, ToggleTabs, ToggleTab, tabsListVariants }
+/**
+ * Line-tab look for links between routes. Put the row inside a `nav`: these are pages, not an ARIA
+ * tablist, so each link keeps its own Tab stop and the current one says so with
+ * `aria-current="page"` — the underline marks it, not only the colour.
+ */
+function TabLinks(props: ComponentProps<'div'>) {
+  return <LineTabsRow {...props} />
+}
+
+type TabLinkProps = Omit<ComponentProps<typeof Link>, 'aria-current'> & { current: boolean }
+
+function TabLink({ current, className, ...props }: TabLinkProps) {
+  return (
+    <Link
+      data-slot="tabs-trigger"
+      aria-current={current ? 'page' : undefined}
+      data-active={current ? '' : undefined}
+      className={cn(tabsTriggerClassName, className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  ToggleTabs,
+  ToggleTab,
+  TabLinks,
+  TabLink,
+  tabsListVariants,
+}

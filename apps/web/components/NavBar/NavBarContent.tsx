@@ -1,12 +1,19 @@
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import type { Me, SessionFeatures } from '@bookswap/shared'
 import { type SessionState } from '@/app/lib/use-session'
-import { NAVBAR_LINK_CONTACTS, NAVBAR_LINKS_AUTH, NAVBAR_LINKS_GUEST } from '@/constants/navigation'
+import {
+  NAVBAR_LINK_CONTACTS,
+  NAVBAR_LINK_LIBRARY,
+  NAVBAR_LINKS_AUTH,
+  NAVBAR_LINKS_GUEST,
+} from '@/constants/navigation'
 import { NavBarAvatar } from '@/components/NavBar/NavBarAvatar'
 import { NavBarLogo } from '@/components/NavBar/NavBarLogo'
 import { NavBarMenu } from '@/components/NavBar/NavBarMenu'
 import { NavBarNotifications } from '@/components/NavBar/NavBarNotifications'
 import { ThemeToggleButton } from '@/components/ThemeToggle'
+import { currentLibrarySection } from '@/features/library/sections'
 import { UserSearch } from '@/features/user-search/index.client'
 
 const NavContent = ({ state }: { state: SessionState }) => {
@@ -32,18 +39,27 @@ const NavContent = ({ state }: { state: SessionState }) => {
 const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) => {
   const links =
     features?.guestLoans === true ? [...NAVBAR_LINKS_AUTH, NAVBAR_LINK_CONTACTS] : NAVBAR_LINKS_AUTH
+  // Only «Моя бібліотека» has a current state: it is the one entry that stands for several routes.
+  // Someone else's library (`/users/:id/library`) is not one of them.
+  const currentHref =
+    currentLibrarySection(usePathname()) === undefined ? undefined : NAVBAR_LINK_LIBRARY.href
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-3">
       <div className="flex items-center gap-2">
-        <NavBarMenu links={links} className="xl:hidden" />
+        <NavBarMenu links={links} currentHref={currentHref} className="lg:hidden" />
         <NavBarLogo />
       </div>
-      {/* Below `xl` the inline row no longer fits next to the logo, the people search and the
-          account controls. */}
-      <nav className="hidden items-center gap-4 xl:flex">
+      {/* Below `lg` the inline row no longer fits next to the logo, the people search and the
+          account controls. Checked at 1024px with «Контакти» shown: one row, the search narrows. */}
+      <nav className="hidden items-center gap-4 lg:flex">
         {links.map((link) => (
-          <Link key={link.href} href={link.href} className="link-underline">
+          <Link
+            key={link.href}
+            href={link.href}
+            aria-current={link.href === currentHref ? 'page' : undefined}
+            className="link-underline"
+          >
             {link.label}
           </Link>
         ))}

@@ -13,6 +13,8 @@ import {
 
 type NavBarMenuProps = {
   links: ReadonlyArray<{ href: string; label: string }>
+  /** The link marked as the current page, the same one as in the inline row. */
+  currentHref: string | undefined
   className?: string
 }
 
@@ -21,7 +23,7 @@ type NavBarMenuProps = {
  * not fit. Which of the two is visible is decided by CSS breakpoints at the call site, so both
  * always receive the same list.
  */
-export const NavBarMenu = ({ links, className }: NavBarMenuProps) => (
+export const NavBarMenu = ({ links, currentHref, className }: NavBarMenuProps) => (
   <DropdownMenu>
     <DropdownMenuTrigger
       render={
@@ -38,7 +40,18 @@ export const NavBarMenu = ({ links, className }: NavBarMenuProps) => (
     <DropdownMenuContent className="w-48">
       <DropdownMenuGroup>
         {links.map((link) => (
-          <DropdownMenuItem key={link.href} render={<Link href={link.href} />}>
+          <DropdownMenuItem
+            key={link.href}
+            render={
+              <Link
+                href={link.href}
+                aria-current={link.href === currentHref ? 'page' : undefined}
+              />
+            }
+            // The menu highlights the focused item with a background, so the current page is told
+            // apart by weight and an underline instead.
+            className="aria-[current=page]:font-semibold aria-[current=page]:underline aria-[current=page]:underline-offset-4"
+          >
             {link.label}
           </DropdownMenuItem>
         ))}

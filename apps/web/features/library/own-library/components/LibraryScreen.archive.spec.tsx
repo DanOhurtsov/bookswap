@@ -30,6 +30,7 @@ jest.mock('@/app/lib/use-session', () => ({
 }))
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/library',
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
   useSearchParams: jest.requireActual<typeof import('../own-library.test-helpers')>(
     '../own-library.test-helpers',

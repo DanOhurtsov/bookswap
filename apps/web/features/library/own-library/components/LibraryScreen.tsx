@@ -6,6 +6,7 @@ import { useEffect, type ReactNode } from 'react'
 import { FormStatus } from '@/components/Form/FormStatus'
 import type { LibraryView } from '@/app/lib/use-library'
 import { useSession } from '@/app/lib/use-session'
+import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { isLibraryView } from '../model/library-address'
 import { useLibraryAddress } from '../model/use-library-address'
 import { BorrowedShelf } from './BorrowedShelf'
@@ -37,38 +38,29 @@ export function LibraryScreen({ checklist }: LibraryScreenProps) {
 
   if (session.status === 'loading') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Перевіряю сесію…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status === 'error') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <FormStatus error={new Error(session.message)} />
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status !== 'authenticated') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   return <LibraryBody checklist={checklist} />
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="page">
-      <h1>Моя бібліотека</h1>
-      {children}
-    </main>
-  )
 }
 
 const VIEW_BUTTONS: ReadonlyArray<{ value: LibraryView; label: string }> = [
@@ -82,7 +74,7 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
   const { view, filters, selectView, applyFilters } = useLibraryAddress()
 
   return (
-    <Shell>
+    <LibrarySectionPage>
       {checklist}
 
       <div className="actions">
@@ -116,6 +108,6 @@ function LibraryBody({ checklist }: LibraryScreenProps) {
       ) : (
         <OwnShelf view={view} filters={filters} onApplyFilters={applyFilters} />
       )}
-    </Shell>
+    </LibrarySectionPage>
   )
 }

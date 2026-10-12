@@ -245,6 +245,12 @@ a:focus-visible > .link-underline {
   background-size: 100% 1px;
 }
 
+/* The current page keeps the line and a heavier weight: where you are is told by more than colour. */
+.link-underline[aria-current='page'] {
+  font-weight: 600;
+  background-size: 100% 1px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .link-underline {
     transition: none;

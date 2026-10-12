@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, type ReactNode } from 'react'
+import { useEffect } from 'react'
 import { AuthorLine } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
+import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { useSession } from '../../lib/use-session'
 import { useWishlist } from '../../lib/use-wishlist'
 
@@ -24,46 +25,46 @@ export default function WishlistPage() {
 
   if (session.status === 'loading') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Перевіряю сесію…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status === 'error') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <FormStatus error={new Error(session.message)} />
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status !== 'authenticated') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (wishlist.items === undefined) {
     if (wishlist.state.status === 'error') {
       return (
-        <Shell>
+        <LibrarySectionPage>
           <FormStatus error={new Error(wishlist.state.message)} />
-        </Shell>
+        </LibrarySectionPage>
       )
     }
 
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Завантажую…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   return (
-    <Shell>
+    <LibrarySectionPage>
       {wishlist.refreshing && <p className="status status--pending">Оновлюю…</p>}
 
       {wishlist.backgroundErrorMessage !== undefined && (
@@ -101,15 +102,6 @@ export default function WishlistPage() {
           ))}
         </ul>
       )}
-    </Shell>
-  )
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="page">
-      <h1>Вішлист</h1>
-      {children}
-    </main>
+    </LibrarySectionPage>
   )
 }

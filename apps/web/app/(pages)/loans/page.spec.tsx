@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { SessionState } from '@/app/lib/use-session'
 import LoansPage from './page'
@@ -17,6 +17,7 @@ const mockPush = jest.fn()
 let mockParameters = new URLSearchParams()
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/loans',
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
   useSearchParams: () => mockParameters,
 }))
@@ -116,5 +117,44 @@ describe('LoansPage: вхід у «Гостьові позики» (BS-104)', ()
     await screen.findByText(/Вашими книжками поки ніхто не цікавився/)
 
     expect(screen.queryByRole('link', { name: 'Гостьові позики' })).not.toBeInTheDocument()
+  })
+})
+
+describe('LoansPage: розділ «Позичання» у «Моїй бібліотеці»', () => {
+  const sectionNav = () => screen.getByRole('navigation', { name: 'Розділи бібліотеки' })
+
+  it('список стоїть під заголовком «Моя бібліотека» й навігацією, де поточний — «Позичання»', async () => {
+    render(<LoansPage />)
+    await screen.findByText(/Вашими книжками поки ніхто не цікавився/)
+
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([
+      'Моя бібліотека',
+    ])
+    expect(within(sectionNav()).getByRole('link', { name: 'Позичання' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    // Only the loans' own sides are tabs here; the shelf tabs belong to «Книжки».
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Мої книжки',
+      'Я позичаю',
+    ])
+  })
+
+  it('пряме посилання ?loanId=…&role=… і далі відкриває одне позичання в тій самій рамці', async () => {
+    mockParameters = new URLSearchParams('loanId=loan-7&role=borrower')
+    apiRequest.mockRejectedValue(new Error('Не знайдено'))
+
+    render(<LoansPage />)
+
+    expect(
+      await screen.findByText('Можливо, це позичання вам не належить або його вже немає.'),
+    ).toBeVisible()
+    expect(requestedPaths()).toEqual(['/loans/loan-7'])
+    expect(within(sectionNav()).getByRole('link', { name: 'Позичання' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
   })
 })

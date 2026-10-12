@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Work, WorkAuthor } from '@bookswap/shared'
 import { NAVBAR_LINKS_AUTH, NAVBAR_PROFILE_LINKS } from '@/constants/navigation'
+import { currentLibrarySection } from '@/features/library/sections'
 import WishlistPage from './page'
 
 /**
@@ -29,6 +30,7 @@ jest.mock('@/app/lib/use-session', () => ({
 }))
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/wishlist',
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }))
 
@@ -139,7 +141,9 @@ it('паралельне «Прибрати» на двох різних ряд�
   expect(screen.queryByText('Твір Б')).not.toBeInTheDocument()
 })
 
-it('BS-86: page is reachable from the main navigation, with no duplicate in the profile menu', () => {
-  expect(NAVBAR_LINKS_AUTH).toContainEqual({ href: '/wishlist', label: 'Вішлист' })
+it('page is a section of «Моя бібліотека», not an entry of the header or the profile menu', () => {
+  expect(currentLibrarySection('/wishlist')).toEqual({ href: '/wishlist', label: 'Вішлист' })
+  expect(NAVBAR_LINKS_AUTH.map((link) => link.href)).toContain('/library')
+  expect(NAVBAR_LINKS_AUTH.map((link) => link.href)).not.toContain('/wishlist')
   expect(NAVBAR_PROFILE_LINKS.map((link) => link.href)).not.toContain('/wishlist')
 })
