@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import {
   USER_SEARCH_LIMIT,
+  emailSchema,
   type Me,
   type UpdateProfileRequest,
   type UserSearchResult,
@@ -27,14 +28,44 @@ export class UsersService {
   }
 
   /**
+   * One search field: everyone whose name contains `query`, OR whose address is exactly
+   * `query` when it is a complete valid email — a union, not a choice of one mode.
+   *
+   * The exact address match comes first: it names one specific person. Duplicates
+   * (the same person matched both ways) are dropped by id, and the limit applies to the final
+   * list. The address is normalized exactly as at registration, and only ever compared whole.
+   */
+  async search(query: string, viewerId: string): Promise<UserSearchResult[]> {
+    const email = emailSchema.safeParse(query)
+    const [byEmail, byName] = await Promise.all([
+      email.success
+        ? this.prisma.user.findUnique({ where: { email: email.data }, select: PUBLIC_FIELDS })
+        : null,
+      this.findByDisplayName(query, viewerId),
+    ])
+    const first = byEmail === null || byEmail.id === viewerId ? [] : [byEmail]
+    const users = [...first, ...byName.filter((user) => user.id !== byEmail?.id)]
+
+    return this.annotate(users.slice(0, USER_SEARCH_LIMIT), viewerId)
+  }
+
+  /** `?q=`: the name only (§6.1). */
+  async searchByDisplayName(query: string, viewerId: string): Promise<UserSearchResult[]> {
+    return this.annotate(await this.findByDisplayName(query, viewerId), viewerId)
+  }
+
+  /**
    * Пошук за імʼям — частковий збіг без урахування регістру (§6.1).
    *
    * `contains`, а не тріграмна схожість: GIN-індекси §4.9 стоять на каталозі, і
    * заводити нечіткий пошук по людях, поки їх десятки, — вирішувати неіснуючу
    * проблему. Ліміт при цьому є, і він той самий, що бачить фронт.
    */
-  async searchByDisplayName(query: string, viewerId: string): Promise<UserSearchResult[]> {
-    const users = await this.prisma.user.findMany({
+  private findByDisplayName(
+    query: string,
+    viewerId: string,
+  ): Promise<Pick<UserModel, 'id' | 'displayName' | 'avatarUrl'>[]> {
+    return this.prisma.user.findMany({
       where: {
         displayName: { contains: query, mode: 'insensitive' },
         // Себе в результатах пошуку людей немає: додати себе в друзі не можна,
@@ -45,8 +76,6 @@ export class UsersService {
       orderBy: { displayName: 'asc' },
       take: USER_SEARCH_LIMIT,
     })
-
-    return this.annotate(users, viewerId)
   }
 
   /**

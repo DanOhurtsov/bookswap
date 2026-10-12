@@ -19,8 +19,8 @@ import {
   type ResponseProgress,
 } from './friend-request-notification'
 
-/** One resource, one key (CONVENTIONS §3.9). */
-const FRIEND_REQUESTS_QUERY_KEY = ['friends', 'requests'] as const
+/** One resource, one key (CONVENTIONS §3.9) — the header user search reads the same cache. */
+export const FRIEND_REQUESTS_QUERY_KEY = ['friends', 'requests'] as const
 
 export interface FriendRequestActions {
   viewOf: (notification: Notification) => FriendRequestNotificationView

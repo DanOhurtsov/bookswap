@@ -5,6 +5,7 @@ import type { App } from 'supertest/types'
 import {
   API_ERROR_CODES,
   API_PREFIX,
+  USER_SEARCH_LIMIT,
   apiErrorSchema,
   meSchema,
   userSearchResponseSchema,
@@ -24,8 +25,10 @@ describe('Профіль і пошук людей (e2e)', () => {
 
   const url = (path: string): string => `${API_PREFIX}${path}`
 
-  async function register(displayName: string): Promise<{ cookie: string; email: string }> {
-    const email = uniqueEmail('profile')
+  async function register(
+    displayName: string,
+    email = uniqueEmail('profile'),
+  ): Promise<{ cookie: string; email: string }> {
     const response = await request(app.getHttpServer())
       .post(url('/auth/register'))
       .send({ email, password: VALID_PASSWORD, displayName })
@@ -39,6 +42,7 @@ describe('Профіль і пошук людей (e2e)', () => {
       ['GET', '/me'],
       ['PATCH', '/me'],
       ['GET', '/users?q=Марта'],
+      ['GET', '/users?query=Марта'],
     ])('%s %s без кукі — 401 з машиночитним code', async (method, path) => {
       const response = await request(app.getHttpServer())
         [method === 'GET' ? 'get' : 'patch'](url(path))
@@ -278,6 +282,132 @@ describe('Профіль і пошук людей (e2e)', () => {
         .query({ q: 'М' })
         .set('Cookie', cookie)
         .expect(400)
+    })
+  })
+
+  describe('GET /users?query= — одне поле пошуку', () => {
+    async function search(cookie: string, query: Record<string, string>) {
+      const response = await request(app.getHttpServer())
+        .get(url('/users'))
+        .query(query)
+        .set('Cookie', cookie)
+        .expect(200)
+
+      return userSearchResponseSchema.parse(response.body).results
+    }
+
+    const names = (results: { user: { displayName: string } }[]) =>
+      results.map((result) => result.user.displayName)
+
+    it('шукає частину імені без урахування регістру й обрізає зовнішні пробіли', async () => {
+      const { cookie } = await register('Шукач Query')
+      await register('Мирослава Кобилянська')
+
+      expect(names(await search(cookie, { query: '  мирослава кобил  ' }))).toEqual([
+        'Мирослава Кобилянська',
+      ])
+    })
+
+    it('повна адреса знаходить людину точно, а частина адреси — нікого', async () => {
+      const { cookie } = await register('Шукач Адреси')
+      const { email } = await register('Власник Адреси')
+      const [local = '', domain = ''] = email.split('@')
+
+      expect(names(await search(cookie, { query: email.toUpperCase() }))).toEqual([
+        'Власник Адреси',
+      ])
+
+      for (const partial of [local, `${local}@`, `${local.slice(0, -1)}@${domain}`, domain]) {
+        expect(await search(cookie, { query: partial })).toEqual([])
+      }
+    })
+
+    it('не віддає email знайденої за адресою людини — лише §9-проєкцію', async () => {
+      const { cookie } = await register('Шукач Проєкції')
+      const { email } = await register('Прихована Адреса')
+
+      const response = await request(app.getHttpServer())
+        .get(url('/users'))
+        .query({ query: email })
+        .set('Cookie', cookie)
+        .expect(200)
+
+      const [result] = userSearchResponseSchema.parse(response.body).results
+
+      expect(Object.keys(result?.user ?? {}).sort()).toEqual(['avatarUrl', 'displayName', 'id'])
+      expect(JSON.stringify(response.body)).not.toContain(email)
+    })
+
+    it('обʼєднує збіги імені й адреси: точна адреса першою, без дублікатів', async () => {
+      const { cookie } = await register('Шукач Обʼєднання')
+      const email = uniqueEmail('union')
+      // The owner of the address also has it in the name: matched both ways, listed once.
+      // Their name sorts after the other match, so only the email priority puts them first.
+      await register(`Я ${email}`, email)
+      await register(`А ${email}`)
+
+      expect(names(await search(cookie, { query: email }))).toEqual([`Я ${email}`, `А ${email}`])
+    })
+
+    it('застосовує ліміт до фінальної видачі, лишаючи точну адресу першою', async () => {
+      const { cookie } = await register('Шукач Ліміту')
+      const email = uniqueEmail('limit')
+
+      await register('Власник Лімітної Адреси', email)
+      await Promise.all(
+        Array.from({ length: USER_SEARCH_LIMIT }, (_, index) =>
+          register(`${String(index).padStart(2, '0')} ${email}`),
+        ),
+      )
+
+      const results = await search(cookie, { query: email })
+
+      expect(results).toHaveLength(USER_SEARCH_LIMIT)
+      expect(results[0]?.user.displayName).toBe('Власник Лімітної Адреси')
+      expect(new Set(results.map((result) => result.user.id)).size).toBe(USER_SEARCH_LIMIT)
+    })
+
+    it('не показує самого себе ні за імʼям, ні за адресою', async () => {
+      const { cookie, email } = await register('Самотній Query Унікум')
+
+      expect(await search(cookie, { query: 'Самотній Query Унікум' })).toEqual([])
+      expect(await search(cookie, { query: email })).toEqual([])
+    })
+
+    it('позначає стан звʼязку з кожним знайденим', async () => {
+      const { cookie } = await register('Шукач Звʼязку')
+      await register('Незнайомка Query')
+
+      const [result] = await search(cookie, { query: 'Незнайомка Query' })
+
+      expect(result?.relation).toBe('NONE')
+    })
+
+    it('приймає адресу найбільшої допустимої довжини', async () => {
+      const { cookie } = await register('Шукач Довгої Адреси')
+      const longest = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(58)}.ua`
+
+      expect(longest).toHaveLength(254)
+      expect(await search(cookie, { query: longest })).toEqual([])
+    })
+
+    it.each([
+      ['один символ після обрізання', { query: ' М ' }],
+      ['лише пробіли', { query: '   ' }],
+      ['довше за найдовшу адресу', { query: 'а'.repeat(255) }],
+      ['query разом із q', { query: 'Мар', q: 'Мар' }],
+      ['query разом із email', { query: 'Мар', email: 'a@b.co' }],
+      ['усі три разом', { query: 'Мар', q: 'Мар', email: 'a@b.co' }],
+    ])('відхиляє %s як помилку валідації', async (_case, query) => {
+      const { cookie } = await register('Валідатор Query')
+
+      const response = await request(app.getHttpServer())
+        .get(url('/users'))
+        .query(query)
+        .set('Cookie', cookie)
+        .expect(400)
+
+      expect(apiErrorSchema.parse(response.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
     })
   })
 })

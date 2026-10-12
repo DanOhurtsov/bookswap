@@ -21,6 +21,11 @@ jest.mock('@/components/NavBar/NavBarNotifications', () => ({
   NavBarNotifications: () => <button type="button">Notifications</button>,
 }))
 
+// Covered on its own, header placement included, in features/user-search.
+jest.mock('@/features/user-search/index.client', () => ({
+  UserSearch: () => <div role="search" aria-label="People search" />,
+}))
+
 const user: Me = {
   id: 'user-1',
   email: 'reader@example.com',

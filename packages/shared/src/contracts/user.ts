@@ -83,13 +83,27 @@ export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>
 export const USER_SEARCH_LIMIT = 20
 
 /**
+ * One search field (`?query=`): the name matches partially; when the whole value is a valid
+ * email address, the address is also matched — exactly, never partially. The upper bound is the
+ * longest valid address, which is longer than any display name.
+ */
+export const userSearchQuerySchema = z
+  .string()
+  .trim()
+  .min(2, 'Мінімум два символи')
+  .max(PROFILE_LIMITS.emailMax, 'Задовгий запит')
+
+/**
  * §6.1: пошук за імʼям — частковий збіг; за email — ТІЛЬКИ точний.
  *
- * Два взаємовиключні режими в одному ендпоінті: підбирати чужу пошту по літері
- * не можна, тож для неї немає режиму «схоже».
+ * `query` — the unified field the interface uses. `q` (name only) and `email` (exact address
+ * only) stay for compatibility. Exactly one of the three per request: a combination is a
+ * malformed call, not a wider search. Partial matching of an address is impossible in every
+ * form — otherwise someone else's email could be guessed letter by letter.
  */
 export const userSearchRequestSchema = z
   .object({
+    query: userSearchQuerySchema.optional(),
     q: z
       .string()
       .trim()
@@ -99,8 +113,8 @@ export const userSearchRequestSchema = z
     email: emailSchema.optional(),
   })
   .refine(
-    (value) => (value.q === undefined) !== (value.email === undefined),
-    'Потрібен рівно один параметр: q або email',
+    (value) => [value.query, value.q, value.email].filter((v) => v !== undefined).length === 1,
+    'Потрібен рівно один параметр: query, q або email',
   )
 
 export type UserSearchRequest = z.infer<typeof userSearchRequestSchema>

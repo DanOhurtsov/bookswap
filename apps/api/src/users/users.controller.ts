@@ -41,9 +41,10 @@ export class UsersController {
   }
 
   /**
-   * §6.1: `?q=` — частковий збіг по імені, `?email=` — тільки точний.
+   * §6.1: `?query=` — частковий збіг по імені плюс точний збіг email, якщо значення є адресою;
+   * `?q=` — лише імʼя, `?email=` — лише точна адреса (сумісність).
    *
-   * Рівно один параметр: обидва разом чи жодного — це не пошук, а помилка виклику.
+   * Рівно один параметр: кілька разом чи жодного — це не пошук, а помилка виклику.
    */
   @Get('users')
   @UseGuards(ThrottlerGuard)
@@ -52,23 +53,22 @@ export class UsersController {
     @CurrentUser() user: UserModel,
     @Query() dto: UserSearchDto,
   ): Promise<UserSearchResponse> {
-    const byName = dto.q !== undefined
-    const byEmail = dto.email !== undefined
+    const given = [dto.query, dto.q, dto.email].filter((value) => value !== undefined)
 
-    if (byName === byEmail) {
+    if (given.length !== 1) {
       throw new ApiException(
         API_ERROR_CODES.VALIDATION_ERROR,
-        'Потрібен рівно один параметр: q або email',
+        'Потрібен рівно один параметр: query, q або email',
         HttpStatus.BAD_REQUEST,
       )
     }
 
-    const results =
-      dto.q !== undefined
-        ? await this.users.searchByDisplayName(dto.q, user.id)
-        : await this.users.findByExactEmail(dto.email ?? '', user.id)
+    if (dto.query !== undefined) return { results: await this.users.search(dto.query, user.id) }
+    if (dto.q !== undefined) {
+      return { results: await this.users.searchByDisplayName(dto.q, user.id) }
+    }
 
-    return { results }
+    return { results: await this.users.findByExactEmail(dto.email ?? '', user.id) }
   }
 }
 
