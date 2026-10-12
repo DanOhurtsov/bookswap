@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import type { MyHistoryEntry } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
@@ -10,6 +10,7 @@ import { useSession } from '@/app/lib/use-session'
 import { useMyHistory } from '@/app/lib/use-history'
 import { HistoryEntryLine } from '@/components/HistoryEntryLine'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { LibrarySectionPage } from '@/features/library/sections/index.client'
 
 /**
  * §6.6, «Моя історія»: що я брав і що в мене брали.
@@ -27,38 +28,29 @@ export default function HistoryPage() {
 
   if (session.status === 'loading') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Перевіряю сесію…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status === 'error') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <FormStatus error={new Error(session.message)} />
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status !== 'authenticated') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   return <HistoryScreen />
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="page">
-      <h1>Моя історія</h1>
-      {children}
-    </main>
-  )
 }
 
 const VIEWS = ['borrowed', 'lent'] as const
@@ -75,7 +67,7 @@ function HistoryScreen() {
   const { state } = useMyHistory()
 
   return (
-    <Shell>
+    <LibrarySectionPage>
       <Tabs
         className="gap-8"
         value={view}
@@ -117,7 +109,7 @@ function HistoryScreen() {
           )}
         </TabsContent>
       </Tabs>
-    </Shell>
+    </LibrarySectionPage>
   )
 }
 

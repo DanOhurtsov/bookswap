@@ -18,6 +18,7 @@ import { RecordedLoanActions } from '@/components/RecordedLoanActions'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
 import {
   CONDITION_LABELS,
@@ -46,25 +47,25 @@ export default function LoansPage() {
 
   if (session.status === 'loading') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Перевіряю сесію…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status === 'error') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <FormStatus error={new Error(session.message)} />
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
   if (session.status !== 'authenticated') {
     return (
-      <Shell>
+      <LibrarySectionPage>
         <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </Shell>
+      </LibrarySectionPage>
     )
   }
 
@@ -73,22 +74,13 @@ export default function LoansPage() {
   return (
     <Suspense
       fallback={
-        <Shell>
+        <LibrarySectionPage>
           <p className="status status--pending">Завантажую…</p>
-        </Shell>
+        </LibrarySectionPage>
       }
     >
       <LoansScreen user={session.user} />
     </Suspense>
-  )
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="page">
-      <h1>Позичання</h1>
-      {children}
-    </main>
   )
 }
 
@@ -195,7 +187,7 @@ function LoanListView({ user }: { user: Me }) {
   const actions = useLoanActions(reload)
 
   return (
-    <Shell>
+    <LibrarySectionPage>
       <GuestLoansLink />
 
       <Tabs
@@ -270,7 +262,7 @@ function LoanListView({ user }: { user: Me }) {
       </Tabs>
 
       <LoanDialog actions={actions} />
-    </Shell>
+    </LibrarySectionPage>
   )
 }
 
@@ -295,7 +287,7 @@ function SingleLoanView({ user, loanId }: { user: Me; loanId: string }) {
     state.status === 'ready' ? roleOf(state.data.loan, user.id) : null
 
   return (
-    <Shell>
+    <LibrarySectionPage>
       <p className="form__aside">
         {backRole === null ? (
           'Одне позичання.'
@@ -329,7 +321,7 @@ function SingleLoanView({ user, loanId }: { user: Me; loanId: string }) {
       )}
 
       <LoanDialog actions={actions} />
-    </Shell>
+    </LibrarySectionPage>
   )
 }
 

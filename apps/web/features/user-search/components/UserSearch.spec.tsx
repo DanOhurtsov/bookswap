@@ -25,6 +25,12 @@ jest.mock('@/app/lib/api', () => {
   return { ...actual, apiRequest: jest.fn() }
 })
 
+// The header reads the address to mark its current entry; outside the app router there is none.
+jest.mock('next/navigation', () => ({
+  ...jest.requireActual<typeof import('next/navigation')>('next/navigation'),
+  usePathname: () => '/',
+}))
+
 jest.mock('@/components/ThemeToggle', () => ({
   ThemeToggleButton: () => <button type="button">Theme</button>,
 }))

@@ -14,6 +14,7 @@ jest.mock('@/app/lib/api', () => {
 })
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/history',
   useRouter: () => ({ push: jest.fn(), replace: jest.fn() }),
 }))
 
@@ -129,6 +130,12 @@ describe('HistoryPage: вкладки «Що я брав» / «Що в мене 
 
     render(<HistoryPage />)
     await screen.findByRole('link', { name: 'Позичена книга' })
+
+    // The section navigation stands above the tabs: four links, each its own Tab stop.
+    for (const name of ['Книжки', 'Позичання', 'Історія', 'Вішлист']) {
+      await user.tab()
+      expect(screen.getByRole('link', { name })).toHaveFocus()
+    }
 
     await user.tab()
     expect(screen.getByRole('tab', { name: 'Що я брав' })).toHaveFocus()

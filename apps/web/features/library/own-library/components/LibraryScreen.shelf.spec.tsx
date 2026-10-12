@@ -35,6 +35,7 @@ jest.mock('@/app/lib/use-session', () => ({
 const mockReplace = jest.fn()
 
 jest.mock('next/navigation', () => ({
+  usePathname: () => '/library',
   useRouter: () => ({ push: jest.fn(), replace: mockReplace }),
   useSearchParams: jest.requireActual<typeof import('../own-library.test-helpers')>(
     '../own-library.test-helpers',
@@ -238,6 +239,18 @@ function renderShelf(): void {
   render(withQueryClient(<LibraryScreen />))
 }
 
+/**
+ * The shelf list. The section navigation above it has an «Історія» link of its own, so a copy's
+ * links are looked up here rather than on the whole screen.
+ */
+function shelf() {
+  const list = document.querySelector<HTMLElement>('ul.books')
+
+  if (list === null) throw new Error('полицю не знайдено')
+
+  return within(list)
+}
+
 const button = (name: string) => screen.getByRole('button', { name })
 const queryButton = (name: string) => screen.queryByRole('button', { name })
 
@@ -257,6 +270,41 @@ async function choose(name: string, copyIndex = 0): Promise<void> {
   await openMenu(copyIndex)
   await userEvent.click(await screen.findByRole('menuitem', { name }))
 }
+
+// --- Section «Книжки» ---------------------------------------------------------
+
+describe('розділ «Книжки» у «Моїй бібліотеці»', () => {
+  it('навігація розділів іде перед чеклістом, діями й вкладками полиць', async () => {
+    serve({ 'GET /me/library': () => EMPTY })
+
+    render(withQueryClient(<LibraryScreen checklist={<p>Чекліст активації</p>} />))
+
+    const shelfTab = await screen.findByRole('tab', { name: 'Усі мої' })
+    const sectionNav = screen.getByRole('navigation', { name: 'Розділи бібліотеки' })
+
+    expect(within(sectionNav).getByRole('link', { name: 'Книжки' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    for (const block of [
+      screen.getByText('Чекліст активації'),
+      screen.getByRole('link', { name: 'Додати книжку' }),
+      screen.getByRole('link', { name: 'Імпорт із CSV' }),
+      shelfTab,
+    ]) {
+      expect(sectionNav.compareDocumentPosition(block)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    }
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Усі мої',
+      'Мої не вдома',
+      'Чужі в мене',
+      'Архів',
+    ])
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([
+      'Моя бібліотека',
+    ])
+  })
+})
 
 // --- Session guard -----------------------------------------------------------
 
@@ -578,7 +626,9 @@ describe('«Чужі в мене»', () => {
       '/loans?loanId=loan-7&role=borrower',
     )
     expect(
-      screen.getAllByRole('link', { name: 'Історія' }).map((a) => a.getAttribute('href')),
+      shelf()
+        .getAllByRole('link', { name: 'Історія' })
+        .map((a) => a.getAttribute('href')),
     ).toEqual(['/copies/copy-7/history', '/copies/copy-8/history'])
     expect(queryButton('Редагувати')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: MENU_TRIGGER })).not.toBeInTheDocument()
@@ -696,7 +746,7 @@ describe('рядок примірника: які дії пропонуютьс�
       'href',
       '/loans?role=owner',
     )
-    expect(screen.getByRole('link', { name: 'Історія' })).toHaveAttribute(
+    expect(shelf().getByRole('link', { name: 'Історія' })).toHaveAttribute(
       'href',
       '/copies/copy-1/history',
     )
@@ -1048,7 +1098,7 @@ describe('картка книги', () => {
     for (const link of [
       await screen.findByRole('link', { name: /^Позичання: Марко/ }),
       screen.getByRole('link', { name: 'Запитів: 1' }),
-      screen.getByRole('link', { name: 'Історія' }),
+      shelf().getByRole('link', { name: 'Історія' }),
       screen.getByRole('button', { name: MENU_TRIGGER }),
     ]) {
       expect(link).toHaveClass('relative', 'z-10')
@@ -1082,7 +1132,7 @@ describe('картка книги', () => {
     await userEvent.tab()
 
     // Between the title and the ⋮ there is only the copy's own link.
-    expect(screen.getByRole('link', { name: 'Історія' })).toHaveFocus()
+    expect(shelf().getByRole('link', { name: 'Історія' })).toHaveFocus()
 
     await userEvent.tab()
 
