@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { isGuestResponseNotificationType, type Notification } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
+import { buttonVariants } from '@/components/ui/button'
 import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import {
   FriendRequestNotification,
@@ -61,10 +62,13 @@ export default function NotificationsPage() {
   return <NotificationsScreen />
 }
 
-function Shell({ children }: { children: ReactNode }) {
+function Shell({ children, cta }: { children: ReactNode; cta?: ReactNode }) {
   return (
     <main className="page">
-      <h1>Сповіщення</h1>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h1>Сповіщення</h1>
+        {cta}
+      </div>
       {children}
     </main>
   )
@@ -102,7 +106,14 @@ function NotificationsScreen() {
   const unreadCount = state.status === 'ready' ? state.data.unreadCount : 0
 
   return (
-    <Shell>
+    <Shell
+      cta={
+        // The navbar panel has no settings entry: the way there is bell → «Усі сповіщення» → here.
+        <Link href="/notifications/settings" className={buttonVariants({ variant: 'outline' })}>
+          Налаштування сповіщень
+        </Link>
+      }
+    >
       <nav className="actions items-center" aria-label="Вигляд сповіщень">
         <ToggleTabs>
           <ToggleTab

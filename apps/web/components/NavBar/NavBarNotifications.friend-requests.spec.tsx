@@ -71,6 +71,21 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>): Promise<HTML
   return screen.findByRole('dialog', { name: 'Сповіщення' })
 }
 
+function rowOf(panel: HTMLElement, label: string): HTMLElement {
+  const row = within(panel).getByText(label).closest('li')
+
+  if (row === null) throw new Error(`Немає рядка «${label}»`)
+
+  return row
+}
+
+const UNREAD_ACCENT = 'border-l-(--bookswap-accent)'
+
+/** The bell stays behind the modal panel, so it is outside the accessibility tree while open. */
+function bell(name: string): HTMLElement {
+  return screen.getByRole('button', { name, hidden: true })
+}
+
 async function requestGroup(panel: HTMLElement, name: string): Promise<HTMLElement> {
   return within(panel).findByRole('group', { name: `Запит у друзі від ${name}` })
 }
@@ -93,7 +108,8 @@ describe('NavBarNotifications: відповідь на запит у друзі 
     const group = await requestGroup(panel, MARTA.displayName)
 
     expect(within(group).getByText('МК')).toBeInTheDocument()
-    expect(within(panel).getByRole('button', { name: 'Непрочитані (1)' })).toBeVisible()
+    expect(bell('Відкрити сповіщення: 1 непрочитаних')).toBeInTheDocument()
+    expect(rowOf(panel, 'Новий запит у друзі')).toHaveClass(UNREAD_ACCENT)
 
     await user.click(within(group).getByRole('button', { name: 'Прийняти' }))
 
@@ -102,37 +118,39 @@ describe('NavBarNotifications: відповідь на запит у друзі 
     ).toBeVisible()
     expect(screen.getByRole('dialog', { name: 'Сповіщення' })).toBeInTheDocument()
     expect(within(panel).queryByRole('button', { name: 'Прийняти' })).not.toBeInTheDocument()
-    await waitFor(() =>
-      expect(within(panel).getByRole('button', { name: 'Непрочитані' })).toBeVisible(),
-    )
+    await waitFor(() => expect(bell('Відкрити сповіщення')).toBeInTheDocument())
+    expect(rowOf(panel, 'Новий запит у друзі')).not.toHaveClass(UNREAD_ACCENT)
+    expect(rowOf(panel, 'Новий запит у друзі')).not.toHaveTextContent('нове')
     expect(screen.getByText(`Друзі на сторінці: ${MARTA.displayName}`)).toBeInTheDocument()
     expect(mockPush).not.toHaveBeenCalled()
   })
 
-  it('відхилення без підтвердження: у «Непрочитаних» сповіщення зникає, в «Усіх» лишається', async () => {
+  it('відхилення без підтвердження: сповіщення лишається на місці в історії, акцент і лічильник гаснуть', async () => {
     const user = userEvent.setup()
 
     serve([friendRequested('n-marta', martaRequest)])
 
     const panel = await openPanel(user)
 
-    await user.click(within(panel).getByRole('button', { name: /^Непрочитані/ }))
     await user.click(
       within(await requestGroup(panel, MARTA.displayName)).getByRole('button', {
         name: 'Відхилити',
       }),
     )
 
-    expect(await within(panel).findByText('Непрочитаних сповіщень немає.')).toBeVisible()
-    expect(respondCalls(martaRequest.id)).toBe(1)
-    expect(screen.getByText('Друзі на сторінці: нікого')).toBeInTheDocument()
-
-    await user.click(within(panel).getByRole('button', { name: 'Усі' }))
-
     expect(
       await within(panel).findByText(`Запит від ${MARTA.displayName} відхилено.`),
     ).toBeVisible()
-    expect(within(panel).getByText('Новий запит у друзі')).toBeVisible()
+    await waitFor(() => expect(bell('Відкрити сповіщення')).toBeInTheDocument())
+    expect(respondCalls(martaRequest.id)).toBe(1)
+    expect(screen.getByText('Друзі на сторінці: нікого')).toBeInTheDocument()
+
+    const row = rowOf(panel, 'Новий запит у друзі')
+
+    expect(row).toBeVisible()
+    expect(row).not.toHaveClass(UNREAD_ACCENT)
+    expect(row).not.toHaveTextContent('нове')
+    expect(screen.getByRole('dialog', { name: 'Сповіщення' })).toBeInTheDocument()
   })
 
   it('прочитаний активний запит має кнопки; відповідь не шле зайвого позначення прочитаним', async () => {
@@ -193,12 +211,13 @@ describe('NavBarNotifications: відповідь на запит у друзі 
       await within(panel).findByText('Не вдалося позначити сповіщення прочитаним.'),
     ).toBeVisible()
     expect(within(panel).getByText(/^Запит прийнято/)).toBeVisible()
+    expect(rowOf(panel, 'Новий запит у друзі')).toHaveClass(UNREAD_ACCENT)
+    expect(bell('Відкрити сповіщення: 1 непрочитаних')).toBeInTheDocument()
 
     await user.click(within(panel).getByRole('button', { name: 'Позначити прочитаним ще раз' }))
 
-    await waitFor(() =>
-      expect(within(panel).getByRole('button', { name: 'Непрочитані' })).toBeVisible(),
-    )
+    await waitFor(() => expect(bell('Відкрити сповіщення')).toBeInTheDocument())
+    expect(rowOf(panel, 'Новий запит у друзі')).not.toHaveClass(UNREAD_ACCENT)
     expect(respondCalls(martaRequest.id)).toBe(2)
     expect(server.count('PATCH /me/notifications/n-marta/read')).toBe(2)
   })

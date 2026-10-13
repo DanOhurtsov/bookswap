@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Notification } from '@bookswap/shared'
 import { withQueryClient } from '@/app/lib/test-query-client'
@@ -220,7 +220,7 @@ describe('NavBarNotifications: «Прочитати всі» з панелі (BS
     return screen.findByRole('dialog', { name: 'Сповіщення' })
   }
 
-  it('фільтр «Непрочитані» у панелі показує лише сповіщення без readAt', async () => {
+  it('панель без фільтрів показує прочитані й непрочитані разом; фільтри лишаються на сторінці', async () => {
     const user = userEvent.setup()
 
     renderScreen()
@@ -228,11 +228,38 @@ describe('NavBarNotifications: «Прочитати всі» з панелі (BS
     const panel = await openPanel(user)
 
     expect(await within(panel).findByText('Ваше прохання погодили')).toBeVisible()
+    expect(within(panel).getByText('У вас просять книжку')).toBeVisible()
+    expect(within(panel).queryByRole('button', { name: /^Непрочитані/ })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^Непрочитані/, hidden: true }).closest('[role=dialog]'),
+    ).toBeNull()
+  })
 
-    await user.click(within(panel).getByRole('button', { name: /^Непрочитані/ }))
+  it('«Прочитати всі» на сторінці оновлює відкриту панель: акцент гасне, рядки лишаються', async () => {
+    const user = userEvent.setup()
 
-    expect(await within(panel).findByText('У вас просять книжку')).toBeVisible()
-    expect(within(panel).queryByText('Ваше прохання погодили')).not.toBeInTheDocument()
+    renderScreen()
+
+    const panel = await openPanel(user)
+
+    await within(panel).findByText('У вас просять книжку')
+    expect(rowOf('У вас просять книжку', panel)).toHaveClass('border-l-(--bookswap-accent)')
+
+    // The page sits behind the modal panel; the page's own button is the action under test.
+    const pageReadAll = screen
+      .getAllByRole('button', { name: 'Прочитати всі', hidden: true })
+      .find((button) => button.closest('[role=dialog]') === null)
+
+    if (pageReadAll === undefined) throw new Error('Немає кнопки сторінки')
+    fireEvent.click(pageReadAll)
+
+    await waitFor(() =>
+      expect(rowOf('У вас просять книжку', panel)).not.toHaveClass('border-l-(--bookswap-accent)'),
+    )
+    expect(rowOf('У вас просять книжку', panel)).not.toHaveTextContent('нове')
+    expect(rowOf('Ваше прохання погодили', panel)).toBeVisible()
+    expect(within(panel).getByRole('button', { name: 'Прочитати всі' })).toBeDisabled()
+    expect(readAllCalls()).toBe(1)
   })
 
   it('після успіху оновлюється і панель, і відкрита сторінка сповіщень', async () => {
