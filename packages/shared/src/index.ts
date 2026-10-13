@@ -102,6 +102,11 @@ export {
 export { LANGUAGE_CODES, isLanguageCode, languageCodeSchema } from './domain/language'
 export { isValidIsbn13, isbn13Schema, normalizeIsbn13 } from './domain/isbn'
 export {
+  BLOCKED_REGISTRATION_EMAIL_DOMAIN_SUFFIXES,
+  EMAIL_DOMAIN_BLOCKED_MESSAGE,
+  isRegistrationEmailDomainBlocked,
+} from './domain/registration-email'
+export {
   comparableText,
   comparableTokens,
   relevanceOf,

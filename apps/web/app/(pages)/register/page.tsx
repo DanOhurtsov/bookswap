@@ -3,7 +3,13 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState, type FormEvent } from 'react'
-import { PASSWORD_LIMITS, registerRequestSchema, sessionResponseSchema } from '@bookswap/shared'
+import {
+  EMAIL_DOMAIN_BLOCKED_MESSAGE,
+  PASSWORD_LIMITS,
+  isRegistrationEmailDomainBlocked,
+  registerRequestSchema,
+  sessionResponseSchema,
+} from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '../../lib/api'
@@ -39,10 +45,17 @@ function RegisterPageForm() {
     event.preventDefault()
     setFailure(undefined)
 
+    // The domain policy runs before the schema: `z.email()` rejects Cyrillic TLDs
+    // and their Punycode as malformed, and a blocked address must get the agreed
+    // refusal, not a format error. Other fields are still validated alongside.
+    const emailBlocked = isRegistrationEmailDomainBlocked(fields.email)
     const result = validate(registerRequestSchema, fields)
 
-    if (!result.ok) {
-      setErrors(result.errors)
+    if (emailBlocked || !result.ok) {
+      setErrors({
+        ...(result.ok ? {} : result.errors),
+        ...(emailBlocked ? { email: EMAIL_DOMAIN_BLOCKED_MESSAGE } : {}),
+      })
       return
     }
 
@@ -62,8 +75,12 @@ function RegisterPageForm() {
       session.setUser(user, features)
       router.push(safeReturnTo(returnTo))
     } catch (error) {
-      // Зайнята адреса — це помилка конкретного поля, а не форми загалом.
-      if (error instanceof ApiRequestError && error.code === 'EMAIL_TAKEN') {
+      // A taken or blocked address is an error of the email field, not of the whole
+      // form. The server check stands on its own: the precheck above is only a hint.
+      if (
+        error instanceof ApiRequestError &&
+        (error.code === 'EMAIL_TAKEN' || error.code === 'EMAIL_DOMAIN_BLOCKED')
+      ) {
         setErrors({ email: error.message })
       } else {
         setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))

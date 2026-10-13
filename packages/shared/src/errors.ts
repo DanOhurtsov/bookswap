@@ -32,6 +32,12 @@ export const API_ERROR_CODES = {
   /** Реєстрація на вже зайнятий email (HTTP 409). */
   EMAIL_TAKEN: 'EMAIL_TAKEN',
   /**
+   * BS-129: a new account cannot be created on this email domain (HTTP 400,
+   * `isRegistrationEmailDomainBlocked`). Registration only — login, the session
+   * and password reset of an existing account never answer with it.
+   */
+  EMAIL_DOMAIN_BLOCKED: 'EMAIL_DOMAIN_BLOCKED',
+  /**
    * Логін не вдався (HTTP 401). Один код і на невідомий email, і на хибний
    * пароль: різні коди перетворили б форму входу на перевірку «чи є такий акаунт».
    */
