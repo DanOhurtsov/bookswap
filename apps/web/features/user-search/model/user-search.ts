@@ -5,13 +5,10 @@ import { validate, type FieldErrors } from '@/app/lib/validation'
 export const USER_SEARCH_DELAY_MS = 300
 
 /**
- * How long an answer for one query counts as fresh: the header and the page — or Back to an
- * earlier query — reuse it without asking again. Friend actions invalidate it explicitly.
+ * How long an answer for one query counts as fresh: returning to it — typing it again, Back or
+ * Forward — reuses it without asking again. Friend actions invalidate it explicitly.
  */
 export const USER_SEARCH_STALE_MS = 30_000
-
-/** The header panel is a preview: the full answer (`USER_SEARCH_LIMIT`) lives on the page. */
-export const HEADER_RESULTS_LIMIT = 5
 
 export const USER_SEARCH_PATH = '/friends/search'
 
@@ -42,7 +39,7 @@ export function validateSearch(
 }
 
 /**
- * What the results panel shows.
+ * What the search page shows under the field.
  *
  * - `waiting` — the text is searchable, the pause before the request has not run out yet;
  * - `loading` — the request for exactly this text is in flight (a manual run would duplicate it).

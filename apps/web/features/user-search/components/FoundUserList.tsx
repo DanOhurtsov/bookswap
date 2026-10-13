@@ -25,21 +25,14 @@ const LINKED_RELATIONS: ReadonlySet<FriendRelation> = new Set([
 type FoundUserListProps = {
   results: readonly UserSearchResult[]
   actions: FoundUserActions
-  /** A link was followed — the header panel closes. */
-  onNavigate?: () => void
 }
 
-/** Found people with their relation and action: the same rows in the header panel and the page. */
-export function FoundUserList({ results, actions, onNavigate }: FoundUserListProps) {
+/** Found people with their relation and action. */
+export function FoundUserList({ results, actions }: FoundUserListProps) {
   return (
     <ul className="divide-y" aria-label="Знайдені люди">
       {results.map((result) => (
-        <FoundUserRow
-          key={result.user.id}
-          result={result}
-          actions={actions}
-          onNavigate={onNavigate}
-        />
+        <FoundUserRow key={result.user.id} result={result} actions={actions} />
       ))}
     </ul>
   )
@@ -48,10 +41,9 @@ export function FoundUserList({ results, actions, onNavigate }: FoundUserListPro
 type FoundUserRowProps = {
   result: UserSearchResult
   actions: FoundUserActions
-  onNavigate: (() => void) | undefined
 }
 
-function FoundUserRow({ result, actions, onNavigate }: FoundUserRowProps) {
+function FoundUserRow({ result, actions }: FoundUserRowProps) {
   const { user, relation } = result
   const acceptFailed =
     relation === 'REQUEST_RECEIVED' && actions.acceptStateOf(user.id).status === 'failed'
@@ -64,7 +56,6 @@ function FoundUserRow({ result, actions, onNavigate }: FoundUserRowProps) {
           <Link
             href={`/users/${encodeURIComponent(user.id)}/library`}
             className="block truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-            onClick={onNavigate}
           >
             {user.displayName}
           </Link>
@@ -83,7 +74,7 @@ function FoundUserRow({ result, actions, onNavigate }: FoundUserRowProps) {
   )
 }
 
-function RelationAction({ result, actions }: Omit<FoundUserRowProps, 'onNavigate'>) {
+function RelationAction({ result, actions }: FoundUserRowProps) {
   const { user, relation } = result
   const busy = actions.pending.length > 0
   const pendingHere = actions.pending.some((action) => action.userId === user.id)

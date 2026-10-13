@@ -14,7 +14,6 @@ import { NavBarMenu } from '@/components/NavBar/NavBarMenu'
 import { NavBarNotifications } from '@/components/NavBar/NavBarNotifications'
 import { ThemeToggleButton } from '@/components/ThemeToggle'
 import { currentLibrarySection } from '@/features/library/sections'
-import { UserSearch } from '@/features/user-search/index.client'
 
 const NavContent = ({ state }: { state: SessionState }) => {
   switch (state.status) {
@@ -45,13 +44,12 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
     currentLibrarySection(usePathname()) === undefined ? undefined : NAVBAR_LINK_LIBRARY.href
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-3">
+    <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
       <div className="flex items-center gap-2">
         <NavBarMenu links={links} currentHref={currentHref} className="lg:hidden" />
         <NavBarLogo />
       </div>
-      {/* Below `lg` the inline row no longer fits next to the logo, the people search and the
-          account controls. Checked at 1024px with «Контакти» shown: one row, the search narrows. */}
+      {/* Below `lg` the inline row no longer fits next to the logo and the account controls. */}
       <nav className="hidden items-center gap-4 lg:flex">
         {links.map((link) => (
           <Link
@@ -64,13 +62,6 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
           </Link>
         ))}
       </nav>
-      {/* One instance on every width: below `md` it wraps into its own row. Keyed by the person,
-          so another account never sees the previous one's text or results. */}
-      <UserSearch
-        key={user.id}
-        viewerId={user.id}
-        className="order-last w-full md:order-none md:w-auto md:max-w-sm md:flex-1"
-      />
       <div className="flex items-center gap-2">
         <NavBarNotifications />
         <NavBarAvatar user={user} />

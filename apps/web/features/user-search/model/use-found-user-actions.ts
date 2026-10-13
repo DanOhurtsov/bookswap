@@ -27,7 +27,7 @@ export type AcceptState =
   | { status: 'unavailable' }
 
 export interface FoundUserActions {
-  /** Pending actions of this viewer, in every mounted search: each one blocks all buttons. */
+  /** Pending actions of this viewer, from the mutation cache: each one blocks all buttons. */
   pending: readonly FoundUserAction[]
   /** The last action's error, only while the same search is on screen. */
   failure: unknown
@@ -42,13 +42,12 @@ export interface FoundUserActions {
 const actionKeyOf = (viewerId: string) => ['users', 'search', 'action', viewerId] as const
 
 /**
- * «Додати», «Прийняти», «Розблокувати» on found people — for the header panel and the search page
- * alike.
+ * «Додати», «Прийняти», «Розблокувати» on found people on the search page.
  *
- * The block lives in the mutation cache, not in this hook: `useMutationState` shows every mounted
- * search the same pending action, and `run` checks the cache synchronously, so neither a second
- * click before the re-render nor another search on the page can send it twice. Nothing here ever
- * resets the mutation — hiding an error is local state.
+ * The block lives in the mutation cache, not in this hook: `useMutationState` shows the pending
+ * action to every instance, a remounted page included, and `run` checks the cache synchronously,
+ * so neither a second click before the re-render nor another instance can send it twice. Nothing
+ * here ever resets the mutation — hiding an error is local state.
  *
  * After success the searches are refetched first, then every mounted friends reader is told
  * (`announceResourceChanged` reaches the legacy `useFriends`, the invalidation reaches the

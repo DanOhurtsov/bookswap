@@ -3,27 +3,23 @@
 import '@testing-library/jest-dom'
 import { act, render, screen, within } from '@testing-library/react'
 import type { MouseEvent, ReactNode } from 'react'
-import type { Me } from '@bookswap/shared'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import type { SessionState } from '@/app/lib/use-session'
-import { NavContent } from '@/components/NavBar/NavBarContent'
-import {
-  HEADER_RESULTS_LIMIT,
-  USER_SEARCH_DELAY_MS,
-  USER_SEARCH_STALE_MS,
-} from '../model/user-search'
+import { USER_SEARCH_DELAY_MS } from '../model/user-search'
 import {
   OLEKSAS,
   TRICKY,
   advance,
+  createHistory,
   createSearchTestClient,
   createServer,
+  me,
+  pageOf,
   requestsOf,
   searchFor,
   setupUser,
   type FakeServer,
 } from '../user-search.test-helpers'
-import { UserSearch } from './UserSearch'
 import { UserSearchScreen } from './UserSearchScreen'
 
 jest.mock('@/app/lib/api', () => {
@@ -32,53 +28,10 @@ jest.mock('@/app/lib/api', () => {
   return { ...actual, apiRequest: jest.fn() }
 })
 
-/** The browser history the page sees: entries, a cursor, and who listens for changes. */
-function createHistory() {
-  let entries = ['/friends/search']
-  let index = 0
-  const listeners = new Set<() => void>()
-  const notify = () => listeners.forEach((listener) => listener())
-  const current = () => entries[index] ?? '/'
-
-  return {
-    current,
-    get length() {
-      return entries.length
-    },
-    open(href: string) {
-      entries = [href]
-      index = 0
-    },
-    subscribe(listener: () => void) {
-      listeners.add(listener)
-
-      return () => listeners.delete(listener)
-    },
-    replace: jest.fn((href: string) => {
-      entries[index] = href
-      notify()
-    }),
-    push: jest.fn((href: string) => {
-      entries = [...entries.slice(0, index + 1), href]
-      index += 1
-      notify()
-    }),
-    back() {
-      index -= 1
-      notify()
-    },
-    forward() {
-      index += 1
-      notify()
-    },
-  }
-}
-
 const mockHistory = createHistory()
 let mockSession: SessionState = { status: 'loading' }
 
 jest.mock('next/navigation', () => ({
-  usePathname: () => '/friends/search',
   useRouter: () => ({ replace: mockHistory.replace, push: mockHistory.push }),
   useSearchParams: () => {
     const { useSyncExternalStore } = jest.requireActual<typeof import('react')>('react')
@@ -115,18 +68,6 @@ jest.mock('next/link', () => ({
   ),
 }))
 
-jest.mock('@/components/ThemeToggle', () => ({
-  ThemeToggleButton: () => <button type="button">Theme</button>,
-}))
-
-jest.mock('@/components/NavBar/NavBarAvatar', () => ({
-  NavBarAvatar: () => <span>Профіль</span>,
-}))
-
-jest.mock('@/components/NavBar/NavBarNotifications', () => ({
-  NavBarNotifications: () => <span>Сповіщення</span>,
-}))
-
 const mockReload = jest.fn()
 
 jest.mock('@/app/lib/use-session', () => ({
@@ -138,46 +79,23 @@ const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/ap
 let server: FakeServer
 
 const searches = () => requestsOf(apiRequest, '/users?')
-const posts = () => requestsOf(apiRequest, '/friends/requests', 'POST')
 const addressQuery = () =>
   new URLSearchParams(mockHistory.current().split('?')[1] ?? '').get('query')
-
-const me = (id: string): Me => ({
-  id,
-  email: `${id}@example.com`,
-  emailVerified: true,
-  displayName: id,
-  avatarUrl: null,
-  bio: null,
-  libraryVisibility: 'FRIENDS',
-  showHolderNames: false,
-  createdAt: '2026-01-01T00:00:00.000Z',
-})
 
 const pageForm = () => screen.getByRole('search', { name: 'Пошук людей' })
 const pageField = () => within(pageForm()).getByRole('searchbox', { name: 'Ім’я або email' })
 const results = () => screen.getByRole('region', { name: 'Результати пошуку людей' })
 const queryResults = () => screen.queryByRole('region', { name: 'Результати пошуку людей' })
-const headerForm = () => screen.getByRole('search', { name: 'Швидкий пошук людей' })
-const headerField = () => within(headerForm()).getByRole('searchbox', { name: 'Ім’я або email' })
 
 /** Opens `href` as a fresh tab would, signed in as `viewer` unless told otherwise. */
-async function openPage(href: string, { header = false, session = 'anna' as string | null } = {}) {
+async function openPage(href: string, { session = 'anna' as string | null } = {}) {
   mockHistory.open(href)
   mockSession =
     session === null ? { status: 'guest' } : { status: 'authenticated', user: me(session) }
 
   const user = setupUser()
   const client = createSearchTestClient()
-  const view = render(
-    withQueryClient(
-      <>
-        {header && <UserSearch viewerId="anna" />}
-        <UserSearchScreen />
-      </>,
-      client,
-    ),
-  )
+  const view = render(withQueryClient(<UserSearchScreen />, client))
 
   await advance(0)
 
@@ -255,7 +173,7 @@ describe('/friends/search — the page', () => {
 
     expect(pageField()).toHaveValue('Ол')
     expect(searches()).toEqual([searchFor('Ол')])
-    // Seven people: more than the header would show.
+    // Seven people: the whole answer, not a preview.
     expect(within(results()).getAllByRole('listitem')).toHaveLength(2 + OLEKSAS.length)
     expect(within(results()).getByText('Знайдено людей: 7')).toBeInTheDocument()
   })
@@ -315,14 +233,13 @@ describe('/friends/search — the page', () => {
   })
 
   it('Back and Forward restore the field and the results of each entry', async () => {
-    const { user } = await openPage('/friends/search?query=Олена', { header: true })
+    await openPage('/friends/search?query=Олена')
 
-    // The header's «Показати всі» is a real navigation: a new entry.
-    await user.type(headerField(), 'Ольга')
-    await advance(USER_SEARCH_DELAY_MS)
-    await user.click(screen.getByRole('link', { name: 'Показати всі' }))
+    // Another search opened by a link is a real navigation: a new entry.
+    act(() => mockHistory.push(pageOf('Ольга')))
     await advance(0)
     expect(pageField()).toHaveValue('Ольга')
+    expect(mockHistory.length).toBe(2)
 
     act(() => mockHistory.back())
     await advance(0)
@@ -376,32 +293,20 @@ describe('/friends/search — the page', () => {
     expect(within(results()).getByText('Ольга Мельник')).toBeInTheDocument()
   })
 
-  it('another account keeps the address query, but not the header search or the cache', async () => {
-    mockHistory.open('/friends/search?query=Олена')
-    mockSession = { status: 'authenticated', user: me('anna') }
-
-    const user = setupUser()
-    const client = createSearchTestClient()
+  it('another account keeps the address query, but never the previous results or cache', async () => {
+    const { user, client, view } = await openPage('/friends/search?query=Олена')
     const cached = (viewer: string) =>
       client
         .getQueryCache()
         .findAll({ queryKey: ['users', 'search', viewer] })
         .map((query) => query.queryKey)
-        // A closed header search with no text holds a disabled entry without a query.
+        // An emptied field holds a disabled entry without a query.
         .filter((key) => key[3] !== undefined)
-    const app = (session: SessionState) =>
-      withQueryClient(
-        <>
-          <NavContent state={session} />
-          <UserSearchScreen />
-        </>,
-        client,
-      )
-    const view = render(app(mockSession))
 
-    await advance(0)
-    await user.type(headerField(), 'Ольга')
+    await user.clear(pageField())
+    await user.type(pageField(), 'Ольга')
     await advance(USER_SEARCH_DELAY_MS)
+    expect(addressQuery()).toBe('Ольга')
     expect(cached('anna')).toEqual(
       expect.arrayContaining([
         ['users', 'search', 'anna', 'Олена'],
@@ -409,93 +314,25 @@ describe('/friends/search — the page', () => {
       ]),
     )
 
+    server.flags.holdSearches = true
     mockSession = { status: 'authenticated', user: me('bohdan') }
-    view.rerender(app(mockSession))
+    view.rerender(withQueryClient(<UserSearchScreen />, client))
     await advance(0)
 
-    // The header starts empty and closed for the new account.
-    expect(headerField()).toHaveValue('')
-    expect(screen.getAllByRole('region', { name: 'Результати пошуку людей' })).toHaveLength(1)
     // The address query stays (agreed) and is asked anew — under the new account's own key,
-    // even though the previous account's answer for the same text is still fresh.
-    expect(pageField()).toHaveValue('Олена')
-    expect(within(results()).getByText('Олена Коваль')).toBeInTheDocument()
-    expect(searches()).toEqual([searchFor('Олена'), searchFor('Ольга'), searchFor('Олена')])
-    expect(cached('bohdan')).toEqual([['users', 'search', 'bohdan', 'Олена']])
-  })
-})
+    // even though the previous account's answer for the same text is still fresh. Until that
+    // answer arrives, nothing of the previous account's is on screen.
+    expect(addressQuery()).toBe('Ольга')
+    expect(pageField()).toHaveValue('Ольга')
+    expect(queryResults()).not.toBeInTheDocument()
+    expect(screen.queryByText('Ольга Мельник')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Шукаю людей…')
 
-describe('/friends/search — with the header search mounted', () => {
-  it('«Показати всі» opens the page with the field filled and the full answer loaded', async () => {
-    const { user } = await openPage('/friends/search', { header: true })
-
-    await user.type(headerField(), '  Ол ')
-    await advance(USER_SEARCH_DELAY_MS)
-    expect(
-      within(screen.getByRole('region', { name: 'Результати пошуку людей' })).getAllByRole(
-        'listitem',
-      ),
-    ).toHaveLength(HEADER_RESULTS_LIMIT)
-
-    await user.click(screen.getByRole('link', { name: 'Показати всі' }))
+    server.held[0]?.answer()
     await advance(0)
 
-    expect(mockHistory.current()).toBe(
-      `/friends/search?${new URLSearchParams({ query: 'Ол' }).toString()}`,
-    )
-    expect(pageField()).toHaveValue('Ол')
-    // The header panel closed; the only results on screen are the page's — all seven.
-    expect(screen.getAllByRole('region', { name: 'Результати пошуку людей' })).toHaveLength(1)
-    expect(within(results()).getAllByRole('listitem')).toHaveLength(7)
-    // The header's answer is fresh: the page shows it without a second request.
-    expect(searches()).toEqual([searchFor('Ол')])
-  })
-
-  it('an answer older than the freshness window is asked again on the page', async () => {
-    const { user } = await openPage('/friends/search', { header: true })
-
-    await user.type(headerField(), 'Ол')
-    await advance(USER_SEARCH_DELAY_MS)
-    await advance(USER_SEARCH_STALE_MS)
-    await user.click(screen.getByRole('link', { name: 'Показати всі' }))
-    await advance(0)
-
-    expect(searches()).toEqual([searchFor('Ол'), searchFor('Ол')])
-    expect(within(results()).getAllByRole('listitem')).toHaveLength(7)
-  })
-
-  it('one action updates both, and the pending one cannot be repeated from the other', async () => {
-    const { user } = await openPage('/friends/search?query=Олена', { header: true })
-
-    await user.type(headerField(), 'Олена')
-    await advance(USER_SEARCH_DELAY_MS)
-    const [, page] = screen.getAllByRole('region', { name: 'Результати пошуку людей' })
-
-    const searchesBefore = searches().length
-
-    server.flags.holdActions = true
-    await user.click(within(page as HTMLElement).getByRole('button', { name: 'Додати' }))
-
-    // The click on the page closed the header panel; back in its field, it reopens.
-    await user.click(headerField())
-    const [headerPanel] = screen.getAllByRole('region', { name: 'Результати пошуку людей' })
-    const headerButton = within(headerPanel as HTMLElement).getByRole('button', {
-      name: 'Надсилаю…',
-    })
-
-    expect(headerButton).toBeDisabled()
-    await user.click(headerButton)
-    expect(posts()).toHaveLength(1)
-
-    server.heldActions[0]?.answer()
-    await advance(0)
-
-    for (const region of screen.getAllByRole('region', { name: 'Результати пошуку людей' })) {
-      expect(within(region).getByText('Запит надіслано — чекає на відповідь')).toBeInTheDocument()
-    }
-    // Both searches show the same text: one cache entry, asked once, and once more for the action.
-    expect(searchesBefore).toBe(1)
-    expect(searches()).toEqual([searchFor('Олена'), searchFor('Олена')])
-    expect(posts()).toHaveLength(1)
+    expect(within(results()).getByText('Ольга Мельник')).toBeInTheDocument()
+    expect(searches()).toEqual([searchFor('Олена'), searchFor('Ольга'), searchFor('Ольга')])
+    expect(cached('bohdan')).toEqual([['users', 'search', 'bohdan', 'Ольга']])
   })
 })

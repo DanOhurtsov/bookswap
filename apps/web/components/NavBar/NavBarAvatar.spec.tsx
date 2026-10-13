@@ -58,6 +58,9 @@ describe('NavBarAvatar', () => {
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
     ).toEqual(['Профіль', 'Друзі', 'Список читання', 'Темна тема', 'Вийти'])
+    expect(
+      within(menu).queryByRole('menuitem', { name: /пошук|знайти|search/i }),
+    ).not.toBeInTheDocument()
     expect(within(menu).getByRole('menuitem', { name: 'Профіль' })).toHaveAttribute(
       'href',
       '/profile',

@@ -94,8 +94,6 @@ function UserSearchPage({ viewerId }: { viewerId: string }) {
     <ScreenShell>
       <div className="space-y-4">
         <UserSearchForm
-          label="Пошук людей"
-          variant="full"
           text={search.text}
           loading={search.view.status === 'loading'}
           errorId={error === undefined ? undefined : errorId}

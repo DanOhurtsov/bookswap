@@ -1,15 +1,16 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { FriendRelation, PublicUser } from '@bookswap/shared'
+import type { FriendRelation, Me, PublicUser } from '@bookswap/shared'
 import { createTestQueryClient } from '@/app/lib/test-query-client'
 import { USER_SEARCH_QUERY_KEY } from './model/use-user-search'
+import { USER_SEARCH_DELAY_MS } from './model/user-search'
 
 export const OLENA: PublicUser = { id: 'olena', displayName: 'Олена Коваль', avatarUrl: null }
 export const OLHA: PublicUser = { id: 'olha', displayName: 'Ольга Мельник', avatarUrl: null }
 export const MARKO: PublicUser = { id: 'marko', displayName: 'Марко Левченко', avatarUrl: null }
 export const IRA: PublicUser = { id: 'ira', displayName: 'Ірина Бондар', avatarUrl: null }
-/** Five more «Ол…» people: «Ол» finds seven — more than the header shows. */
+/** Five more «Ол…» people: «Ол» finds seven. */
 export const OLEKSAS: PublicUser[] = [1, 2, 3, 4, 5].map((n) => ({
   id: `oleksa-${String(n)}`,
   displayName: `Олекса ${String(n)}`,
@@ -22,6 +23,65 @@ const PEOPLE = [OLENA, OLHA, MARKO, IRA, ...OLEKSAS, TRICKY]
 const EMAILS: Record<string, PublicUser> = { 'olena@example.com': OLENA }
 
 export const NETWORK_ERROR = /Не вдалося звʼязатися з API/
+
+/** The signed-in person `id`, as the session reports them. */
+export const me = (id: string): Me => ({
+  id,
+  email: `${id}@example.com`,
+  emailVerified: true,
+  displayName: id,
+  avatarUrl: null,
+  bio: null,
+  libraryVisibility: 'FRIENDS',
+  showHolderNames: false,
+  createdAt: '2026-01-01T00:00:00.000Z',
+})
+
+/** The browser history the page sees: entries, a cursor, and who listens for changes. */
+export function createHistory() {
+  let entries = ['/friends/search']
+  let index = 0
+  const listeners = new Set<() => void>()
+  const notify = () => listeners.forEach((listener) => listener())
+  const current = () => entries[index] ?? '/'
+
+  return {
+    current,
+    get length() {
+      return entries.length
+    },
+    open(href: string) {
+      entries = [href]
+      index = 0
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+
+      return () => listeners.delete(listener)
+    },
+    replace: jest.fn((href: string) => {
+      entries[index] = href
+      notify()
+    }),
+    push: jest.fn((href: string) => {
+      entries = [...entries.slice(0, index + 1), href]
+      index += 1
+      notify()
+    }),
+    back() {
+      index -= 1
+      notify()
+    },
+    forward() {
+      index += 1
+      notify()
+    },
+  }
+}
+
+/** `/friends/search?query=…`, encoded as the page writes it. */
+export const pageOf = (query: string) =>
+  `/friends/search?${new URLSearchParams({ query }).toString()}`
 
 interface Held {
   path: string
@@ -174,6 +234,17 @@ export async function advance(ms: number): Promise<void> {
   // answer to the screen on a zero-delay timer: separate steps, the clock stays where it is.
   await act(() => jest.advanceTimersByTimeAsync(0))
   await act(() => jest.advanceTimersByTimeAsync(0))
+}
+
+/**
+ * Lets the pause run out on the search page and its answer arrive. The launch writes the address,
+ * and the page re-renders from it while the fake clock is still ticking: the request and TanStack
+ * Query's zero-delay hand-over of its answer are set up inside that tick, where
+ * @sinonjs/fake-timers makes a zero delay due 1 ms later.
+ */
+export async function advancePastPause(): Promise<void> {
+  await advance(USER_SEARCH_DELAY_MS)
+  await advance(1)
 }
 
 export function setupUser() {
