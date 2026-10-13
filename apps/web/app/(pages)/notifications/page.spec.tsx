@@ -54,11 +54,16 @@ const NOTIFICATIONS = [
   },
 ]
 
+let mockNotifications: typeof NOTIFICATIONS = NOTIFICATIONS
+
 jest.mock('../../lib/use-notifications', () => ({
   useNotifications: () => ({
     state: {
       status: 'ready',
-      data: { notifications: NOTIFICATIONS, unreadCount: 3 },
+      data: {
+        notifications: mockNotifications,
+        unreadCount: mockNotifications.filter((item) => item.readAt === null).length,
+      },
     },
     reload: jest.fn(() => Promise.resolve()),
   }),
@@ -96,5 +101,40 @@ describe('NotificationsPage: відповіді гостя (Stage 10, 10i.3)', (
     expect(
       within(row('У вас просять книжку')).getByRole('link', { name: 'Відкрити позичання' }),
     ).toHaveAttribute('href', '/loans?loanId=loan-r1')
+  })
+})
+
+describe('NotificationsPage: вхід у налаштування сповіщень (BS-131)', () => {
+  afterEach(() => {
+    mockNotifications = NOTIFICATIONS
+  })
+
+  function settingsLinks(): HTMLElement[] {
+    return screen
+      .getAllByRole('link')
+      .filter((link) => link.getAttribute('href') === '/notifications/settings')
+  }
+
+  it('рівно одне посилання «Налаштування сповіщень» на /notifications/settings', () => {
+    render(withQueryClient(<NotificationsPage />))
+
+    expect(screen.getByRole('link', { name: 'Налаштування сповіщень' })).toHaveAttribute(
+      'href',
+      '/notifications/settings',
+    )
+    expect(settingsLinks()).toHaveLength(1)
+  })
+
+  it('посилання є й за порожнього списку', () => {
+    mockNotifications = []
+
+    render(withQueryClient(<NotificationsPage />))
+
+    expect(screen.getByText('Сповіщень поки немає.')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Налаштування сповіщень' })).toHaveAttribute(
+      'href',
+      '/notifications/settings',
+    )
+    expect(settingsLinks()).toHaveLength(1)
   })
 })

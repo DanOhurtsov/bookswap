@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import type { Notification } from '@bookswap/shared'
-import { BellIcon, CheckCheckIcon, SettingsIcon } from 'lucide-react'
+import { BellIcon, CheckCheckIcon } from 'lucide-react'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { NOTIFICATION_TYPE_LABELS, formatDate } from '@/app/lib/labels'
 import {
@@ -21,17 +21,18 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ToggleTab, ToggleTabs } from '@/components/ui/tabs'
 import {
   FriendRequestNotification,
   useFriendRequestActions,
   type FriendRequestActions,
 } from '@/features/friend-requests/index.client'
+import { cn } from '@/lib/utils'
 
 export const NavBarNotifications = () => {
   const [open, setOpen] = useState(false)
-  const [unreadOnly, setUnreadOnly] = useState(false)
-  const notifications = useNotifications(unreadOnly)
+  // The panel has no filters: it always shows the whole list in server order (`createdAt DESC`),
+  // read and unread together. Filtering lives on `/notifications`.
+  const notifications = useNotifications(false)
 
   const unreadCount =
     notifications.state.status === 'ready' ? notifications.state.data.unreadCount : 0
@@ -63,27 +64,16 @@ export const NavBarNotifications = () => {
         }
       />
 
-      {open && (
-        <NotificationsPanel
-          resource={notifications}
-          unreadOnly={unreadOnly}
-          onUnreadOnlyChange={setUnreadOnly}
-          onNavigate={() => setOpen(false)}
-        />
-      )}
+      {open && <NotificationsPanel resource={notifications} onNavigate={() => setOpen(false)} />}
     </Sheet>
   )
 }
 
 function NotificationsPanel({
   resource,
-  unreadOnly,
-  onUnreadOnlyChange,
   onNavigate,
 }: {
   resource: ReturnType<typeof useNotifications>
-  unreadOnly: boolean
-  onUnreadOnlyChange: (value: boolean) => void
   onNavigate: () => void
 }) {
   const [busyKey, setBusyKey] = useState<string>()
@@ -119,44 +109,20 @@ function NotificationsPanel({
   return (
     <SheetContent className="dark w-full gap-0 sm:max-w-md">
       <SheetHeader className="border-b pr-14">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <SheetTitle>Сповіщення</SheetTitle>
-            <SheetDescription>Новини про позичання, друзів і вашу бібліотеку.</SheetDescription>
-          </div>
+        <SheetTitle>Сповіщення</SheetTitle>
+        <SheetDescription>Новини про позичання, друзів і вашу бібліотеку.</SheetDescription>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            nativeButton={false}
-            aria-label="Налаштування сповіщень"
-            render={<Link href="/notifications/settings" onClick={onNavigate} />}
-          >
-            <SettingsIcon aria-hidden="true" />
-          </Button>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <ToggleTabs aria-label="Вигляд сповіщень">
-            <ToggleTab pressed={!unreadOnly} onClick={() => onUnreadOnlyChange(false)}>
-              Усі
-            </ToggleTab>
-            <ToggleTab pressed={unreadOnly} onClick={() => onUnreadOnlyChange(true)}>
-              Непрочитані{unreadCount > 0 && ` (${unreadCount})`}
-            </ToggleTab>
-          </ToggleTabs>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="ml-auto"
-            disabled={busyKey !== undefined || unreadCount === 0}
-            onClick={readAll}
-          >
-            <CheckCheckIcon aria-hidden="true" />
-            {busyKey === 'read-all' ? 'Позначаю…' : 'Прочитати всі'}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="mt-2 -ml-2.5 self-start"
+          disabled={busyKey !== undefined || unreadCount === 0}
+          onClick={readAll}
+        >
+          <CheckCheckIcon aria-hidden="true" />
+          {busyKey === 'read-all' ? 'Позначаю…' : 'Прочитати всі'}
+        </Button>
       </SheetHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -184,7 +150,7 @@ function NotificationsPanel({
 
         {resource.state.status === 'ready' && resource.state.data.notifications.length === 0 && (
           <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            {unreadOnly ? 'Непрочитаних сповіщень немає.' : 'Сповіщень поки немає.'}
+            Сповіщень поки немає.
           </p>
         )}
 
@@ -205,12 +171,9 @@ function NotificationsPanel({
         )}
       </div>
 
-      <div className="flex items-center justify-between border-t p-4 text-sm font-medium">
+      <div className="border-t p-4 text-sm font-medium">
         <Link href="/notifications" onClick={onNavigate}>
           Усі сповіщення
-        </Link>
-        <Link href="/notifications/settings" onClick={onNavigate}>
-          Налаштування
         </Link>
       </div>
     </SheetContent>
@@ -237,7 +200,11 @@ function NotificationRow({
 
   return (
     <li
-      className={`rounded-lg border p-3 ${unread ? 'border-l-3 border-l-primary bg-muted/40' : ''}`}
+      className={cn(
+        'rounded-lg border p-3',
+        // Green, not `--primary`: that token is neutral (near-white in the dark panel).
+        unread && 'border-l-4 border-l-(--bookswap-accent) bg-muted/40',
+      )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
