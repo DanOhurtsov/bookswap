@@ -604,6 +604,84 @@ a:focus-visible > .link-underline {
   border-bottom: none;
 }
 
+/* --- Metadata correction: field as text, editor in place (BS-76) ---------- */
+
+.inline-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.inline-field__body {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.inline-field__label {
+  font-size: 0.85rem;
+  color: var(--bookswap-muted);
+}
+
+/* A description keeps its own line breaks; long text and URLs wrap instead of widening the page. */
+.inline-field__value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inline-field__list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.inline-field .inline-field__edit {
+  display: grid;
+  place-items: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  color: var(--fg);
+  background: none;
+  border-color: var(--line);
+}
+
+.inline-field .inline-field__add {
+  min-height: 2.75rem;
+  padding: 0.4rem 0.9rem;
+}
+
+.inline-field__edit svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/*
+ * Only where hover is real: the icon shows on the row under the pointer or when focus is inside it.
+ * `opacity`, not `display`/`visibility` — the button stays in the Tab order. Without hover (phones,
+ * tablets) this rule does not apply, and the icon is always visible.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .inline-field .inline-field__edit {
+    opacity: 0;
+  }
+
+  .inline-field:hover .inline-field__edit,
+  .inline-field:focus-within .inline-field__edit {
+    opacity: 1;
+  }
+}
+
+.inline-field-editor {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+
 /* --- Позичання і сповіщення --------------------------------------------- */
 
 /*

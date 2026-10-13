@@ -1,4 +1,5 @@
 import type { WorkAuthor, WorkPatchRequest } from '@bookswap/shared'
+import { plainDataEqual } from './form-values'
 
 /**
  * One row of the Work author editor — exactly the wire shape `PATCH
@@ -8,8 +9,8 @@ import type { WorkAuthor, WorkPatchRequest } from '@bookswap/shared'
  * so there is nothing to strip at submit time and no risk of the strict wire
  * schema rejecting a key the UI added for its own convenience. The
  * human-readable name for an EXISTING author (`authorId` set) is looked up by
- * id (`authorLookup`) or kept in local component state when newly picked —
- * see `AuthorFormRow`.
+ * id — the Work's own authors (`authorLookup`) plus candidates picked from
+ * search, which `AuthorsField` keeps outside the form value.
  */
 export type AuthorFormValue = NonNullable<WorkPatchRequest['authors']>[number]
 
@@ -24,11 +25,12 @@ export function newAuthorFormValue(): AuthorFormValue {
   return { name: '', nameLatin: null, role: 'AUTHOR' }
 }
 
+/** Same authors in the same order; key order inside an element does not matter. */
 export function authorsEqual(
   a: readonly AuthorFormValue[],
   b: readonly AuthorFormValue[],
 ): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  return plainDataEqual(a, b)
 }
 
 /** Existing authors' current name/transliteration, looked up by id — stable across reorders. */

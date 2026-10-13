@@ -1,18 +1,21 @@
 'use client'
 
+import type { AuthorMatch } from '@bookswap/shared'
 import { useFieldArray, type Control, type FieldErrors } from 'react-hook-form'
 import { AuthorFormRow } from './AuthorFormRow'
 import { newAuthorFormValue } from '../model/author-list'
+import type { AuthorName } from '../model/field-display'
 import type { WorkCorrectionFormValues } from '../model/work-form'
 
 type AuthorListEditorProps = {
   control: Control<WorkCorrectionFormValues>
   errors: FieldErrors<WorkCorrectionFormValues>
-  knownAuthors: ReadonlyMap<string, { name: string; nameLatin: string | null }>
+  names: ReadonlyMap<string, AuthorName>
+  onPick: (candidate: AuthorMatch) => void
 }
 
 /** R10a, minimal 8e-3 scope: add/remove/reorder (Up/Down, no drag-and-drop). */
-export function AuthorListEditor({ control, errors, knownAuthors }: AuthorListEditorProps) {
+export function AuthorListEditor({ control, errors, names, onPick }: AuthorListEditorProps) {
   const { fields, append, remove, move } = useFieldArray({ control, name: 'authors' })
 
   return (
@@ -28,7 +31,9 @@ export function AuthorListEditor({ control, errors, knownAuthors }: AuthorListEd
           key={field.id}
           control={control}
           index={index}
-          knownAuthors={knownAuthors}
+          names={names}
+          onPick={onPick}
+          error={errors.authors?.[index]}
           canRemove={fields.length > 1}
           onRemove={() => {
             remove(index)
