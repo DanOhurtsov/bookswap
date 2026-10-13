@@ -2,9 +2,9 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import type { Work, WorkAuthor, WorkPatchRequest } from '@bookswap/shared'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type BaseSyntheticEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { TextAreaField, TextField } from '@/components/Form/FormFields'
@@ -17,11 +17,14 @@ import {
   toAuthorFormValues,
   type AuthorFormValue,
 } from '../model/author-list'
-import { nullableNumber, nullableText } from '../model/form-values'
+import { workFieldsDisplay } from '../model/field-display'
+import { copyFormValue, nullableNumber, nullableText } from '../model/form-values'
 import type { CatalogCorrection } from '../model/use-catalog-correction'
+import { useInlineEditors } from '../model/use-inline-editors'
 import { workCorrectionFormSchema, type WorkCorrectionFormValues } from '../model/work-form'
-import { AuthorListEditor } from './AuthorListEditor'
+import { AuthorsField } from './AuthorsField'
 import { ConflictNotice } from './ConflictNotice'
+import { InlineField, InlineSaveHint } from './InlineField'
 import { RefreshNotice } from './RefreshNotice'
 
 type WorkCorrectionFormProps = {
@@ -32,6 +35,9 @@ type WorkCorrectionFormProps = {
   reload: () => Promise<WorkReloadOutcome>
   onClose: () => void
 }
+
+/** Display order — the first invalid one gets focus after a failed general submit. */
+const WORK_FIELDS = ['title', 'origLang', 'firstPubYear', 'description', 'authors'] as const
 
 function toFormValues(work: Work, authors: WorkAuthor[]): WorkCorrectionFormValues {
   return {
@@ -72,6 +78,13 @@ export function WorkCorrectionForm({
 }: WorkCorrectionFormProps) {
   const router = useRouter()
 
+  const form = useForm<WorkCorrectionFormValues>({
+    resolver: zodResolver(workCorrectionFormSchema),
+    defaultValues: toFormValues(work, authors),
+    // `useInlineEditors.reveal` focuses the first invalid field — RHF cannot,
+    // while that field's editor is still closed.
+    shouldFocusError: false,
+  })
   const {
     control,
     register,
@@ -80,21 +93,26 @@ export function WorkCorrectionForm({
     getValues,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<WorkCorrectionFormValues>({
-    resolver: zodResolver(workCorrectionFormSchema),
-    defaultValues: toFormValues(work, authors),
+  } = form
+  const editors = useInlineEditors(form)
+  const [title, origLang, firstPubYear, description] = useWatch({
+    control,
+    name: ['title', 'origLang', 'firstPubYear', 'description'],
   })
+  const display = workFieldsDisplay({ title, origLang, firstPubYear, description })
 
   // Pinned to what the form opened with — R10a: `authors` is sent only when
   // it actually changed FROM THAT POINT. Updated after a successful save (see
   // the effect below) so a later, unrelated edit does not re-diff against a
   // pre-save snapshot and re-declare an already-saved author "changed".
   const baselineAuthorsRef = useRef(toAuthorFormValues(authors))
-  // What the LAST submit actually sent for `authors` — used only to decide
-  // whether it is safe to silently back-fill server-assigned author ids into
-  // the visible field (below): safe exactly when nothing has touched that
-  // field since. If the user kept editing authors further in the meantime,
-  // the back-fill is skipped and their in-progress edit is left alone.
+  // The authors field AS THE FORM HELD IT at the last submit — a copy of the
+  // raw value, not zod's parsed output: "has anything touched this field
+  // since?" must compare like with like (zod trims names). Used only to
+  // decide whether it is safe to silently back-fill server-assigned author ids
+  // into the visible field and an open editor's snapshot (below). If the user
+  // kept editing authors in the meantime, the back-fill is skipped and their
+  // in-progress edit is left alone.
   const lastSubmittedAuthorsRef = useRef<AuthorFormValue[] | undefined>(undefined)
 
   // `correction.confirmed` lives in the stable ancestor and outlives this
@@ -128,8 +146,12 @@ export function WorkCorrectionForm({
       setValue('authors', freshAuthorValues, { shouldDirty: false })
     }
 
+    // An authors editor opened while this save was in flight must not cancel
+    // back to the names the server has just created authors from.
+    if (submitted !== undefined) editors.rebaseSnapshot('authors', submitted, freshAuthorValues)
+
     baselineAuthorsRef.current = freshAuthorValues
-  }, [correction.confirmed, setValue, getValues])
+  }, [correction.confirmed, setValue, getValues, editors])
 
   const mergedInto =
     correction.saveError instanceof ApiRequestError &&
@@ -153,7 +175,7 @@ export function WorkCorrectionForm({
   function submit(values: WorkCorrectionFormValues): void {
     const authorsChanged = !authorsEqual(values.authors, baselineAuthorsRef.current)
 
-    lastSubmittedAuthorsRef.current = values.authors
+    lastSubmittedAuthorsRef.current = copyFormValue(getValues('authors'))
 
     const body: WorkPatchRequest = {
       title: values.title,
@@ -181,11 +203,26 @@ export function WorkCorrectionForm({
     })
   }
 
+  // Open editors are part of the draft: their input is validated and sent
+  // like everything else, and a field that fails validation is never left
+  // hidden behind its text view.
+  function submitDraft(event?: BaseSyntheticEvent): Promise<void> {
+    return handleSubmit(
+      (values) => {
+        editors.closeAll()
+        submit(values)
+      },
+      (fieldErrors) => {
+        editors.reveal(WORK_FIELDS.filter((name) => fieldErrors[name] !== undefined))
+      },
+    )(event)
+  }
+
   function retryAfterConflict(): void {
     if (conflict === undefined) return
 
     setValue('expectedRevision', conflict.work.revision)
-    void handleSubmit(submit)()
+    void submitDraft()
   }
 
   if (mergedInto !== undefined) {
@@ -200,7 +237,7 @@ export function WorkCorrectionForm({
   }
 
   return (
-    <form className="form" onSubmit={(event) => void handleSubmit(submit)(event)} noValidate>
+    <form className="form" onSubmit={(event) => void submitDraft(event)} noValidate>
       <p className="form__aside">
         Це спільні метадані каталогу — їх бачить кожен, хто відкриє цей твір, а не лише ваш
         примірник.
@@ -228,45 +265,70 @@ export function WorkCorrectionForm({
         />
       )}
 
-      <TextField
-        id="correction-work-title"
-        label="Назва твору"
-        required
-        error={errors.title?.message}
-        {...register('title')}
-      />
-      <Controller
-        control={control}
+      <InlineField name="title" label="Назва твору" display={display.title} editors={editors}>
+        <TextField
+          id="correction-work-title"
+          label="Назва твору"
+          required
+          error={errors.title?.message}
+          {...register('title')}
+        />
+      </InlineField>
+      <InlineField
         name="origLang"
-        render={({ field }) => (
-          <LanguageSelect
-            id="correction-work-lang"
-            label="Мова оригіналу"
-            value={field.value}
-            error={errors.origLang?.message}
-            // Невідому мову можна лишити невказаною; відому очищувати цією формою не пропонуємо.
-            {...(work.origLang === null ? { emptyLabel: 'Не вказано' } : {})}
-            onChange={field.onChange}
-          />
-        )}
-      />
-      <TextField
-        id="correction-work-year"
+        label="Мова оригіналу"
+        display={display.origLang}
+        editors={editors}
+      >
+        <Controller
+          control={control}
+          name="origLang"
+          render={({ field }) => (
+            <LanguageSelect
+              id="correction-work-lang"
+              label="Мова оригіналу"
+              value={field.value}
+              error={errors.origLang?.message}
+              // An unknown language may stay unset; clearing a known one is not offered by this form.
+              {...(work.origLang === null ? { emptyLabel: 'Не вказано' } : {})}
+              onChange={field.onChange}
+            />
+          )}
+        />
+      </InlineField>
+      <InlineField
+        name="firstPubYear"
         label="Рік першого видання"
-        type="number"
-        inputMode="numeric"
-        error={errors.firstPubYear?.message}
-        {...register('firstPubYear', { setValueAs: nullableNumber })}
-      />
-      <TextAreaField
-        id="correction-work-description"
-        label="Опис"
-        rows={3}
-        error={errors.description?.message}
-        {...register('description', { setValueAs: nullableText })}
+        display={display.firstPubYear}
+        editors={editors}
+      >
+        <TextField
+          id="correction-work-year"
+          label="Рік першого видання"
+          type="number"
+          inputMode="numeric"
+          error={errors.firstPubYear?.message}
+          {...register('firstPubYear', { setValueAs: nullableNumber })}
+        />
+      </InlineField>
+      <InlineField name="description" label="Опис" display={display.description} editors={editors}>
+        <TextAreaField
+          id="correction-work-description"
+          label="Опис"
+          rows={3}
+          error={errors.description?.message}
+          {...register('description', { setValueAs: nullableText })}
+        />
+      </InlineField>
+
+      <AuthorsField
+        control={control}
+        errors={errors}
+        editors={editors}
+        knownAuthors={authorLookup(authors)}
       />
 
-      <AuthorListEditor control={control} errors={errors} knownAuthors={authorLookup(authors)} />
+      <InlineSaveHint />
 
       <div className="person__actions">
         <button type="submit" disabled={isSubmitting || correction.isSaving}>

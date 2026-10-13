@@ -13,13 +13,30 @@ import { apiRequest, describeError } from '@/app/lib/api'
 import { AUTHOR_ROLE_LABELS } from '@/app/lib/labels'
 import { SelectField, TextField } from '@/components/Form/FormFields'
 import type { AuthorFormValue } from '../model/author-list'
+import type { AuthorName } from '../model/field-display'
 import type { WorkCorrectionFormValues } from '../model/work-form'
+
+type AuthorRowError = {
+  message?: string
+  name?: { message?: string }
+  nameLatin?: { message?: string }
+}
 
 type AuthorFormRowProps = {
   control: Control<WorkCorrectionFormValues>
   index: number
-  /** Existing authors' current name/transliteration, by id — `authorLookup()`. */
-  knownAuthors: ReadonlyMap<string, { name: string; nameLatin: string | null }>
+  /**
+   * Existing authors' names by id — the Work's own authors plus every
+   * candidate picked from search. Owned above the editor (see `AuthorsField`),
+   * so a picked name outlives this row unmounting when the editor closes.
+   */
+  names: ReadonlyMap<string, AuthorName>
+  onPick: (candidate: AuthorMatch) => void
+  /**
+   * This element's error subtree: a field's own message, or the element-level
+   * "exactly one source" refinement (`message`).
+   */
+  error: AuthorRowError | undefined
   canRemove: boolean
   onRemove: () => void
   onMoveUp?: () => void
@@ -87,7 +104,9 @@ function AuthorCandidates({
 export function AuthorFormRow({
   control,
   index,
-  knownAuthors,
+  names,
+  onPick,
+  error,
   canRemove,
   onRemove,
   onMoveUp,
@@ -96,10 +115,8 @@ export function AuthorFormRow({
   const { field } = useController({ control, name: `authors.${index}` as const })
   const author: AuthorFormValue = field.value
   const isExisting = author.authorId !== undefined
-  const [displayName, setDisplayName] = useState(
-    () =>
-      (author.authorId !== undefined ? knownAuthors.get(author.authorId)?.name : author.name) ?? '',
-  )
+  const displayName =
+    (author.authorId !== undefined ? names.get(author.authorId)?.name : author.name) ?? ''
   const [candidates, setCandidates] = useState<AuthorMatch[]>()
   const [searchError, setSearchError] = useState<string>()
   const [isSearching, setIsSearching] = useState(false)
@@ -112,11 +129,11 @@ export function AuthorFormRow({
 
     try {
       setCandidates(await searchAuthorCandidates(displayName.trim()))
-    } catch (error) {
+    } catch (failure) {
       // A network/server failure is not "no matching authors" — showing it as
       // one would make the user believe an author search actually ran.
       setCandidates(undefined)
-      setSearchError(describeError(error))
+      setSearchError(describeError(failure))
     } finally {
       setIsSearching(false)
     }
@@ -134,10 +151,10 @@ export function AuthorFormRow({
             ? 'Наявний автор із каталогу — перейменувати його тут не можна.'
             : 'Буде створено нового автора.'
         }
+        error={error?.name?.message ?? error?.message}
         onChange={(event) => {
           const name = event.target.value
 
-          setDisplayName(name)
           // Typing a name always means "different/new author": R10 forbids
           // renaming an existing global Author through this list, so this
           // switches the row away from `authorId` rather than editing it.
@@ -150,6 +167,7 @@ export function AuthorFormRow({
           id={`correction-author-name-latin-${field.name}`}
           label="Латиницею (необовʼязково)"
           value={author.nameLatin ?? ''}
+          error={error?.nameLatin?.message}
           onChange={(event) => {
             const trimmed = event.target.value.trim()
 
@@ -213,7 +231,7 @@ export function AuthorFormRow({
         <AuthorCandidates
           candidates={candidates}
           onSelect={(candidate) => {
-            setDisplayName(candidate.name)
+            onPick(candidate)
             field.onChange({ authorId: candidate.id, role: author.role })
             setCandidates(undefined)
           }}

@@ -119,6 +119,11 @@ function detail(): WorkDetailResponse {
 const emptyHistory: WorkHistoryResponse = { work: work(), authors, entries: [] }
 const emptyWishlist: WishlistResponse = { items: [] }
 
+/** BS-76: a filled field shows as text until its own editor is opened. */
+async function openEditor(user: ReturnType<typeof userEvent.setup>, label: string): Promise<void> {
+  await user.click(screen.getByRole('button', { name: `Редагувати: ${label}` }))
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockApiRequest.mockImplementation((path: string) => {
@@ -154,6 +159,8 @@ it("переклад: зберегти → нове ім'я перекладач
 
   await user.click(screen.getByRole('button', { name: 'Виправити переклад' }))
 
+  await openEditor(user, 'Перекладач')
+
   const translatorInput = screen.getByLabelText('Перекладач')
 
   await user.clear(translatorInput)
@@ -178,7 +185,8 @@ it("переклад: зберегти → нове ім'я перекладач
   await waitFor(() => {
     expect(screen.getByText('Збережено.')).toBeInTheDocument()
   })
-  expect(await screen.findByText('Jane Weston')).toBeInTheDocument()
+  // The open form shows the draft as text too — the card's own title is what must update.
+  expect(await screen.findByText('Jane Weston', { selector: '.book__title' })).toBeInTheDocument()
 })
 
 it('видання: зберегти → нове видавництво видно; звіряється revision видання, не Work', async () => {
@@ -196,6 +204,8 @@ it('видання: зберегти → нове видавництво вид�
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити видання' }))
+
+  await openEditor(user, 'Видавництво')
 
   const publisherInput = screen.getByLabelText('Видавництво')
 
@@ -233,6 +243,8 @@ it(
 
     await user.click(screen.getByRole('button', { name: 'Виправити переклад' }))
 
+    await openEditor(user, 'Перекладач')
+
     const translatorInput = screen.getByLabelText('Перекладач')
 
     await user.clear(translatorInput)
@@ -257,6 +269,8 @@ it(
     await user.click(screen.getByRole('button', { name: 'Закрити' }))
     await user.click(screen.getByRole('button', { name: 'Виправити переклад' }))
 
+    await openEditor(user, 'Перекладач')
+
     const reopenedTranslatorInput = screen.getByLabelText('Перекладач')
 
     await user.clear(reopenedTranslatorInput)
@@ -275,7 +289,7 @@ it(
     await user.click(screen.getByRole('button', { name: 'Зберегти' }))
 
     await waitFor(() => {
-      expect(screen.getByText('Jane Weston II')).toBeInTheDocument()
+      expect(screen.getByText('Jane Weston II', { selector: '.book__title' })).toBeInTheDocument()
     })
   },
 )
@@ -293,6 +307,8 @@ it(
     expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Виправити видання' }))
+
+    await openEditor(user, 'Видавництво')
 
     const publisherInput = screen.getByLabelText('Видавництво')
 
@@ -315,6 +331,8 @@ it(
 
     await user.click(screen.getByRole('button', { name: 'Закрити' }))
     await user.click(screen.getByRole('button', { name: 'Виправити видання' }))
+
+    await openEditor(user, 'Видавництво')
 
     const reopenedPublisherInput = screen.getByLabelText('Видавництво')
 

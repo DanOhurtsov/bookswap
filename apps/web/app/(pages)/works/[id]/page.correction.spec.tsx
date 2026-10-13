@@ -17,6 +17,11 @@ import { ApiRequestError } from '@/app/lib/api'
 import { createTestQueryClient, withQueryClient } from '@/app/lib/test-query-client'
 import WorkPage from './page'
 
+/** BS-76: a filled field shows as text until its own editor is opened. */
+async function openEditor(user: ReturnType<typeof userEvent.setup>, label: string): Promise<void> {
+  await user.click(screen.getByRole('button', { name: `Редагувати: ${label}` }))
+}
+
 function lastOf<T>(items: readonly T[]): T {
   const item = items[items.length - 1]
 
@@ -120,6 +125,8 @@ it('редагування назви: зберегти → нова назва 
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -162,6 +169,7 @@ it('порожня назва: валідація зупиняє сабміт, P
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Назва твору')
   await user.clear(screen.getByLabelText('Назва твору'))
   await user.click(screen.getByRole('button', { name: 'Зберегти' }))
 
@@ -210,6 +218,8 @@ it('409 CATALOG_REVISION_CONFLICT: показує свіжі дані, не вт
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -229,6 +239,7 @@ it('409 CATALOG_REVISION_CONFLICT: показує свіжі дані, не вт
 
   expect(await screen.findByText('Чиясь інша назва')).toBeInTheDocument()
   // Ввід користувача лишається в полі — конфлікт не стер і не замінив його.
+  await openEditor(user, 'Назва твору')
   expect(screen.getByLabelText('Назва твору')).toHaveValue('Мій варіант назви')
 
   mockApiRequestWithRedirect.mockResolvedValueOnce({
@@ -260,6 +271,8 @@ it('помилка refresh після успішного PATCH не вигляд
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+
+  await openEditor(user, 'Назва твору')
 
   const titleInput = screen.getByLabelText('Назва твору')
 
@@ -304,6 +317,8 @@ it('PATCH успішний, GET ще летить: закриття форми �
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -341,6 +356,8 @@ it('PATCH успішний, GET провалився: закриття форм�
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -376,6 +393,8 @@ it('два послідовні збереження без закриття ф�
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -393,8 +412,13 @@ it('два послідовні збереження без закриття ф�
     expect(screen.getByText('Збережено.')).toBeInTheDocument()
   })
 
-  await user.clear(titleInput)
-  await user.type(titleInput, 'Друга правка')
+  // The general save closed the editor; the second edit opens it again.
+  await openEditor(user, 'Назва твору')
+
+  const secondTitleInput = screen.getByLabelText('Назва твору')
+
+  await user.clear(secondTitleInput)
+  await user.type(secondTitleInput, 'Друга правка')
 
   // If `expectedRevision` had not been synced after the first save, this
   // would still carry `1` and the server would answer 409 — never mocked
@@ -423,6 +447,8 @@ it('подвійний клік «Зберегти» під час pending: ли
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+
+  await openEditor(user, 'Назва твору')
 
   const titleInput = screen.getByLabelText('Назва твору')
 
@@ -478,6 +504,7 @@ it('створити автора → зберегти → змінити лиш
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Автори')
   await user.click(screen.getByRole('button', { name: 'Додати ще автора' }))
 
   const newAuthorNameInputs = screen.getAllByLabelText('Імʼя')
@@ -508,6 +535,8 @@ it('створити автора → зберегти → змінити лиш
   })
 
   // Now touch ONLY the title — the authors UI is left exactly as the server confirmed it.
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -527,6 +556,78 @@ it('створити автора → зберегти → змінити лиш
         ...authors,
         { id: 'author-new-1', name: 'Новий Автор', nameLatin: null, role: 'AUTHOR', position: 1 },
       ],
+    })
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+  await waitFor(() => {
+    expect(screen.getByRole('heading', { name: 'Кобзар (виправлено)' })).toBeInTheDocument()
+  })
+})
+
+it('новий автор із латиницею → зберегти → змінити лише назву: authors не надсилається повторно', async () => {
+  const user = userEvent.setup()
+  const created: WorkAuthor = {
+    id: 'author-new-1',
+    name: 'Новий Автор',
+    nameLatin: 'Novyi Avtor',
+    role: 'AUTHOR',
+    position: 1,
+  }
+
+  mockApiRequestWithRedirect
+    .mockResolvedValueOnce({ data: detail('Кобзар'), redirected: false })
+    .mockResolvedValueOnce({
+      data: { ...detail('Кобзар', 2), authors: [...authors, created] },
+      redirected: false,
+    })
+
+  render(withQueryClient(<WorkPage />))
+
+  expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Автори')
+  await user.click(screen.getByRole('button', { name: 'Додати ще автора' }))
+  await user.type(lastOf(screen.getAllByLabelText('Імʼя')), 'Новий Автор')
+  // Pasted in one go: the field trims on every keystroke (known, separate issue).
+  await user.click(lastOf(screen.getAllByLabelText('Латиницею (необовʼязково)')))
+  await user.paste('Novyi Avtor')
+
+  mockApiRequest.mockImplementationOnce((_path: string, options?: { body?: unknown }) => {
+    expect(options?.body).toMatchObject({
+      authors: [
+        { authorId: 'author-1', role: 'AUTHOR' },
+        { name: 'Новий Автор', nameLatin: 'Novyi Avtor', role: 'AUTHOR' },
+      ],
+    })
+
+    return Promise.resolve<WorkPatchResponse>({
+      work: work('Кобзар', 2),
+      authors: [...authors, created],
+    })
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+  await waitFor(() => {
+    expect(screen.getByText('Збережено.')).toBeInTheDocument()
+  })
+
+  await openEditor(user, 'Назва твору')
+  await user.type(screen.getByLabelText('Назва твору'), ' (виправлено)')
+
+  mockApiRequest.mockImplementationOnce((_path: string, options?: { body?: unknown }) => {
+    const body = options?.body as { authors?: unknown; expectedRevision?: number }
+
+    // The author now exists server-side — resending its name would create a duplicate.
+    expect(body.authors).toBeUndefined()
+    expect(body.expectedRevision).toBe(2)
+
+    return Promise.resolve<WorkPatchResponse>({
+      work: work('Кобзар (виправлено)', 3),
+      authors: [...authors, created],
     })
   })
 
@@ -581,6 +682,7 @@ it('пошук автора: мережева помилка показує erro
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Автори')
   await user.click(screen.getByRole('button', { name: 'Додати ще автора' }))
 
   const nameInputs = screen.getAllByLabelText('Імʼя')
@@ -634,6 +736,7 @@ it('вибір наявного автора з пошуку: PATCH несе aut
   expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Автори')
   await user.click(screen.getByRole('button', { name: 'Додати ще автора' }))
 
   const nameInputs = screen.getAllByLabelText('Імʼя')
@@ -706,6 +809,8 @@ it('pending PATCH реально змінює заголовок ще до ві�
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+  await openEditor(user, 'Назва твору')
+
   const titleInput = screen.getByLabelText('Назва твору')
 
   await user.clear(titleInput)
@@ -751,6 +856,8 @@ it('A з підтвердженим overlay → перехід на B з МЕН�
   expect(await screen.findByRole('heading', { name: 'Книга А' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+
+  await openEditor(user, 'Назва твору')
 
   const titleInput = screen.getByLabelText('Назва твору')
 
@@ -800,6 +907,8 @@ it('перехід A → B під час PATCH для A: пізня відпов
   expect(await screen.findByRole('heading', { name: 'Книга А' })).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+
+  await openEditor(user, 'Назва твору')
 
   const titleInput = screen.getByLabelText('Назва твору')
 
@@ -855,6 +964,8 @@ it(
 
     await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
 
+    await openEditor(user, 'Назва твору')
+
     const titleInput = screen.getByLabelText('Назва твору')
 
     await user.clear(titleInput)
@@ -881,6 +992,8 @@ it(
 
     // Reopened form — the SECOND save must not have been silently pinned
     // back to revision 2 by the stale `confirmed` from the first save.
+    await openEditor(user, 'Назва твору')
+
     const reopenedTitleInput = screen.getByLabelText('Назва твору')
 
     await user.clear(reopenedTitleInput)
@@ -906,3 +1019,55 @@ it(
     })
   },
 )
+
+it('BS-76: редактор, відкритий під час pending PATCH, зберігає новіший ввід після відповіді', async () => {
+  const user = userEvent.setup()
+
+  mockApiRequestWithRedirect
+    .mockResolvedValueOnce({ data: detail('Кобзар'), redirected: false })
+    .mockResolvedValueOnce({ data: detail('Перша правка', 2), redirected: false })
+
+  render(withQueryClient(<WorkPage />))
+
+  expect(await screen.findByRole('heading', { name: 'Кобзар' })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Виправити метадані твору' }))
+  await openEditor(user, 'Назва твору')
+  await user.clear(screen.getByLabelText('Назва твору'))
+  await user.type(screen.getByLabelText('Назва твору'), 'Перша правка')
+
+  let resolvePatch: ((value: WorkPatchResponse) => void) | undefined
+
+  mockApiRequest.mockImplementationOnce(
+    () =>
+      new Promise<WorkPatchResponse>((resolve) => {
+        resolvePatch = resolve
+      }),
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+  // While the PATCH is in flight the person keeps editing the same field.
+  await openEditor(user, 'Назва твору')
+  await user.clear(screen.getByLabelText('Назва твору'))
+  await user.type(screen.getByLabelText('Назва твору'), 'Друга правка')
+
+  resolvePatch?.({ work: work('Перша правка', 2), authors })
+
+  await waitFor(() => {
+    expect(screen.getByText('Збережено.')).toBeInTheDocument()
+  })
+  expect(screen.getByLabelText('Назва твору')).toHaveValue('Друга правка')
+
+  mockApiRequest.mockImplementationOnce((_path: string, options?: { body?: unknown }) => {
+    expect(options?.body).toMatchObject({ title: 'Друга правка', expectedRevision: 2 })
+
+    return Promise.resolve<WorkPatchResponse>({ work: work('Друга правка', 3), authors })
+  })
+
+  await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+  await waitFor(() => {
+    expect(screen.getByRole('heading', { name: 'Друга правка' })).toBeInTheDocument()
+  })
+})

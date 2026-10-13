@@ -7,8 +7,8 @@ import {
   type EditionPatchRequest,
   type Translation,
 } from '@bookswap/shared'
-import { useEffect, useRef } from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { useEffect, useRef, type BaseSyntheticEvent } from 'react'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
@@ -20,9 +20,16 @@ import {
   editionCorrectionFormSchema,
   type EditionCorrectionFormValues,
 } from '../model/edition-form'
+import {
+  EDITION_TEXT_KIND_LABELS,
+  editionFieldsDisplay,
+  translationLabel,
+} from '../model/field-display'
 import { nullableNumber, nullableText } from '../model/form-values'
 import type { CatalogCorrection } from '../model/use-catalog-correction'
+import { useInlineEditors } from '../model/use-inline-editors'
 import { ConflictNotice } from './ConflictNotice'
+import { InlineField, InlineSaveHint } from './InlineField'
 import { RefreshNotice } from './RefreshNotice'
 
 type EditionCorrectionFormProps = {
@@ -34,6 +41,19 @@ type EditionCorrectionFormProps = {
   reload: () => Promise<WorkReloadOutcome>
   onClose: () => void
 }
+
+/** Display order — the first invalid one gets focus after a failed general submit. */
+const EDITION_FIELDS = [
+  'translationId',
+  'textKind',
+  'lang',
+  'publisher',
+  'year',
+  'isbn13',
+  'pageCount',
+  'coverUrl',
+  'format',
+] as const
 
 function toFormValues(edition: Edition): EditionCorrectionFormValues {
   return {
@@ -62,16 +82,26 @@ export function EditionCorrectionForm({
   reload,
   onClose,
 }: EditionCorrectionFormProps) {
+  const form = useForm<EditionCorrectionFormValues>({
+    resolver: zodResolver(editionCorrectionFormSchema),
+    defaultValues: toFormValues(edition),
+    // `useInlineEditors.reveal` focuses the first invalid field instead.
+    shouldFocusError: false,
+  })
   const {
     control,
     register,
     handleSubmit,
     setValue,
     formState: { errors, isSubmitting, dirtyFields },
-  } = useForm<EditionCorrectionFormValues>({
-    resolver: zodResolver(editionCorrectionFormSchema),
-    defaultValues: toFormValues(edition),
-  })
+  } = form
+  const editors = useInlineEditors(form)
+  const [translationId, textKind, lang, publisher, year, isbn13, pageCount, coverUrl, format] =
+    useWatch({ control, name: [...EDITION_FIELDS] })
+  const display = editionFieldsDisplay(
+    { translationId, textKind, lang, publisher, year, isbn13, pageCount, coverUrl, format },
+    translations,
+  )
 
   // `correction.confirmed` outlives this form closing — a REOPENED form must
   // not re-apply a save from BEFORE it mounted. Seeded with whatever
@@ -115,15 +145,28 @@ export function EditionCorrectionForm({
     )
   }
 
+  // Open editors are part of the draft — see `WorkCorrectionForm`.
+  function submitDraft(event?: BaseSyntheticEvent): Promise<void> {
+    return handleSubmit(
+      (values) => {
+        editors.closeAll()
+        submit(values)
+      },
+      (fieldErrors) => {
+        editors.reveal(EDITION_FIELDS.filter((name) => fieldErrors[name] !== undefined))
+      },
+    )(event)
+  }
+
   function retryAfterConflict(): void {
     if (conflict === undefined) return
 
     setValue('expectedRevision', conflict.revision)
-    void handleSubmit(submit)()
+    void submitDraft()
   }
 
   return (
-    <form className="form" onSubmit={(event) => void handleSubmit(submit)(event)} noValidate>
+    <form className="form" onSubmit={(event) => void submitDraft(event)} noValidate>
       <p className="form__aside">
         Це спільні метадані каталогу — їх бачить кожен, хто відкриє цей твір.
       </p>
@@ -151,107 +194,153 @@ export function EditionCorrectionForm({
         />
       )}
 
-      <Controller
-        control={control}
+      <InlineField
         name="translationId"
-        render={({ field }) => (
-          <SelectField
-            id="correction-edition-translation"
-            label="Переклад"
-            value={field.value ?? ''}
-            onChange={(event) => {
-              field.onChange(event.target.value === '' ? null : event.target.value)
-            }}
-          >
-            <option value="">Без привʼязки до перекладу</option>
-            {translations.map((translation) => (
-              <option key={translation.id} value={translation.id}>
-                {translation.translator} ({translation.lang})
-              </option>
-            ))}
-          </SelectField>
-        )}
-      />
-      <Controller
-        control={control}
+        label="Переклад"
+        display={display.translationId}
+        editors={editors}
+      >
+        <Controller
+          control={control}
+          name="translationId"
+          render={({ field }) => (
+            <SelectField
+              id="correction-edition-translation"
+              label="Переклад"
+              value={field.value ?? ''}
+              onChange={(event) => {
+                field.onChange(event.target.value === '' ? null : event.target.value)
+              }}
+            >
+              <option value="">Без привʼязки до перекладу</option>
+              {translations.map((translation) => (
+                <option key={translation.id} value={translation.id}>
+                  {translationLabel(translation)}
+                </option>
+              ))}
+            </SelectField>
+          )}
+        />
+      </InlineField>
+      <InlineField
         name="textKind"
-        render={({ field }) => (
-          <SelectField
-            id="correction-edition-text-kind"
-            label="Що відомо про текст видання"
-            hint="Відсутність перекладу не означає, що це оригінал."
-            value={field.value}
-            onChange={(event) => {
-              field.onChange(event.target.value)
-            }}
-          >
-            <option value="UNKNOWN">Невідомо: оригінал чи переклад</option>
-            <option value="ORIGINAL">Оригінал</option>
-            <option value="TRANSLATION">Переклад</option>
-          </SelectField>
-        )}
-      />
-      <Controller
-        control={control}
-        name="lang"
-        render={({ field }) => (
-          <LanguageSelect
-            id="correction-edition-lang"
-            label="Мова видання"
-            hint="Мова цього видання не доводить мови оригіналу."
-            value={field.value ?? ''}
-            emptyLabel="Не вказано"
-            onChange={(value) => {
-              field.onChange(value === '' ? null : value)
-            }}
-          />
-        )}
-      />
-      <TextField
-        id="correction-edition-publisher"
+        label="Що відомо про текст видання"
+        display={display.textKind}
+        editors={editors}
+      >
+        <Controller
+          control={control}
+          name="textKind"
+          render={({ field }) => (
+            <SelectField
+              id="correction-edition-text-kind"
+              label="Що відомо про текст видання"
+              hint="Відсутність перекладу не означає, що це оригінал."
+              value={field.value}
+              onChange={(event) => {
+                field.onChange(event.target.value)
+              }}
+            >
+              <option value="UNKNOWN">{EDITION_TEXT_KIND_LABELS.UNKNOWN}</option>
+              <option value="ORIGINAL">{EDITION_TEXT_KIND_LABELS.ORIGINAL}</option>
+              <option value="TRANSLATION">{EDITION_TEXT_KIND_LABELS.TRANSLATION}</option>
+            </SelectField>
+          )}
+        />
+      </InlineField>
+      <InlineField name="lang" label="Мова видання" display={display.lang} editors={editors}>
+        <Controller
+          control={control}
+          name="lang"
+          render={({ field }) => (
+            <LanguageSelect
+              id="correction-edition-lang"
+              label="Мова видання"
+              hint="Мова цього видання не доводить мови оригіналу."
+              value={field.value ?? ''}
+              emptyLabel="Не вказано"
+              onChange={(value) => {
+                field.onChange(value === '' ? null : value)
+              }}
+            />
+          )}
+        />
+      </InlineField>
+      <InlineField
+        name="publisher"
         label="Видавництво"
-        error={errors.publisher?.message}
-        {...register('publisher', { setValueAs: nullableText })}
-      />
-      <TextField
-        id="correction-edition-year"
-        label="Рік видання"
-        type="number"
-        inputMode="numeric"
-        error={errors.year?.message}
-        {...register('year', { setValueAs: nullableNumber })}
-      />
-      <TextField
-        id="correction-edition-isbn"
+        display={display.publisher}
+        editors={editors}
+      >
+        <TextField
+          id="correction-edition-publisher"
+          label="Видавництво"
+          error={errors.publisher?.message}
+          {...register('publisher', { setValueAs: nullableText })}
+        />
+      </InlineField>
+      <InlineField name="year" label="Рік видання" display={display.year} editors={editors}>
+        <TextField
+          id="correction-edition-year"
+          label="Рік видання"
+          type="number"
+          inputMode="numeric"
+          error={errors.year?.message}
+          {...register('year', { setValueAs: nullableNumber })}
+        />
+      </InlineField>
+      <InlineField
+        name="isbn13"
         label="ISBN-13"
-        inputMode="numeric"
-        hint="Дефіси можна лишити. Контрольна сума перевіряється."
-        error={isbnTakenMessage ?? errors.isbn13?.message}
-        {...register('isbn13', { setValueAs: nullableText })}
-      />
-      <TextField
-        id="correction-edition-pages"
-        label="Сторінок"
-        type="number"
-        inputMode="numeric"
-        error={errors.pageCount?.message}
-        {...register('pageCount', { setValueAs: nullableNumber })}
-      />
-      <TextField
-        id="correction-edition-cover"
+        display={display.isbn13}
+        editors={editors}
+        error={isbnTakenMessage}
+      >
+        <TextField
+          id="correction-edition-isbn"
+          label="ISBN-13"
+          inputMode="numeric"
+          hint="Дефіси можна лишити. Контрольна сума перевіряється."
+          error={isbnTakenMessage ?? errors.isbn13?.message}
+          {...register('isbn13', { setValueAs: nullableText })}
+        />
+      </InlineField>
+      <InlineField name="pageCount" label="Сторінок" display={display.pageCount} editors={editors}>
+        <TextField
+          id="correction-edition-pages"
+          label="Сторінок"
+          type="number"
+          inputMode="numeric"
+          error={errors.pageCount?.message}
+          {...register('pageCount', { setValueAs: nullableNumber })}
+        />
+      </InlineField>
+      <InlineField
+        name="coverUrl"
         label="Обкладинка (посилання)"
-        type="url"
-        error={errors.coverUrl?.message}
-        {...register('coverUrl', { setValueAs: nullableText })}
-      />
-      <SelectField id="correction-edition-format" label="Палітурка" {...register('format')}>
-        {edition.format === null && <option value="">Не вказано</option>}
-        {EDITION_FORMAT.map((value) => (
-          <option key={value} value={value}>
-            {EDITION_FORMAT_LABELS[value]}
-          </option>
-        ))}
-      </SelectField>
+        display={display.coverUrl}
+        editors={editors}
+      >
+        <TextField
+          id="correction-edition-cover"
+          label="Обкладинка (посилання)"
+          type="url"
+          error={errors.coverUrl?.message}
+          {...register('coverUrl', { setValueAs: nullableText })}
+        />
+      </InlineField>
+      <InlineField name="format" label="Палітурка" display={display.format} editors={editors}>
+        <SelectField id="correction-edition-format" label="Палітурка" {...register('format')}>
+          {edition.format === null && <option value="">Не вказано</option>}
+          {EDITION_FORMAT.map((value) => (
+            <option key={value} value={value}>
+              {EDITION_FORMAT_LABELS[value]}
+            </option>
+          ))}
+        </SelectField>
+      </InlineField>
+
+      <InlineSaveHint />
 
       <div className="person__actions">
         <button type="submit" disabled={isSubmitting || correction.isSaving}>
