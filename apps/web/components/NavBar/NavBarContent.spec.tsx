@@ -27,11 +27,6 @@ jest.mock('@/components/NavBar/NavBarNotifications', () => ({
   NavBarNotifications: () => <button type="button">Notifications</button>,
 }))
 
-// Covered on its own, header placement included, in features/user-search.
-jest.mock('@/features/user-search/index.client', () => ({
-  UserSearch: () => <div role="search" aria-label="People search" />,
-}))
-
 const user: Me = {
   id: 'user-1',
   email: 'reader@example.com',
@@ -48,6 +43,19 @@ function renderState(state: SessionState) {
   return render(<NavContent state={state} />)
 }
 
+const SEARCH_NAME = /пошук|знайти|шукати|search/i
+
+/** The header offers no way into a search: no landmark, field, results or control for one. */
+function expectNoSearch() {
+  expect(screen.queryByRole('search')).not.toBeInTheDocument()
+  expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: SEARCH_NAME })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: SEARCH_NAME })).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: SEARCH_NAME })).not.toBeInTheDocument()
+  expect(screen.queryByRole('menuitem', { name: SEARCH_NAME })).not.toBeInTheDocument()
+}
+
 beforeEach(() => {
   mockPathname = '/'
 })
@@ -59,6 +67,7 @@ describe('NavContent', () => {
     expect(container.querySelector('[aria-hidden="true"]')).toHaveClass('animate-pulse')
     expect(screen.getByRole('button', { name: 'Theme' })).toBeInTheDocument()
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expectNoSearch()
   })
 
   it.each<SessionState>([{ status: 'guest' }, { status: 'error', message: 'Session unavailable' }])(
@@ -73,6 +82,7 @@ describe('NavContent', () => {
       expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute('href', '/login')
       expect(screen.queryByRole('link', { name: 'Вішлист' })).not.toBeInTheDocument()
       expect(screen.queryByTestId('profile-menu')).not.toBeInTheDocument()
+      expectNoSearch()
     },
   )
 
@@ -93,6 +103,16 @@ describe('NavContent', () => {
     expect(screen.queryByRole('button', { name: 'Theme' })).not.toBeInTheDocument()
     expect(screen.getByTestId('profile-menu')).toHaveTextContent('Reader One')
     expect(screen.queryByRole('link', { name: 'Увійти' })).not.toBeInTheDocument()
+    expectNoSearch()
+  })
+
+  it.each([
+    ['guestLoans=true', { guestLoans: true }],
+    ['guestLoans=false', { guestLoans: false }],
+  ])('offers no people search to a signed-in person (%s)', (_name, features) => {
+    renderState({ status: 'authenticated', user, features })
+
+    expectNoSearch()
   })
   it.each([
     ['guestLoans=true', { guestLoans: true }, true],
@@ -127,6 +147,7 @@ describe('NavContent', () => {
       expect(
         within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Моя бібліотека' }),
       ).toHaveAttribute('href', '/library')
+      expectNoSearch()
     },
   )
 

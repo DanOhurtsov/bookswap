@@ -40,15 +40,14 @@ export interface UserSearch {
 }
 
 /**
- * Search among all users while typing — the logic the header panel and the search page share.
- * The text is searched `USER_SEARCH_DELAY_MS` after the last change; «Знайти» and Enter run it at
- * once and take the pause's place.
+ * Search among all users while typing — the logic behind the search page. The text is searched
+ * `USER_SEARCH_DELAY_MS` after the last change; «Знайти» and Enter run it at once and take the
+ * pause's place.
  *
  * The pending timer and the active search are only ever changed together, here — so whenever the
  * text is searchable and no search is active, a timer is pending. Each search is its own query
  * key, scoped to the viewer: a late answer or error for an earlier text lands under that text's
- * key and never replaces what the current one shows. Two mounted searches for the same text share
- * one cache entry and one request.
+ * key and never replaces what the current one shows.
  */
 export function useUserSearch(viewerId: string, options: UserSearchOptions = {}): UserSearch {
   const queryClient = useQueryClient()
@@ -68,7 +67,7 @@ export function useUserSearch(viewerId: string, options: UserSearchOptions = {})
   const query = useQuery({
     queryKey: [...userSearchKeyOf(viewerId), active],
     queryFn: active === undefined ? skipToken : ({ signal }) => searchUsers(active, signal),
-    // A fresh answer is shared, not re-asked: «Показати всі» opens the page from this cache.
+    // A fresh answer is reused, not re-asked: the same text again, Back or Forward.
     staleTime: USER_SEARCH_STALE_MS,
     // Searches run when the person types or acts — not on window focus or reconnect.
     refetchOnWindowFocus: false,
@@ -77,9 +76,9 @@ export function useUserSearch(viewerId: string, options: UserSearchOptions = {})
     retry: false,
   })
 
-  // A friendship changed anywhere (the friends page, a notification, an action in this or another
-  // mounted search): the relations shown here are out of date. A refresh already in flight is not
-  // restarted, so one action is one refetch however many searches listen.
+  // A friendship changed anywhere (the friends page, a notification, an action in this search):
+  // the relations shown here are out of date. A refresh already in flight is not restarted, so one
+  // action is one refetch, even though its own invalidation and its announcement both land here.
   const refreshRelations = useCallback(
     () =>
       queryClient.invalidateQueries(

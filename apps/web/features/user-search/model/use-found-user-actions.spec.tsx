@@ -24,7 +24,7 @@ afterEach(() => {
 })
 
 describe('useFoundUserActions', () => {
-  it('runs an action once even when asked twice before any re-render, from two searches', async () => {
+  it('runs an action once even when asked twice before any re-render, from two instances', async () => {
     const server = createServer()
 
     server.flags.holdActions = true
@@ -33,25 +33,25 @@ describe('useFoundUserActions', () => {
     const client = createTestQueryClient()
     const wrapper = ({ children }: { children: ReactNode }) =>
       withQueryClient(<>{children}</>, client)
-    const header = renderHook(() => useFoundUserActions('me', [], 'Олена'), { wrapper })
-    const page = renderHook(() => useFoundUserActions('me', [], 'Олена'), { wrapper })
+    const first = renderHook(() => useFoundUserActions('me', [], 'Олена'), { wrapper })
+    const second = renderHook(() => useFoundUserActions('me', [], 'Олена'), { wrapper })
 
     act(() => {
-      header.result.current.run({ kind: 'request', userId: 'olena' })
-      header.result.current.run({ kind: 'request', userId: 'olena' })
-      page.result.current.run({ kind: 'request', userId: 'olena' })
+      first.result.current.run({ kind: 'request', userId: 'olena' })
+      first.result.current.run({ kind: 'request', userId: 'olena' })
+      second.result.current.run({ kind: 'request', userId: 'olena' })
     })
     await advance(0)
 
     expect(requestsOf(apiRequest, '/friends/requests', 'POST')).toHaveLength(1)
-    expect(page.result.current.pending).toEqual([{ kind: 'request', userId: 'olena' }])
+    expect(second.result.current.pending).toEqual([{ kind: 'request', userId: 'olena' }])
 
     // Hiding an error never ends a pending action.
-    act(() => header.result.current.dismissFailure())
-    expect(header.result.current.pending).toHaveLength(1)
+    act(() => first.result.current.dismissFailure())
+    expect(first.result.current.pending).toHaveLength(1)
 
     server.heldActions[0]?.answer()
     await advance(0)
-    expect(header.result.current.pending).toEqual([])
+    expect(first.result.current.pending).toEqual([])
   })
 })
