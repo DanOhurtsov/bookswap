@@ -1,6 +1,10 @@
 import { HttpStatus, Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { API_ERROR_CODES } from '@bookswap/shared'
+import {
+  API_ERROR_CODES,
+  EMAIL_DOMAIN_BLOCKED_MESSAGE,
+  isRegistrationEmailDomainBlocked,
+} from '@bookswap/shared'
 import type { ConfirmPasswordResetRequest, LoginRequest, RegisterRequest } from '@bookswap/shared'
 import { AnalyticsService } from '../analytics/analytics.service'
 import { ApiException } from '../common/api.exception'
@@ -375,6 +379,11 @@ export class AuthService implements OnModuleDestroy {
     // БД. Усе, що нижче, виконується під ним до кінця навіть якщо SIGTERM
     // прилетить наступної мілісекунди.
     const authenticated = await this.runWorkflow('реєстрація', async (workflow) => {
+      // BS-129: checked here and not only in the DTO or the form, so that no caller
+      // can create an account on a blocked domain. It comes before the password hash
+      // and every write: a refusal leaves no User, session, token, email or event.
+      if (isRegistrationEmailDomainBlocked(request.email)) throw emailDomainBlocked()
+
       const passwordHash = await this.passwords.hash(request.password)
 
       const existing = await this.prisma.user.findUnique({
@@ -642,6 +651,14 @@ function emailTaken(): ApiException {
     API_ERROR_CODES.EMAIL_TAKEN,
     'Акаунт із такою адресою вже існує',
     HttpStatus.CONFLICT,
+  )
+}
+
+function emailDomainBlocked(): ApiException {
+  return new ApiException(
+    API_ERROR_CODES.EMAIL_DOMAIN_BLOCKED,
+    EMAIL_DOMAIN_BLOCKED_MESSAGE,
+    HttpStatus.BAD_REQUEST,
   )
 }
 

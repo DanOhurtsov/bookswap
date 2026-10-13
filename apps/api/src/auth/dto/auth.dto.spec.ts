@@ -75,6 +75,21 @@ describe('RegisterDto ↔ registerRequestSchema', () => {
     expect(dto.displayName).toBe(parsed.displayName)
   })
 
+  /**
+   * BS-129: the blocked-domain policy is not syntax. Both validators accept the
+   * address; the refusal belongs to `AuthService.register()`, so login and
+   * password reset keep accepting the same address for an existing account.
+   */
+  it('однаково пропускають синтаксично коректну адресу на заблокованому домені', () => {
+    expectAgreement(RegisterDto, registerRequestSchema, [
+      { name: 'адреса на .ru', payload: { ...base, email: 'marta@example.ru' }, valid: true },
+      { name: 'піддомен .su', payload: { ...base, email: 'marta@mail.example.su' }, valid: true },
+    ])
+    expectAgreement(LoginDto, loginRequestSchema, [
+      { name: 'вхід на .ru', payload: { email: 'marta@example.ru', password: 'x' }, valid: true },
+    ])
+  })
+
   it('не чіпає пароль при нормалізації — пробіли в ньому значущі', () => {
     const dto = plainToInstance(RegisterDto, { ...base, password: '  parol z probilamy  ' })
 
