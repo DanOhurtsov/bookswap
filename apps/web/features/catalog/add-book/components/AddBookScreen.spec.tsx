@@ -16,9 +16,9 @@ import { withQueryClient } from '@/app/lib/test-query-client'
 import { AddBookScreen } from './AddBookScreen'
 
 /**
- * Екран додавання (docs/plan/fast-book-add.md, §2.1–2.3, QA1, QA6, QA8, QA9): одна картка = одне видання,
- * кнопка «Додати до бібліотеки» → «Додаю…» → «✓ У моїй бібліотеці», користувач лишається в результатах,
- * повтор після невизначеного результату йде тією самою операцією.
+ * Екран додавання (docs/plan/fast-book-add.md, §2.1–2.3, QA1, QA6, QA8, QA9; BS-114): одна картка = одне
+ * видання; вибір картки відкриває діалог, у якому «Додати до бібліотеки» → «Додаю…» → «✓ У моїй бібліотеці»,
+ * користувач лишається в результатах, повтор після невизначеного результату йде тією самою операцією.
  *
  * jsdom підтверджує стани, обробники клавіатури, Escape і керування фокусом; реальну адаптивну верстку,
  * прокрутку, touch і браузерний фокус він НЕ підтверджує — вони позначені NOT RUN у runbook.
@@ -27,7 +27,7 @@ import { AddBookScreen } from './AddBookScreen'
 jest.mock('@/app/lib/api', () => {
   const actual = jest.requireActual<typeof import('@/app/lib/api')>('@/app/lib/api')
 
-  return { ...actual, apiRequest: jest.fn() }
+  return { ...actual, apiRequest: jest.fn(), apiRequestWithRedirect: jest.fn() }
 })
 
 jest.mock('../lib/load-barcode-scanner-panel', () => ({
@@ -94,7 +94,8 @@ jest.mock('next/navigation', () => {
   }
 })
 
-const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
+const { apiRequest: mockApiRequest, apiRequestWithRedirect: mockApiRequestWithRedirect } =
+  jest.requireMock<{ apiRequest: jest.Mock; apiRequestWithRedirect: jest.Mock }>('@/app/lib/api')
 
 beforeAll(() => {
   // jsdom не має `showModal`; підтвердження закриття панелі — нативний `<dialog>`.
@@ -198,6 +199,28 @@ function cardAt(index: number): HTMLElement {
   return card
 }
 
+/** BS-114: the card's one button chooses the result; its dialog holds the details and the actions. */
+async function openCard(user: User, index = 0): Promise<HTMLElement> {
+  const choose = await waitFor(() => within(cardAt(index)).getByRole('button'))
+
+  await user.click(choose)
+
+  return screen.findByRole('dialog')
+}
+
+function linkHref(name: string): string {
+  return screen.getByRole('link', { name }).getAttribute('href') ?? ''
+}
+
+/** Opens the card and presses «Додати до бібліотеки» in its dialog. */
+async function addFromCard(user: User, index = 0): Promise<HTMLElement> {
+  const dialog = await openCard(user, index)
+
+  await user.click(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' }))
+
+  return dialog
+}
+
 let items: AddSearchItem[]
 /** Додаткові поля відповіді повного пошуку (наприклад, `spellingSuggestion`). */
 let fullExtra: Partial<AddSearchResponse>
@@ -294,20 +317,21 @@ describe('результати: одна картка — одне виданн�
     expect(screen.getByText(/Наука/)).toBeInTheDocument()
     expect(screen.getByText(/2019/)).toBeInTheDocument()
     expect(screen.getByText(/українська/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    // The card is chosen by its title; the actions are in its dialog, which nothing opens by itself.
+    expect(screen.getByRole('button', { name: 'Кобзар' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('ISBN і джерело — у деталях; невідомі поля не вигадуються', async () => {
+  it('ISBN і джерело — у діалозі; невідомі поля не вигадуються', async () => {
     items = [editionItem('e-1', { isbn13: null })]
     renderScreen()
 
     await screen.findByText('Кобзар')
 
-    const card = cardAt(0)
+    const dialog = await openCard(userEvent.setup())
 
-    expect(within(card).getByText('Деталі видання')).toBeInTheDocument()
-    expect(within(card).queryByText(/ISBN/)).not.toBeInTheDocument()
-    expect(within(card).getByText('Джерело: каталог BookSwap')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/ISBN/)).not.toBeInTheDocument()
+    expect(within(dialog).getByText('Джерело: каталог BookSwap')).toBeInTheDocument()
   })
 
   it('твір без видання — не конкретна книжка: кнопки додавання немає', async () => {
@@ -324,12 +348,19 @@ describe('результати: одна картка — одне виданн�
 
     await screen.findByText('Абстрактний твір')
 
-    expect(screen.queryByRole('button', { name: /Додати до бібліотеки/ })).not.toBeInTheDocument()
     expect(screen.getByText('Для цього твору ще немає конкретного видання.')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Відкрити твір' })).toHaveAttribute(
-      'href',
-      '/works/w-9',
-    )
+
+    const dialog = await openCard(userEvent.setup())
+
+    // Nothing to add — only «Уточнити дані», no edition or ISBN taken at random.
+    expect(within(dialog).queryByRole('button', { name: /Додати/ })).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/Це запис про твір, а не про конкретне видання/)).toBeVisible()
+    expect(
+      within(dialog)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['Уточнити дані'])
+    expect(quickAddCalls()).toHaveLength(0)
   })
 
   it('порожня відповідь на першій сторінці — повідомлення, а не помилка', async () => {
@@ -363,33 +394,40 @@ describe('одне натискання (QA1)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
 
-    expect(await screen.findByRole('button', { name: 'Додаю…' })).toHaveAttribute(
+    const dialog = await addFromCard(user)
+
+    expect(await within(dialog).findByRole('button', { name: 'Додаю…' })).toHaveAttribute(
       'aria-disabled',
       'true',
     )
+    expect(within(cardAt(0)).getByText('Додаю…')).toBeInTheDocument()
     expect(screen.queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
 
     await act(async () => {
       finish?.()
     })
 
-    expect(await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
-
-    // Після підтвердженого збереження — на сторінку бібліотеки, один раз і без зміни адреси пошуку.
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/library')
+    // BS-114: the dialog stays open with the confirmation, and the card shows the new state.
+    expect(
+      await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' }),
+    ).toHaveAttribute('aria-disabled', 'true')
+    expect(within(dialog).getByRole('status')).toHaveTextContent(
+      'Книжку додано до вашої бібліотеки.',
+    )
+    expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBe(dialog)
+    // No transition, no change to the search address.
+    expect(push).not.toHaveBeenCalled()
     expect(replace).not.toHaveBeenCalled()
-    expect(screen.getByText('Кобзар')).toBeInTheDocument()
   })
 
   it('надсилає одну операцію з operationId, видом цілі та способом додавання', async () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await addFromCard(user)
+    await screen.findAllByText('✓ У моїй бібліотеці')
 
     const [call, ...rest] = quickAddCalls()
 
@@ -406,10 +444,12 @@ describe('одне натискання (QA1)', () => {
 
     renderScreen()
 
-    const button = await screen.findByRole('button', { name: 'Додати до бібліотеки' })
+    const dialog = await openCard(user)
 
-    await user.dblClick(button)
-    await screen.findByText('✓ У моїй бібліотеці')
+    await user.dblClick(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+    // Pressing the same button again after the success adds nothing either.
+    await user.click(within(dialog).getByRole('button', { name: '✓ У моїй бібліотеці' }))
 
     expect(quickAddCalls()).toHaveLength(1)
   })
@@ -421,8 +461,9 @@ describe('одне натискання (QA1)', () => {
 
     renderScreen()
     await user.click(await screen.findByRole('button', { name: 'Simulate scan' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await screen.findByText('Кобзар')
+    await addFromCard(user)
+    await screen.findAllByText('✓ У моїй бібліотеці')
 
     expect(quickAddCalls()[0]?.entryMethod).toBe('BARCODE')
   })
@@ -434,18 +475,26 @@ describe('одне натискання (QA1)', () => {
 
     renderScreen()
 
-    expect(await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Додати до бібліотеки' })).not.toBeInTheDocument()
+    expect(await screen.findByText('✓ У моїй бібліотеці')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Додати ще один примірник' }))
+    const dialog = await openCard(user)
+
+    expect(within(dialog).getByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Додати до бібліотеки' })).toBeNull()
+    // Refining an owned edition would silently add a second copy: not offered.
+    expect(within(dialog).queryByRole('link', { name: 'Уточнити дані' })).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Додати ще один примірник' }))
     await waitFor(() => {
       expect(quickAddCalls()).toHaveLength(1)
     })
+    await within(dialog).findByRole('status')
     await waitFor(() => {
-      expect(push).toHaveBeenCalledWith('/library')
+      expect(within(dialog).getByRole('status')).toHaveTextContent('Книжку додано')
     })
+    expect(push).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: 'Додати ще один примірник' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Додати ще один примірник' }))
     await waitFor(() => {
       expect(quickAddCalls()).toHaveLength(2)
     })
@@ -464,22 +513,27 @@ describe('одне натискання (QA1)', () => {
 
     await screen.findAllByText('Кобзар')
 
-    const owned = cardAt(0)
-    const other = cardAt(1)
+    expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    expect(within(cardAt(1)).queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
 
-    expect(within(owned).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
-    expect(within(other).getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    const dialog = await openCard(userEvent.setup(), 1)
+
+    expect(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
   })
 
   it('архівний примірник — окремий стан із переходом до відновлення; додати можна й новий', async () => {
     items = [editionItem('e-1', { ownership: { activeCount: 0, archivedCount: 1 } })]
     renderScreen()
 
-    expect(await screen.findByRole('link', { name: 'Відновити з архіву' })).toHaveAttribute(
+    expect(await screen.findByText('Є у вашому архіві')).toBeInTheDocument()
+
+    const dialog = await openCard(userEvent.setup())
+
+    expect(within(dialog).getByRole('link', { name: 'Відновити з архіву' })).toHaveAttribute(
       'href',
       '/library?view=archive',
     )
-    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
     expect(screen.queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
   })
 })
@@ -499,13 +553,18 @@ describe('повтор, відмова й невизначений резуль�
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
 
-    expect(await screen.findByText(/Не вдалося підтвердити додавання/)).toBeInTheDocument()
+    const dialog = await addFromCard(user)
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      /Не вдалося підтвердити додавання/,
+    )
     expect(screen.queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
+    // «Уточнити дані» would start a different operation: not while this one is unresolved.
+    expect(within(dialog).queryByRole('link', { name: 'Уточнити дані' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Перевірити ще раз' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await user.click(within(dialog).getByRole('button', { name: 'Перевірити ще раз' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     const [first, second] = quickAddCalls()
 
@@ -529,12 +588,16 @@ describe('повтор, відмова й невизначений резуль�
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
 
-    expect(await screen.findByText('Видання не знайдено')).toBeInTheDocument()
+    const dialog = await addFromCard(user)
 
-    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    // The dialog stays open with an accessible message and the action to try again.
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Видання не знайдено')
+    expect(within(cardAt(0)).getByText('Не вдалося додати')).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     const [first, second] = quickAddCalls()
 
@@ -547,7 +610,7 @@ describe('повтор, відмова й невизначений резуль�
     const user = userEvent.setup()
     const first = renderScreen()
 
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await addFromCard(user)
     await screen.findByText(/Не вдалося підтвердити додавання/)
 
     const interrupted = quickAddCalls()[0]
@@ -556,9 +619,11 @@ describe('повтор, відмова й невизначений резуль�
     quickAddHandler = (body) => Promise.resolve(addedResponse(body))
     renderScreen()
 
+    // Started in the search dialog: the confirmed result shows on its card, nobody is carried away.
     await waitFor(() => {
-      expect(push).toHaveBeenCalledWith('/library')
+      expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
     })
+    expect(push).not.toHaveBeenCalled()
     expect(quickAddCalls()).toHaveLength(2)
     expect(quickAddCalls()[1]).toEqual(interrupted)
     expect(window.sessionStorage.length).toBe(0)
@@ -613,12 +678,16 @@ describe('зовнішня половина: перше додавання (QA2,
 
     const card = cardAt(0)
 
-    expect(within(card).getByText('Джерело: Google Books')).toBeInTheDocument()
     expect(within(card).getByText(/Видавець/)).toBeInTheDocument()
     expect(within(card).getByText(/українська/)).toBeInTheDocument()
 
-    await user.click(within(card).getByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    const dialog = await openCard(user)
+
+    // The source's attribution stays with its data.
+    expect(within(dialog).getByText('Джерело: Google Books')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     const [call, ...rest] = quickAddCalls()
 
@@ -640,8 +709,12 @@ describe('зовнішня половина: перше додавання (QA2,
     renderScreen()
 
     expect(await screen.findByText('Лише твір')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Додати до бібліотеки/ })).not.toBeInTheDocument()
-    expect(screen.getByText(/Запис про твір, а не про конкретне видання/)).toBeInTheDocument()
+    expect(screen.getByText('Запис про твір, а не про конкретне видання.')).toBeInTheDocument()
+
+    const dialog = await openCard(userEvent.setup())
+
+    expect(within(dialog).queryByRole('button', { name: /Додати/ })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
   })
 
   it('видання без ISBN і без ідентифікатора Google Books не можна додати як конкретне', async () => {
@@ -660,7 +733,12 @@ describe('зовнішня половина: перше додавання (QA2,
     renderScreen()
 
     expect(await screen.findByText('Без ISBN')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Додати до бібліотеки/ })).not.toBeInTheDocument()
+
+    const dialog = await openCard(userEvent.setup())
+
+    expect(within(dialog).queryByRole('button', { name: /Додати/ })).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/Джерело не дало ідентифікатора/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
   })
 
   it('наше видання серед зовнішніх результатів — локальна картка з власним станом, без мережі джерела', async () => {
@@ -672,10 +750,10 @@ describe('зовнішня половина: перше додавання (QA2,
 
     await screen.findByText('Зовнішня vol-2')
 
-    expect(within(cardAt(0)).getByText('Джерело: каталог BookSwap')).toBeInTheDocument()
     expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    expect(within(cardAt(1)).queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
     expect(
-      within(cardAt(1)).getByRole('button', { name: 'Додати до бібліотеки' }),
+      within(await openCard(userEvent.setup())).getByText('Джерело: каталог BookSwap'),
     ).toBeInTheDocument()
   })
 
@@ -696,19 +774,29 @@ describe('зовнішня половина: перше додавання (QA2,
 
     renderScreen()
     await screen.findByText('Зовнішня vol-same')
-    await user.click(within(cardAt(0)).getByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findAllByRole('button', { name: 'Додаю…' })
+    await addFromCard(user, 0)
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    expect(within(cardAt(0)).getByText('Додаю…')).toBeInTheDocument()
+    expect(within(cardAt(1)).getByText('Додаю…')).toBeInTheDocument()
 
     // Друга картка того самого видання не може запустити другої операції.
-    await user.click(within(cardAt(1)).getByRole('button', { name: 'Додаю…' }))
+    const second = await openCard(user, 1)
+
+    await user.click(within(second).getByRole('button', { name: 'Додаю…' }))
     expect(quickAddCalls()).toHaveLength(1)
 
     await act(async () => {
       finish?.()
     })
     await waitFor(() => {
-      expect(screen.getAllByText('✓ У моїй бібліотеці')).toHaveLength(2)
+      expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
     })
+    expect(within(cardAt(1)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    expect(within(second).getByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
     expect(quickAddCalls()).toHaveLength(1)
   })
 
@@ -729,7 +817,7 @@ describe('зовнішня половина: перше додавання (QA2,
     renderScreen()
 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Кобзар' })).toBeInTheDocument()
     expect(screen.queryByText(/недоступна|не відповіла вчасно|неповним/)).not.toBeInTheDocument()
   })
 
@@ -779,9 +867,11 @@ describe('пошук за ISBN (сканер): один сценарій', () =>
     renderScreen()
     await screen.findByText('Знайдена за ISBN')
 
-    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    const dialog = await addFromCard(user)
 
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+
+    expect(within(dialog).getByText('Знайдено за ISBN у Google Books')).toBeInTheDocument()
     expect(quickAddCalls()).toHaveLength(1)
     expect(quickAddCalls()[0]).toMatchObject({ target: { kind: 'EXTERNAL_EDITION', isbn13: ISBN } })
   })
@@ -790,7 +880,8 @@ describe('пошук за ISBN (сканер): один сценарій', () =>
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Знайдена за ISBN')
+    await addFromCard(user)
     await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     await user.click(screen.getByRole('button', { name: 'Додати ще один примірник' }))
@@ -1645,7 +1736,7 @@ describe('ручна форма: поля текстом, редактор на 
   })
 })
 
-describe('твір без видання та запис про твір: «Уточнити видання»', () => {
+describe('твір без видання та запис про твір: «Уточнити дані»', () => {
   it('твір нашого каталогу веде в ручну форму з цим твором', async () => {
     searchParams = new URLSearchParams('q=абстрактний')
     items = [
@@ -1659,7 +1750,9 @@ describe('твір без видання та запис про твір: «Ут
     ]
     renderScreen()
 
-    expect(await screen.findByRole('link', { name: 'Уточнити видання' })).toHaveAttribute(
+    const dialog = await openCard(userEvent.setup())
+
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toHaveAttribute(
       'href',
       `/catalog/new?mode=manual&workId=w-9&${new URLSearchParams({ q: 'абстрактний' }).toString()}`,
     )
@@ -1684,9 +1777,9 @@ describe('твір без видання та запис про твір: «Ут
     ]
     renderScreen()
 
-    const href =
-      (await screen.findByRole('link', { name: 'Уточнити видання' })).getAttribute('href') ?? ''
-    const parameters = new URLSearchParams(href.split('?')[1])
+    const dialog = await openCard(userEvent.setup())
+    const href = within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href')
+    const parameters = new URLSearchParams(href?.split('?')[1])
 
     expect(parameters.get('mode')).toBe('manual')
     expect(parameters.get('title')).toBe('Запис про твір')
@@ -1765,7 +1858,7 @@ describe('«← До пошуку» повертає до того самого 
     expect(searchRequests()).toEqual([`/me/library/add-search?q=${ISBN}&page=1&pageSize=10`])
   })
 
-  it('«Уточнити видання» теж несе пошук туди й назад', async () => {
+  it('«Уточнити дані» теж несе пошук туди й назад', async () => {
     const work = { ...WORK, id: 'w-9', title: 'Абстрактний твір' }
     const searching = mockApiRequest.getMockImplementation()
 
@@ -1777,9 +1870,9 @@ describe('«← До пошуку» повертає до того самого 
         : searching?.(path, options),
     )
     renderScreen()
-    await screen.findByRole('link', { name: 'Уточнити видання' })
+    await openCard(userEvent.setup())
     act(() => {
-      navigate(hrefOf('Уточнити видання'))
+      navigate(hrefOf('Уточнити дані'))
     })
     await screen.findByRole('heading', { name: 'Додати книжку вручну' })
 
@@ -2196,18 +2289,18 @@ describe('автопошук під час введення', () => {
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Ко')
     await advance(350)
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Кобзар')
+    await addFromCard(user)
     await advance(0)
 
-    expect(await screen.findByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
+    expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
     expect(quickAddCalls()).toHaveLength(1)
     expect(quickAddCalls()[0]).toMatchObject({
       target: { kind: 'EXISTING_EDITION', editionId: 'e-1' },
     })
     expect(replace).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/library')
-    expect(screen.getByText('Кобзар')).toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
   })
 
   it('повтор після невизначеного результату йде тією самою операцією', async () => {
@@ -2226,11 +2319,12 @@ describe('автопошук під час введення', () => {
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Ко')
     await advance(350)
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Кобзар')
+    await addFromCard(user)
     expect(await screen.findByText(/Не вдалося підтвердити додавання/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Перевірити ще раз' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     const [first, second] = quickAddCalls()
 
@@ -2245,11 +2339,17 @@ describe('автопошук під час введення', () => {
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Ко')
     await advance(350)
-    await user.click(await screen.findByRole('button', { name: 'Додати ще один примірник' }))
+    await screen.findByText('Кобзар')
+
+    const dialog = await openCard(user)
+
+    await user.click(within(dialog).getByRole('button', { name: 'Додати ще один примірник' }))
     await waitFor(() => {
-      expect(push).toHaveBeenCalledWith('/library')
+      expect(quickAddCalls()).toHaveLength(1)
     })
-    await user.click(await screen.findByRole('button', { name: 'Додати ще один примірник' }))
+    await user.click(
+      await within(dialog).findByRole('button', { name: 'Додати ще один примірник' }),
+    )
 
     await waitFor(() => {
       expect(quickAddCalls()).toHaveLength(2)
@@ -2275,8 +2375,11 @@ describe('автопошук під час введення', () => {
     await advance(350)
 
     expect(await screen.findByText('Абстрактний твір')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Додати до бібліотеки/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Відкрити твір' })).toBeInTheDocument()
+
+    const dialog = await openCard(user)
+
+    expect(within(dialog).queryByRole('button', { name: /Додати/ })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
   })
 
   describe('підказка виправлення написання', () => {
@@ -2688,7 +2791,7 @@ describe('перемикання між пошуком і ручною форм�
 
     renderScreen()
     await user.click(await screen.findByRole('button', { name: 'Simulate scan' }))
-    await screen.findByRole('button', { name: 'Додати до бібліотеки' })
+    await screen.findByText('Кобзар')
 
     act(() => {
       navigate(`/catalog/new?mode=manual&isbn=${SCANNED}`)
@@ -2698,8 +2801,9 @@ describe('перемикання між пошуком і ручною форм�
     act(() => {
       navigate(`/catalog/new?q=${SCANNED}`)
     })
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await screen.findByText('Кобзар')
+    await addFromCard(user)
+    await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     expect(quickAddCalls()[0]?.entryMethod).toBe('BARCODE')
   })
@@ -2708,8 +2812,8 @@ describe('перемикання між пошуком і ручною форм�
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
-    await screen.findByText('✓ У моїй бібліотеці')
+    await addFromCard(user)
+    await screen.findByRole('button', { name: '✓ У моїй бібліотеці' })
 
     act(() => {
       navigate('/catalog/new?mode=manual&title=x')
@@ -2722,5 +2826,907 @@ describe('перемикання між пошуком і ручною форм�
 
     expect(await screen.findByText('✓ У моїй бібліотеці')).toBeInTheDocument()
     expect(quickAddCalls()).toHaveLength(1)
+  })
+})
+
+describe('діалог результату (BS-114)', () => {
+  const INPUT = 'Назва, автор або ISBN'
+
+  function searchRequests(): string[] {
+    return mockApiRequest.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith('/me/library/add-search'))
+  }
+
+  /** A quick-add answer the test releases itself: the request stays in flight until then. */
+  function deferQuickAdd(): () => Promise<void> {
+    const waiting: (() => void)[] = []
+
+    quickAddHandler = (body) =>
+      new Promise((resolve) => {
+        waiting.push(() => {
+          resolve(addedResponse(body))
+        })
+      })
+
+    return async () => {
+      await act(async () => {
+        waiting.shift()?.()
+      })
+    }
+  }
+
+  async function closeWith(user: User, how: 'button' | 'escape'): Promise<void> {
+    if (how === 'escape') await user.keyboard('{Escape}')
+    else
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Закрити' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  }
+
+  it('вибір відкриває діалог: назва — його доступне імʼя, автори й дані видання; фокус — на заголовку', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    const dialog = await openCard(user)
+
+    expect(dialog).toHaveAccessibleName('Кобзар')
+    // base-ui moves the initial focus once the popup is mounted.
+    await waitFor(() => {
+      expect(within(dialog).getByRole('heading', { name: 'Кобзар' })).toHaveFocus()
+    })
+    expect(within(dialog).getByText('Тарас Шевченко')).toBeInTheDocument()
+
+    for (const [label, value] of [
+      ['Мова', 'українська'],
+      ['Видавництво', 'Наука'],
+      ['Рік видання', '2019'],
+      ['ISBN', '9783161484100'],
+    ] as const) {
+      expect(within(dialog).getByText(label).nextElementSibling).toHaveTextContent(value)
+    }
+
+    expect(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Закрити' })).toBeInTheDocument()
+  })
+
+  it.each(['button', 'escape'] as const)(
+    'закриття (%s) нічого не створює, не чіпає адреси й пошуку та повертає фокус до картки',
+    async (how) => {
+      searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=20')
+
+      const user = userEvent.setup()
+
+      renderScreen()
+      await screen.findByText('Кобзар')
+
+      const asked = searchRequests()
+      const choose = within(cardAt(0)).getByRole('button', { name: 'Кобзар' })
+
+      await openCard(user)
+      await closeWith(user, how)
+
+      expect(choose).toHaveFocus()
+      expect(quickAddCalls()).toHaveLength(0)
+      expect(push).not.toHaveBeenCalled()
+      expect(replace).not.toHaveBeenCalled()
+      expect(searchParams.toString()).toBe(
+        'q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=20',
+      )
+      // The same list, not a new search: nothing was asked again, the field keeps its text.
+      expect(searchRequests()).toEqual(asked)
+      expect(cardAt(0)).toBeInTheDocument()
+      expect(screen.getByLabelText(INPUT)).toHaveValue('кобзар')
+    },
+  )
+
+  it('з клавіатури: Enter на картці відкриває, Tab і Shift+Tab ходять лише всередині діалогу', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    const choose = await screen.findByRole('button', { name: 'Кобзар' })
+
+    choose.focus()
+    await user.keyboard('{Enter}')
+
+    const dialog = await screen.findByRole('dialog')
+    const focusedName = (): string => document.activeElement?.textContent ?? ''
+
+    await waitFor(() => {
+      expect(within(dialog).getByRole('heading', { name: 'Кобзар' })).toHaveFocus()
+    })
+
+    // Wrapping around the ends is the focus guards' job — jsdom does not run them, the browser check does.
+    for (const name of ['Додати до бібліотеки', 'Уточнити дані', 'Закрити']) {
+      await user.tab()
+      expect(focusedName()).toBe(name)
+    }
+
+    for (const name of ['Уточнити дані', 'Додати до бібліотеки']) {
+      await user.tab({ shift: true })
+      expect(focusedName()).toBe(name)
+    }
+
+    // Nothing behind the modal dialog is reachable: the page under it is inert.
+    expect(choose.closest('[inert], [aria-hidden="true"]')).not.toBeNull()
+
+    await closeWith(user, 'escape')
+    expect(choose).toHaveFocus()
+  })
+
+  it('закриття під час запиту не скасовує операції; повторне відкриття показує її актуальний стан', async () => {
+    const finish = deferQuickAdd()
+    const user = userEvent.setup()
+
+    renderScreen()
+    await addFromCard(user)
+    await screen.findByRole('button', { name: 'Додаю…' })
+    // Refining now would be a second, different operation.
+    expect(screen.queryByRole('link', { name: 'Уточнити дані' })).not.toBeInTheDocument()
+
+    await closeWith(user, 'escape')
+    expect(within(cardAt(0)).getByText('Додаю…')).toBeInTheDocument()
+
+    let dialog = await openCard(user)
+
+    expect(within(dialog).getByRole('button', { name: 'Додаю…' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+
+    await closeWith(user, 'button')
+    // The late answer only updates the card: no dialog pops up, nobody is carried away.
+    await finish()
+    await waitFor(() => {
+      expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+
+    dialog = await openCard(user)
+    expect(within(dialog).getByRole('button', { name: '✓ У моїй бібліотеці' })).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(1)
+  })
+
+  it('пізня відповідь не змінює іншого вибраного результату', async () => {
+    items = [editionItem('e-1'), editionItem('e-2', { isbn13: '9780306406157', year: 2010 })]
+
+    const finish = deferQuickAdd()
+    const user = userEvent.setup()
+
+    renderScreen()
+    await addFromCard(user, 0)
+    await screen.findByRole('button', { name: 'Додаю…' })
+    await closeWith(user, 'escape')
+
+    const other = await openCard(user, 1)
+
+    expect(within(other).getByText('2010')).toBeInTheDocument()
+
+    await finish()
+    await waitFor(() => {
+      expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    })
+    expect(within(other).getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    expect(within(other).queryByRole('status')).toBeEmptyDOMElement()
+    expect(within(cardAt(1)).queryByText('✓ У моїй бібліотеці')).not.toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('після невизначеного результату закриття й повторне відкриття лишають лише повтор тієї самої операції', async () => {
+    let attempt = 0
+
+    quickAddHandler = (body) => {
+      attempt += 1
+
+      return attempt === 1
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : Promise.resolve(addedResponse(body))
+    }
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await addFromCard(user)
+    await screen.findByText(/Не вдалося підтвердити додавання/)
+    await closeWith(user, 'escape')
+    expect(within(cardAt(0)).getByText('Додавання не підтверджено')).toBeInTheDocument()
+
+    const dialog = await openCard(user)
+
+    expect(within(dialog).queryByRole('button', { name: 'Додати до бібліотеки' })).toBeNull()
+    expect(within(dialog).queryByRole('link', { name: 'Уточнити дані' })).toBeNull()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Перевірити ще раз' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+
+    const [first, second] = quickAddCalls()
+
+    expect(second).toEqual(first)
+  })
+
+  it('довгі назва, автори й ISBN не розпирають діалогу: текст переноситься', async () => {
+    const long = 'Дуже'.repeat(60)
+
+    items = [
+      editionItem('e-1', {
+        work: { ...WORK, title: long },
+        authors: [{ ...AUTHORS[0]!, name: 'Автор'.repeat(40) }],
+      }),
+    ]
+
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    const dialog = await openCard(user)
+
+    expect(within(dialog).getByRole('heading', { name: long })).toHaveClass('wrap-anywhere')
+    expect(within(dialog).getByText('Автор'.repeat(40))).toHaveClass('wrap-anywhere')
+    expect(within(dialog).getByText('9783161484100')).toHaveClass('wrap-anywhere')
+  })
+})
+
+describe('«Уточнити дані» наявного видання (BS-114)', () => {
+  const DETAIL = {
+    work: WORK,
+    authors: AUTHORS,
+    translations: [],
+    editions: [editionItem('e-1').edition],
+    viewerCapabilities: {
+      canEditWork: true,
+      editableEditionIds: ['e-1'],
+      editableTranslationIds: [],
+    },
+  }
+  let patchHandler: (path: string, body: unknown) => Promise<unknown>
+
+  beforeEach(() => {
+    const searching = mockApiRequest.getMockImplementation()
+
+    patchHandler = () => Promise.reject(new Error('PATCH не очікувався'))
+    mockApiRequest.mockImplementation(
+      (path: string, options?: { method?: string; body?: unknown }) => {
+        if (options?.method === 'PATCH') return patchHandler(path, options.body)
+
+        return searching?.(path, options)
+      },
+    )
+    // `useWork` reads the work with the redirect-aware request (a merged work answers 301).
+    mockApiRequestWithRedirect.mockImplementation((path: string) =>
+      path === '/works/work-1'
+        ? Promise.resolve({ data: DETAIL, redirected: false })
+        : Promise.reject(new Error(`Неочікуваний запит ${path}`)),
+    )
+  })
+
+  async function openRefine(user: User): Promise<void> {
+    const dialog = await openCard(user)
+    const href = within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href')
+
+    act(() => {
+      navigate(href ?? '')
+    })
+    await screen.findByRole('region', { name: 'Видання' })
+  }
+
+  /** Every request beyond the search: what the refine screen itself sent. */
+  function nonSearchCalls(): string[] {
+    return [...mockApiRequestWithRedirect.mock.calls, ...mockApiRequest.mock.calls]
+      .map(
+        ([path, options]) =>
+          `${(options as { method?: string } | undefined)?.method ?? 'GET'} ${String(path)}`,
+      )
+      .filter((call) => !call.startsWith('GET /me/library/add-search'))
+  }
+
+  it('посилання несе саме це видання, його твір і пошук для повернення', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    const dialog = await openCard(user)
+    const href = within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href')
+
+    expect(href).toBe(
+      `/catalog/new?mode=manual&editionId=e-1&workId=work-1&${new URLSearchParams({ q: 'кобзар' }).toString()}`,
+    )
+    // Opening the form saves nothing.
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  it('повна форма текстом; без виправлень додає лише примірник цього editionId і веде до бібліотеки', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openRefine(user)
+
+    const work = screen.getByRole('region', { name: 'Твір' })
+    const edition = screen.getByRole('region', { name: 'Видання' })
+
+    expect(within(work).getByText('Назва').nextElementSibling).toHaveTextContent('Кобзар')
+    expect(within(work).getByText('Автори').nextElementSibling).toHaveTextContent('Тарас Шевченко')
+    expect(within(edition).getByText('Видавництво').nextElementSibling).toHaveTextContent('Наука')
+    expect(within(edition).getByText('ISBN').nextElementSibling).toHaveTextContent('9783161484100')
+    expect(screen.getByText(/змінюють спільний каталог/)).toBeInTheDocument()
+    expect(linkHref('← До пошуку')).toBe(
+      `/catalog/new?${new URLSearchParams({ q: 'кобзар' }).toString()}`,
+    )
+    expect(quickAddCalls()).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/library')
+    })
+
+    expect(quickAddCalls()).toEqual([
+      expect.objectContaining({ target: { kind: 'EXISTING_EDITION', editionId: 'e-1' } }),
+    ])
+    // No work, author or edition is created: only the work is read, and the copy added.
+    expect(nonSearchCalls()).toEqual(['GET /works/work-1', 'POST /me/library/quick-add'])
+  })
+
+  it('стан додавання спільний із карткою пошуку: після додавання з діалогу форма показує «✓», нової операції немає', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    const dialog = await addFromCard(user)
+
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+    act(() => {
+      navigate('/catalog/new?mode=manual&editionId=e-1&workId=work-1&q=кобзар')
+    })
+    await screen.findByRole('region', { name: 'Видання' })
+
+    await user.click(screen.getByRole('button', { name: '✓ У моїй бібліотеці' }))
+    expect(quickAddCalls()).toHaveLength(1)
+  })
+
+  it('відкрите виправлення блокує додавання, щоб не загубити введене; закрите — знову дозволяє', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openRefine(user)
+    await user.click(screen.getByRole('button', { name: 'Виправити дані твору' }))
+
+    expect(screen.getByText(/Це спільні метадані каталогу/)).toBeInTheDocument()
+    expect(
+      screen.getByText('Щоб додати книжку, спершу збережіть або закрийте виправлення.'),
+    ).toBeVisible()
+
+    const add = screen.getByRole('button', { name: 'Додати до бібліотеки' })
+
+    expect(add).toHaveAttribute('aria-disabled', 'true')
+    await user.click(add)
+    expect(quickAddCalls()).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Закрити' }))
+    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    )
+  })
+
+  it('виправлення спільних даних — лише явним збереженням через чинний PATCH з expectedRevision', async () => {
+    const saved: { path: string; body: unknown }[] = []
+
+    patchHandler = (path, body) => {
+      saved.push({ path, body })
+
+      return Promise.resolve({ edition: { ...DETAIL.editions[0], publisher: 'Нове', revision: 2 } })
+    }
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openRefine(user)
+    await user.click(screen.getByRole('button', { name: 'Виправити дані видання' }))
+    await user.click(screen.getByRole('button', { name: 'Редагувати: Видавництво' }))
+    await user.clear(screen.getByRole('textbox', { name: 'Видавництво' }))
+    await user.type(screen.getByRole('textbox', { name: 'Видавництво' }), 'Нове')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Видавництво' }))
+
+    // A field's own «Зберегти» is local: nothing is sent yet.
+    expect(saved).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+    await waitFor(() => {
+      expect(saved).toHaveLength(1)
+    })
+    expect(saved[0]).toEqual({
+      path: '/editions/e-1',
+      body: expect.objectContaining({ publisher: 'Нове', expectedRevision: 1 }),
+    })
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  describe('виправлення під час додавання (рев’ю BS-114)', () => {
+    const CORRECTIONS = ['Виправити дані твору', 'Виправити дані видання']
+
+    async function expectCorrectionsLocked(user: User): Promise<void> {
+      for (const name of CORRECTIONS) {
+        const button = screen.getByRole('button', { name })
+
+        expect(button).toHaveAttribute('aria-disabled', 'true')
+        // Mouse/touch and keyboard alike open nothing.
+        await user.click(button)
+        button.focus()
+        await user.keyboard('{Enter}')
+        await user.keyboard(' ')
+      }
+
+      expect(screen.queryByText(/Це спільні метадані каталогу/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Редагувати: Видавництво' })).toBeNull()
+    }
+
+    it('поки додавання триває, обидва виправлення недоступні; пізній успіх не губить чернетки, бо її немає', async () => {
+      let finish: (() => void) | undefined
+
+      quickAddHandler = (body) =>
+        new Promise((resolve) => {
+          finish = () => {
+            resolve(addedResponse(body))
+          }
+        })
+
+      const user = userEvent.setup()
+
+      renderScreen()
+      await openRefine(user)
+      await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+      await screen.findByRole('button', { name: 'Додаю…' })
+
+      await expectCorrectionsLocked(user)
+      expect(
+        screen.getByText(/Виправлення недоступні, поки не завершиться додавання/),
+      ).toBeVisible()
+
+      await act(async () => {
+        finish?.()
+      })
+      await waitFor(() => {
+        expect(push).toHaveBeenCalledWith('/library')
+      })
+    })
+
+    it('після невизначеного результату виправлення недоступні, доки його не зʼясовано', async () => {
+      quickAddHandler = () => Promise.reject(new TypeError('Failed to fetch'))
+
+      const user = userEvent.setup()
+
+      renderScreen()
+      await openRefine(user)
+      await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+      await screen.findByRole('button', { name: 'Перевірити ще раз' })
+
+      await expectCorrectionsLocked(user)
+    })
+
+    it('після однозначної відмови обидва виправлення знову доступні', async () => {
+      quickAddHandler = () =>
+        Promise.reject(
+          new ApiRequestError(404, { code: 'NOT_FOUND', message: 'Видання не знайдено' }),
+        )
+
+      const user = userEvent.setup()
+
+      renderScreen()
+      await openRefine(user)
+      await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+      await screen.findByText('Видання не знайдено')
+
+      for (const name of CORRECTIONS) {
+        expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'false')
+      }
+
+      await user.click(screen.getByRole('button', { name: 'Виправити дані видання' }))
+      expect(await screen.findByRole('button', { name: 'Редагувати: Видавництво' })).toBeVisible()
+      // The open correction still blocks adding.
+      expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      )
+    })
+  })
+
+  it('без прав на виправлення — лише дані й додавання, без кнопок виправлення', async () => {
+    DETAIL.viewerCapabilities = {
+      canEditWork: false,
+      editableEditionIds: [],
+      editableTranslationIds: [],
+    }
+
+    try {
+      renderScreen()
+      await openRefine(userEvent.setup())
+
+      expect(screen.queryByRole('button', { name: /Виправити/ })).not.toBeInTheDocument()
+      expect(screen.queryByText(/змінюють спільний каталог/)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+    } finally {
+      DETAIL.viewerCapabilities = {
+        canEditWork: true,
+        editableEditionIds: ['e-1'],
+        editableTranslationIds: [],
+      }
+    }
+  })
+})
+
+describe('«Уточнити дані» зовнішнього результату (BS-114)', () => {
+  beforeEach(() => {
+    items = []
+  })
+
+  async function refineFromDialog(user: User): Promise<URLSearchParams> {
+    const dialog = await openCard(user)
+    const href =
+      within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href') ?? ''
+
+    act(() => {
+      navigate(href)
+    })
+    await screen.findByRole('heading', { name: 'Додати книжку вручну' })
+
+    return new URLSearchParams(href.split('?')[1])
+  }
+
+  it('конкретне видання: у повну форму йдуть усі відомі поля, роки твору й видання окремо', async () => {
+    externalItems = [
+      {
+        kind: 'EXTERNAL',
+        key: 'external:GOOGLE_BOOKS:vol-9',
+        result: {
+          id: 'GOOGLE_BOOKS:vol-9',
+          kind: 'EDITION',
+          sources: ['GOOGLE_BOOKS'],
+          title: 'Повна назва',
+          authors: ['Перший Автор', 'Другий Автор'],
+          isbn13: '9780306406157',
+          language: 'en',
+          publisher: 'Видавець',
+          publishedYear: 2019,
+          firstPublishedYear: 1937,
+          pageCount: 320,
+          format: 'PAPERBACK',
+          coverUrl: 'https://covers.example/9.jpg',
+        },
+      },
+    ]
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Повна назва')
+
+    const parameters = await refineFromDialog(user)
+
+    expect(parameters.get('q')).toBe('кобзар')
+    expect(linkHref('← До пошуку')).toBe(
+      `/catalog/new?${new URLSearchParams({ q: 'кобзар' }).toString()}`,
+    )
+
+    for (const [label, value] of [
+      ['Назва', 'Повна назва'],
+      ['ISBN-13', '9780306406157'],
+      ['Мова видання', 'англійська'],
+      ['Видавництво', 'Видавець'],
+      ['Рік видання', '2019'],
+      ['Сторінок', '320'],
+      ['Палітурка', 'мʼяка'],
+      ['Обкладинка (посилання)', 'https://covers.example/9.jpg'],
+      ['Рік першого видання твору', '1937'],
+    ] as const) {
+      expect(within(await manualField(label)).getByText(value)).toBeInTheDocument()
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await waitFor(() => {
+      expect(quickAddCalls()).toHaveLength(1)
+    })
+
+    expect(quickAddCalls()[0]).toMatchObject({
+      entryMethod: 'MANUAL',
+      target: {
+        kind: 'MANUAL',
+        work: {
+          title: 'Повна назва',
+          firstPubYear: 1937,
+          authors: [{ name: 'Перший Автор' }, { name: 'Другий Автор' }],
+        },
+        edition: {
+          textKind: 'UNKNOWN',
+          lang: 'en',
+          isbn13: '9780306406157',
+          publisher: 'Видавець',
+          year: 2019,
+          pageCount: 320,
+          format: 'PAPERBACK',
+          coverUrl: 'https://covers.example/9.jpg',
+        },
+      },
+    })
+  })
+
+  it('ISBN уже є в каталозі: чинний сценарій «Додати наявне видання» лишається', async () => {
+    externalItems = [externalEdition('vol-1', { isbn13: '9780306406157', title: 'Конфлікт' })]
+
+    let attempt = 0
+
+    quickAddHandler = (body) => {
+      attempt += 1
+
+      return attempt === 1
+        ? Promise.reject(
+            new ApiRequestError(409, {
+              code: 'EDITION_ISBN_TAKEN',
+              message: 'Видання з таким ISBN уже є',
+              details: { editionId: 'e-known' },
+            }),
+          )
+        : Promise.resolve(addedResponse(body))
+    }
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Конфлікт')
+    await refineFromDialog(user)
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await user.click(await screen.findByRole('button', { name: 'Додати наявне видання' }))
+    await waitFor(() => {
+      expect(quickAddCalls()).toHaveLength(2)
+    })
+
+    expect(quickAddCalls()[1]).toMatchObject({
+      target: { kind: 'EXISTING_EDITION', editionId: 'e-known' },
+    })
+  })
+
+  it('результат пошуку за ISBN: форма отримує ISBN і все, що повідомило джерело', async () => {
+    searchParams = new URLSearchParams('q=9783161484100')
+    lookupHandler = () =>
+      Promise.resolve({
+        result: {
+          title: 'Знайдена за ISBN',
+          authors: ['Автор'],
+          publisher: 'Видавець',
+          publishedYear: 2021,
+          language: 'uk',
+          source: 'GOOGLE_BOOKS',
+        },
+      })
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Знайдена за ISBN')
+
+    const parameters = await refineFromDialog(user)
+
+    expect(Object.fromEntries([...parameters].filter(([key]) => key !== 'mode'))).toEqual({
+      title: 'Знайдена за ISBN',
+      author: 'Автор',
+      isbn: '9783161484100',
+      lang: 'uk',
+      publisher: 'Видавець',
+      year: '2021',
+      q: '9783161484100',
+    })
+    expect(within(await manualField('Видавництво')).getByText('Видавець')).toBeInTheDocument()
+  })
+})
+
+describe('успіх повної форми й пізня відповідь (BS-114)', () => {
+  beforeEach(() => {
+    items = [editionItem('e-1')]
+  })
+
+  it('ручна форма: пізня відповідь після повернення до пошуку не переносить до бібліотеки', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Нова&q=кобзар')
+
+    let finish: (() => void) | undefined
+
+    quickAddHandler = (body) =>
+      new Promise((resolve) => {
+        finish = () => {
+          resolve({
+            ...addedResponse({ operationId: body.operationId, target: { editionId: 'e-new' } }),
+          })
+        }
+      })
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await waitFor(() => {
+      expect(quickAddCalls()).toHaveLength(1)
+    })
+
+    act(() => {
+      navigate('/catalog/new?q=кобзар')
+    })
+    await screen.findByRole('button', { name: 'Кобзар' })
+    await act(async () => {
+      finish?.()
+    })
+
+    // The answer still lands — but the person is not carried away from where they went.
+    await waitFor(() => {
+      expect(window.sessionStorage.length).toBe(0)
+    })
+    expect(push).not.toHaveBeenCalled()
+  })
+})
+
+describe('різні ручні форми — різні наміри (рев’ю BS-114)', () => {
+  const A = externalEdition('vol-a', { isbn13: '9783161484100', title: 'Книжка A' })
+  const B = externalEdition('vol-b', { isbn13: '9780306406157', title: 'Книжка B' })
+  const SEARCH = `/catalog/new?${new URLSearchParams({ q: 'кобзар' }).toString()}`
+
+  beforeEach(() => {
+    items = []
+    externalItems = [A, B]
+  })
+
+  /** From the search: the card's dialog → «Уточнити дані» → the prefilled manual form. */
+  async function refine(user: User, index: number): Promise<string> {
+    const dialog = await openCard(user, index)
+    const href =
+      within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href') ?? ''
+
+    act(() => {
+      navigate(href)
+    })
+    await screen.findByRole('heading', { name: 'Додати книжку вручну' })
+
+    return href
+  }
+
+  async function backToSearch(): Promise<void> {
+    act(() => {
+      navigate(SEARCH)
+    })
+    await screen.findByText('Книжка B')
+  }
+
+  it('A в польоті → пошук → форма B → успіх A: B лишається з власною чернеткою й станом', async () => {
+    let finish: (() => void) | undefined
+
+    quickAddHandler = (body) =>
+      new Promise((resolve) => {
+        finish = () => {
+          resolve(addedResponse({ operationId: body.operationId, target: { editionId: 'e-a' } }))
+        }
+      })
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Книжка A')
+    await refine(user, 0)
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByRole('button', { name: 'Додаю…' })
+
+    await backToSearch()
+    await refine(user, 1)
+
+    // B is a new intent: nothing of A's operation shows here, and its fields are open for editing.
+    expect(within(await manualField('Назва')).getByText('Книжка B')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    )
+    expect(screen.queryByText(/Не вдалося підтвердити/)).not.toBeInTheDocument()
+
+    await openManualEditor(user, 'Видавництво')
+    await user.type(screen.getByRole('textbox', { name: 'Видавництво' }), 'Чернетка B')
+
+    await act(async () => {
+      finish?.()
+    })
+    await waitFor(() => {
+      expect(window.sessionStorage.length).toBe(0)
+    })
+
+    expect(push).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: 'Додати книжку вручну' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Видавництво' })).toHaveValue('Чернетка B')
+    expect(within(await manualField('Назва')).getByText('Книжка B')).toBeInTheDocument()
+    expect(screen.queryByText('Книжку додано до вашої бібліотеки.')).not.toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(1)
+  })
+
+  it('невизначений результат A переживає переходи: B чиста, у формі A — повтор того самого запиту', async () => {
+    let attempt = 0
+
+    quickAddHandler = (body) => {
+      attempt += 1
+
+      return attempt === 1
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : Promise.resolve(
+            addedResponse({ operationId: body.operationId, target: { editionId: 'e-a' } }),
+          )
+    }
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Книжка A')
+
+    const hrefA = await refine(user, 0)
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByRole('button', { name: 'Перевірити ще раз' })
+
+    await backToSearch()
+    await refine(user, 1)
+
+    expect(screen.queryByRole('button', { name: 'Перевірити ще раз' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Не вдалося підтвердити/)).not.toBeInTheDocument()
+
+    act(() => {
+      navigate(hrefA)
+    })
+    await user.click(await screen.findByRole('button', { name: 'Перевірити ще раз' }))
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/library')
+    })
+
+    const [first, second] = quickAddCalls()
+
+    expect(quickAddCalls()).toHaveLength(2)
+    expect(second).toEqual(first)
+  })
+
+  it('успіх власної активної форми, як і раніше, відкриває бібліотеку', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Книжка A')
+    await refine(user, 0)
+    await backToSearch()
+    await refine(user, 1)
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/library')
+    })
+    expect(quickAddCalls()[0]).toMatchObject({
+      target: { kind: 'MANUAL', work: { title: 'Книжка B' }, edition: { isbn13: '9780306406157' } },
+    })
+  })
+
+  it('однакова назва — не однакова ідентичність: два записи з тією самою назвою — два наміри', async () => {
+    externalItems = [
+      externalEdition('vol-1', { isbn13: '9783161484100', title: 'Однакова' }),
+      externalEdition('vol-2', { isbn13: '9780306406157', title: 'Однакова' }),
+    ]
+
+    quickAddHandler = () => new Promise(() => undefined)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findAllByText('Однакова')
+    await refine(user, 0)
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByRole('button', { name: 'Додаю…' })
+
+    act(() => {
+      navigate(SEARCH)
+    })
+    await screen.findAllByText('Однакова')
+    await refine(user, 1)
+
+    expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
   })
 })

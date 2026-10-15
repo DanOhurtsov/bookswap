@@ -1,30 +1,25 @@
-import Link from 'next/link'
 import type { AddSearchEditionItem } from '@bookswap/shared'
 import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
 import { languageName } from '@/app/lib/language-names'
 import type { QuickAddSlot } from '../model/quick-add-slots'
-import { QuickAddActions } from './QuickAddActions'
+import { QuickAddStatus } from './QuickAddActions'
 import { ResultCardShell } from './ResultCardShell'
 
 type EditionResultCardProps = {
   item: AddSearchEditionItem
   /** Стан додавання цього видання в поточному сеансі; наявність на сервері — у `item.ownership`. */
   slot: QuickAddSlot | undefined
-  /** `additional` — свідомо ще один фізичний примірник. */
-  onAdd: (additional: boolean) => void
-  onRetry: () => void
+  /** Opens the dialog with this edition's details and actions (BS-114). */
+  onSelect: (trigger: HTMLButtonElement) => void
 }
 
 /**
- * Одна картка = одне КОНКРЕТНЕ видання з однією основною дією (docs/plan/fast-book-add.md, §2.1–2.2).
- *
- * Кнопка проходить стани «Додати до бібліотеки» → «Додаю…» → «✓ У моїй бібліотеці» (`QuickAddActions`).
+ * Одна картка = одне КОНКРЕТНЕ видання (docs/plan/fast-book-add.md, §2.1–2.2). Вибір картки відкриває
+ * діалог із деталями й діями (BS-114); на картці лишається короткий стан — «Додаю…», «✓ У моїй бібліотеці».
  * Невідомі поля не заповнюються здогадками: порожнє просто відсутнє.
  */
-export function EditionResultCard({ item, slot, onAdd, onRetry }: EditionResultCardProps) {
+export function EditionResultCard({ item, slot, onSelect }: EditionResultCardProps) {
   const { edition, work, authors, ownership } = item
-  const owned = slot?.status === 'done' || ownership.activeCount > 0
-  const archivedOnly = !owned && ownership.archivedCount > 0
   const facts = [
     edition.publisher ?? undefined,
     edition.year === null ? undefined : String(edition.year),
@@ -38,27 +33,14 @@ export function EditionResultCard({ item, slot, onAdd, onRetry }: EditionResultC
       coverAlt={`Обкладинка «${work.title}»`}
       title={<span className="book__title">{work.title}</span>}
       authors={
-        authors.length === 0 ? undefined : <span>{authors.map((a) => a.name).join(', ')}</span>
+        authors.length === 0 ? undefined : (
+          <span className="wrap-anywhere">{authors.map((a) => a.name).join(', ')}</span>
+        )
       }
       meta={facts}
+      onSelect={onSelect}
     >
-      <details className="book__meta">
-        <summary>Деталі видання</summary>
-        <ul>
-          {edition.isbn13 !== null && <li>ISBN {edition.isbn13}</li>}
-          {edition.pageCount !== null && <li>{edition.pageCount} стор.</li>}
-          {edition.translator !== null && <li>Перекладач: {edition.translator}</li>}
-          <li>Джерело: каталог BookSwap</li>
-        </ul>
-      </details>
-
-      {archivedOnly && (
-        <span className="book__meta">
-          Це видання є у вашому архіві. <Link href="/library?view=archive">Відновити з архіву</Link>
-        </span>
-      )}
-
-      <QuickAddActions slot={slot} owned={owned} onAdd={onAdd} onRetry={onRetry} />
+      <QuickAddStatus slot={slot} ownership={ownership} />
     </ResultCardShell>
   )
 }

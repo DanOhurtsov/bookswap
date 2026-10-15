@@ -17,8 +17,11 @@ type AddBookManualScreenProps = {
   quick: QuickAddApi
   /** `workId` of the address: "refine the edition" of an existing work, whose title is then fixed. */
   presetWorkId: string | null
-  /** Every new form is a new intent (and a new add slot). */
-  manualKey: number
+  /**
+   * This form's intent (`manualIntentOf`): its add slot, its draft's key and its screen key at once — a
+   * confirmed add opens the library only while this very form is on screen.
+   */
+  intent: string
   onAddAnother: () => void
 }
 
@@ -26,7 +29,7 @@ type AddBookManualScreenProps = {
 export function AddBookManualScreen({
   quick,
   presetWorkId,
-  manualKey,
+  intent,
   onAddAnother,
 }: AddBookManualScreenProps) {
   const parameters = useSearchParams()
@@ -38,7 +41,7 @@ export function AddBookManualScreen({
         signal,
       }),
   )
-  const identities = [`manual:${String(manualKey)}`]
+  const identities = [intent]
   const presetTitle = presetWork.status === 'ready' ? presetWork.value.work.title : undefined
   const waitingForWork = presetWorkId !== null && presetWork.status !== 'ready'
 
@@ -63,14 +66,15 @@ export function AddBookManualScreen({
 
       {!waitingForWork && (
         <ManualAddForm
-          key={manualKey}
+          // Another form is another draft: nothing typed for one intent is shown under another.
+          key={intent}
           initial={manualInitialFrom(parameters)}
           {...(presetWorkId !== null && presetTitle !== undefined
             ? { presetWork: { id: presetWorkId, title: presetTitle } }
             : {})}
           slot={quick.slotFor(identities)}
           onSubmit={(target) => {
-            quick.add({ identities, entryMethod: 'MANUAL', target })
+            quick.add({ identities, entryMethod: 'MANUAL', target, screen: intent })
           }}
           onRetry={() => {
             quick.retry(identities)
@@ -80,6 +84,7 @@ export function AddBookManualScreen({
               identities,
               entryMethod: 'MANUAL',
               target: { kind: 'EXISTING_EDITION', editionId },
+              screen: intent,
             })
           }}
           onAddAnother={onAddAnother}

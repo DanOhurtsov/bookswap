@@ -2,11 +2,18 @@
 
 import { DEFAULT_SEARCH_PAGE_SIZE } from '@bookswap/shared'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { readSearchAddress, searchHref } from '@/app/lib/search-page'
 import { useSession } from '@/app/lib/use-session'
-import { ADD_BOOK_PATH } from '../model/search-address-urls'
+import {
+  ADD_BOOK_PATH,
+  addBookModeOf,
+  manualIntentOf,
+  opensLibraryAfterAdd,
+  screenKeyOf,
+} from '../model/search-address-urls'
 import { useQuickAdd } from '../model/use-quick-add'
+import { AddBookEditionScreen } from './AddBookEditionScreen'
 import { AddBookManualScreen } from './AddBookManualScreen'
 import { AddBookSearchScreen } from './AddBookSearchScreen'
 import { pageClass, pendingStatusClass } from './screen-styles'
@@ -16,8 +23,9 @@ import { pageClass, pendingStatusClass } from './screen-styles'
  * сканування лише підставляє ISBN у той самий пошук і нічого не створює.
  *
  * Стан пошуку — запит, сторінка, розмір — живе в адресі (пряме посилання, «назад» і перезавантаження
- * відновлюють список). Додавання нічого в адресі не змінює: після успіху користувач лишається в тих
- * самих результатах, на тій самій сторінці й позиції прокрутки.
+ * відновлюють список). Додавання з діалогу результату нічого в адресі не змінює: після успіху користувач
+ * лишається в тих самих результатах, на тій самій сторінці й позиції прокрутки (BS-114). Успіх повної
+ * форми веде до бібліотеки.
  */
 export function AddBookScreen() {
   const router = useRouter()
@@ -50,26 +58,32 @@ function SessionNotice({ text }: SessionNoticeProps) {
 type AddBookModesProps = { userId: string }
 
 /**
- * Picks the screen for the address. What must survive a switch between the two lives here: the add
- * slots (`quick`), the manual form's intent counter (its slots are `manual:<n>`), and whether the
+ * Picks the screen for the address. What must survive a switch between them lives here: the add
+ * slots (`quick`), the manual form's intent counter (part of its intent, `manualIntentOf`), and whether the
  * query in the address came from the scanner.
  */
 function AddBookModes({ userId }: AddBookModesProps) {
   const router = useRouter()
   const parameters = useSearchParams()
   const address = readSearchAddress(parameters)
-  const quick = useQuickAdd({
-    userId,
-    onAdded: () => {
-      router.push('/library')
-    },
-  })
+  // Manual add and refining an edition are separate views of the same page.
+  const mode = addBookModeOf(parameters)
   /** Every new form is a new intent (and a new add slot): after a success the next one can be added. */
   const [manualKey, setManualKey] = useState(0)
+  const screen = screenKeyOf(mode, manualKey)
+  // Read when an answer arrives — possibly long after the add started, on another screen.
+  const screenRef = useRef(screen)
+  const quick = useQuickAdd({
+    userId,
+    onAdded: (_response, startedOn) => {
+      if (opensLibraryAfterAdd(startedOn, screenRef.current)) router.push('/library')
+    },
+  })
   const [scannedQuery, setScannedQuery] = useState<string>()
-  // Manual add is a separate view of the same page. `workId` is "refine the edition" of an existing work.
-  const presetWorkId = parameters.get('workId')
-  const manualMode = parameters.get('mode') === 'manual' || presetWorkId !== null
+
+  useEffect(() => {
+    screenRef.current = screen
+  })
 
   // `page`/`pageSize` is garbage: show the first page and fix the address (`replace`), in either mode.
   const addressValid = address.valid
@@ -86,12 +100,23 @@ function AddBookModes({ userId }: AddBookModesProps) {
     }
   }, [addressValid, address.q, parameters, router])
 
-  if (manualMode) {
+  if (mode.kind === 'edition') {
+    return (
+      <AddBookEditionScreen
+        quick={quick}
+        editionId={mode.editionId}
+        workId={mode.workId}
+        screen={screen}
+      />
+    )
+  }
+
+  if (mode.kind === 'manual') {
     return (
       <AddBookManualScreen
         quick={quick}
-        presetWorkId={presetWorkId}
-        manualKey={manualKey}
+        presetWorkId={mode.presetWorkId}
+        intent={manualIntentOf(mode.form, manualKey)}
         onAddAnother={() => {
           setManualKey((key) => key + 1)
         }}

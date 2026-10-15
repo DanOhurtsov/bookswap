@@ -51,6 +51,21 @@ describe('quickAddSlotsReducer', () => {
     })
   })
 
+  it('екран, з якого почали операцію, лишається з нею й після невідомого результату (BS-114)', () => {
+    const begun = quickAddSlotsReducer(EMPTY_SLOTS, {
+      type: 'started',
+      key: 'manual:0',
+      identities: ['manual:0'],
+      operationId: OPERATION,
+      request,
+      screen: 'manual:0',
+    })
+    const state = quickAddSlotsReducer(begun, { type: 'unknown', key: 'manual:0', message: 'x' })
+
+    expect(slotOf(begun, ['manual:0'])).toMatchObject({ status: 'pending', screen: 'manual:0' })
+    expect(slotOf(state, ['manual:0'])).toMatchObject({ status: 'unknown', screen: 'manual:0' })
+  })
+
   it('«невідомо» не виникає з нічого', () => {
     expect(
       quickAddSlotsReducer(EMPTY_SLOTS, { type: 'unknown', key: 'edition:e-1', message: 'x' }),

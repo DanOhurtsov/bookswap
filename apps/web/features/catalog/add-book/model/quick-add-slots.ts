@@ -17,13 +17,21 @@ import { ApiRequestError } from '@/app/lib/api'
  * - `done` — збережено; `added` — скільки примірників цього видання додано в цьому сеансі.
  */
 export type QuickAddSlot =
-  | { status: 'pending'; operationId: string; request: QuickAddRequest; added: number }
+  | {
+      status: 'pending'
+      operationId: string
+      request: QuickAddRequest
+      added: number
+      /** The screen that started the operation — what a success means is decided against it (BS-114). */
+      screen?: string
+    }
   | {
       status: 'unknown'
       operationId: string
       request: QuickAddRequest
       added: number
       message: string
+      screen?: string
     }
   | {
       status: 'rejected'
@@ -50,6 +58,7 @@ export type QuickAddSlotsAction =
       identities: readonly string[]
       operationId: string
       request: QuickAddRequest
+      screen?: string
     }
   | { type: 'unknown'; key: string; message: string }
   | { type: 'rejected'; key: string; message: string; code?: string; details?: unknown }
@@ -105,6 +114,7 @@ export function quickAddSlotsReducer(
             operationId: action.operationId,
             request: action.request,
             added,
+            ...(action.screen === undefined ? {} : { screen: action.screen }),
           },
         },
         aliases: withAliases(state.aliases, action.key, action.identities),
@@ -124,6 +134,7 @@ export function quickAddSlotsReducer(
             request: current.request,
             added,
             message: action.message,
+            ...(current.screen === undefined ? {} : { screen: current.screen }),
           },
         },
       }

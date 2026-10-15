@@ -1,5 +1,7 @@
 import {
+  EDITION_FORMAT,
   isbn13Schema,
+  languageCodeSchema,
   normalizeIsbn13,
   quickAddManualTargetSchema,
   type EditionFormat,
@@ -243,15 +245,80 @@ export function manualFieldError(
     : parsed.error.issues.find((issue) => fieldOf(issue.path) === field)?.message
 }
 
-/** Початкові значення форми з адреси: назва, ISBN, автори, рік — те, що вже відомо з пошуку чи запису. */
+/**
+ * What a search result already knows, carried to the manual form in its address (BS-114). Work-level
+ * (`firstPubYear`) and edition-level (`year`, `publisher`, …) values stay separate fields.
+ */
+export interface ManualPrefill {
+  title?: string | undefined
+  authors?: readonly string[] | undefined
+  firstPubYear?: number | undefined
+  isbn?: string | undefined
+  lang?: string | undefined
+  publisher?: string | undefined
+  year?: number | undefined
+  pageCount?: number | undefined
+  format?: EditionFormat | undefined
+  coverUrl?: string | undefined
+}
+
+/** The address parameters `manualPrefillParams` writes and `manualInitialFrom` reads — never part of the way back. */
+export const MANUAL_PREFILL_KEYS = [
+  'title',
+  'author',
+  'firstPubYear',
+  'isbn',
+  'lang',
+  'publisher',
+  'year',
+  'pageCount',
+  'format',
+  'coverUrl',
+] as const
+
+export function manualPrefillParams(prefill: ManualPrefill): URLSearchParams {
+  const parameters = new URLSearchParams()
+  const { authors = [], ...single } = prefill
+
+  for (const [key, value] of Object.entries(single)) {
+    if (value !== undefined && value !== '') parameters.set(key, String(value))
+  }
+
+  for (const author of authors) parameters.append('author', author)
+
+  return parameters
+}
+
+/** A language or binding from the address is taken only when it is a real one: anything else stays unknown. */
+function known<T extends string>(
+  value: string | null,
+  allowed: (candidate: string) => T | undefined,
+) {
+  return value === null ? '' : (allowed(value) ?? '')
+}
+
+/** Початкові значення форми з адреси — те, що вже відомо з пошуку чи запису (`manualPrefillParams`). */
 export function manualInitialFrom(parameters: URLSearchParams): ManualFormValues {
   const authors = parameters.getAll('author').filter((name) => name.trim() !== '')
+  const text = (key: (typeof MANUAL_PREFILL_KEYS)[number]): string => parameters.get(key) ?? ''
 
   return {
     ...EMPTY_MANUAL_FORM,
-    title: parameters.get('title') ?? '',
-    isbn: parameters.get('isbn') ?? '',
-    firstPubYear: parameters.get('firstPubYear') ?? '',
+    title: text('title'),
+    isbn: text('isbn'),
+    firstPubYear: text('firstPubYear'),
     authors: authors.length === 0 ? [''] : authors,
+    lang: known(parameters.get('lang'), (code) => {
+      const parsed = languageCodeSchema.safeParse(code)
+
+      return parsed.success ? parsed.data : undefined
+    }),
+    publisher: text('publisher'),
+    year: text('year'),
+    pageCount: text('pageCount'),
+    format: known(parameters.get('format'), (value) =>
+      EDITION_FORMAT.find((format) => format === value),
+    ),
+    coverUrl: text('coverUrl'),
   }
 }

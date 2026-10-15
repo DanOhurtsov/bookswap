@@ -1,25 +1,26 @@
 'use client'
 
 import type {
-  AddSearchEditionItem,
   AddSearchExternalItem,
+  AddSearchItem,
   AddSearchResponse,
   BookLookupResult,
   CopyEntryMethod,
 } from '@bookswap/shared'
 import { useRouter } from 'next/navigation'
+import { useState, type ReactNode } from 'react'
 import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { searchHref, type SearchAddress } from '@/app/lib/search-page'
 import type { KeyedState } from '@/app/lib/use-keyed-request'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { Button } from '@/components/ui/button'
+import { addResultView, type AddResultSubject } from '../model/add-result-view'
 import type { ExternalSearchState } from '../model/external-search-state'
-import { externalIdentities, externalTarget } from '../model/external-target'
-import { quickAddCardProps } from '../model/quick-add-card'
-import { identitiesOf, isbnIdentity } from '../model/quick-add-identities'
+import type { QuickAddSlot } from '../model/quick-add-slots'
 import { ADD_BOOK_PATH } from '../model/search-address-urls'
 import type { EmptyStateKind, SearchResultsView } from '../model/search-results-view'
 import type { QuickAddApi } from '../model/use-quick-add'
+import { AddResultDialog } from './AddResultDialog'
 import { EditionResultCard } from './EditionResultCard'
 import { ExternalEditionCard } from './ExternalEditionCard'
 import { ExternalSearchStatus } from './ExternalSearchStatus'
@@ -35,24 +36,6 @@ const EMPTY_STATE_TEXT: Record<EmptyStateKind, string> = {
   AUTO_IDLE:
     'У нашому каталозі нічого схожого немає. Додайте символ або натисніть «Шукати» — тоді пошук піде й у зовнішні каталоги.',
   PLAIN: 'Нічого схожого не знайшлося.',
-}
-
-type EditionRowProps = {
-  item: AddSearchEditionItem
-  quick: QuickAddApi
-  entryMethod: CopyEntryMethod
-}
-
-function EditionRow({ item, quick, entryMethod }: EditionRowProps) {
-  return (
-    <EditionResultCard
-      item={item}
-      {...quickAddCardProps(quick, entryMethod, identitiesOf(item), {
-        kind: 'EXISTING_EDITION',
-        editionId: item.edition.id,
-      })}
-    />
-  )
 }
 
 type SearchResultsProps = {
@@ -85,6 +68,59 @@ export function SearchResults({
 }: SearchResultsProps) {
   const router = useRouter()
   const { response, items, externalItems, redundantLookup, lookupCard } = view
+  // The chosen result is a snapshot: the list may move on underneath, the dialog keeps its subject.
+  // It stays after closing so the content does not vanish while the dialog animates out.
+  // `trigger` — the card button that opened it: focus goes back there.
+  const [chosen, setChosen] = useState<{
+    subject: AddResultSubject
+    trigger: HTMLButtonElement
+    open: boolean
+  }>()
+
+  function choose(subject: AddResultSubject): (trigger: HTMLButtonElement) => void {
+    return (trigger) => {
+      setChosen({ subject, trigger, open: true })
+    }
+  }
+
+  /** The card's add state: the same slot its dialog acts on. */
+  function slotOf(subject: AddResultSubject): QuickAddSlot | undefined {
+    const { quickAdd } = addResultView(subject)
+
+    return quickAdd === undefined ? undefined : quick.slotFor(quickAdd.identities)
+  }
+
+  function card(item: AddSearchItem | AddSearchExternalItem): ReactNode {
+    if (item.kind === 'WORK') {
+      return <WorkResultCard key={item.key} item={item} onSelect={choose({ kind: 'WORK', item })} />
+    }
+
+    if (item.kind === 'EDITION') {
+      const subject: AddResultSubject = { kind: 'EDITION', item }
+
+      return (
+        <EditionResultCard
+          key={item.key}
+          item={item}
+          slot={slotOf(subject)}
+          onSelect={choose(subject)}
+        />
+      )
+    }
+
+    const subject: AddResultSubject = { kind: 'EXTERNAL', result: item.result }
+
+    return item.result.kind === 'WORK' ? (
+      <ExternalWorkCard key={item.key} result={item.result} onSelect={choose(subject)} />
+    ) : (
+      <ExternalEditionCard
+        key={item.key}
+        result={item.result}
+        slot={slotOf(subject)}
+        onSelect={choose(subject)}
+      />
+    )
+  }
 
   return (
     <>
@@ -93,47 +129,18 @@ export function SearchResults({
       {lookupCard !== undefined && isbn !== undefined && (
         <ul className={booksClass}>
           <LookupAddCard
-            isbn={isbn}
             lookup={lookupCard}
-            {...quickAddCardProps(quick, entryMethod, [isbnIdentity(isbn)], {
-              kind: 'EXTERNAL_EDITION',
-              isbn13: isbn,
-            })}
+            slot={slotOf({ kind: 'LOOKUP', isbn, lookup: lookupCard })}
+            onSelect={choose({ kind: 'LOOKUP', isbn, lookup: lookupCard })}
           />
         </ul>
       )}
 
       {(items.length > 0 || externalItems.length > 0) && (
         <ul className={booksClass}>
-          {items.map((item) =>
-            item.kind === 'WORK' ? (
-              <WorkResultCard key={item.key} item={item} parameters={parameters} />
-            ) : (
-              <EditionRow key={item.key} item={item} quick={quick} entryMethod={entryMethod} />
-            ),
-          )}
-          {externalItems.map((item) => {
-            if (item.kind === 'EDITION') {
-              return (
-                <EditionRow key={item.key} item={item} quick={quick} entryMethod={entryMethod} />
-              )
-            }
-
-            const target = externalTarget(item.result)
-
-            if (target === undefined)
-              return (
-                <ExternalWorkCard key={item.key} result={item.result} parameters={parameters} />
-              )
-
-            return (
-              <ExternalEditionCard
-                key={item.key}
-                result={item.result}
-                {...quickAddCardProps(quick, entryMethod, externalIdentities(item.result), target)}
-              />
-            )
-          })}
+          {/* Two lists, two key spaces: the halves are paged apart and may know the same edition. */}
+          {items.map(card)}
+          {externalItems.map(card)}
         </ul>
       )}
 
@@ -158,6 +165,18 @@ export function SearchResults({
           Показати всі результати
         </Button>
       )}
+
+      <AddResultDialog
+        view={chosen === undefined ? undefined : addResultView(chosen.subject)}
+        open={chosen?.open === true}
+        quick={quick}
+        entryMethod={entryMethod}
+        parameters={parameters}
+        trigger={chosen?.trigger}
+        onClose={() => {
+          setChosen((current) => current && { ...current, open: false })
+        }}
+      />
 
       {view.showPagination && (
         <SearchPagination
