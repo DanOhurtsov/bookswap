@@ -48,7 +48,7 @@ export function AddBookManualScreen({
       <p className={ledeClass}>
         Обов’язкова лише назва. Решту можна не знати — її можна уточнити пізніше.
       </p>
-      <p>
+      <p className="mb-8">
         <Link href={backToSearchHref(parameters)} className="link-underline">
           ← До пошуку
         </Link>

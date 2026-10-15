@@ -1,22 +1,15 @@
 'use client'
 
-import { EDITION_FORMAT, type EditionTextKind, type QuickAddManualTarget } from '@bookswap/shared'
-import dynamic from 'next/dynamic'
-import { useState } from 'react'
-import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import type { QuickAddManualTarget } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { LanguageSelect } from '@/components/Form/LanguageSelect'
-import { loadBarcodeScannerPanel } from '../lib/load-barcode-scanner-panel'
-import {
-  buildManualTarget,
-  type ManualFieldErrors,
-  type ManualFormValues,
-} from '../model/manual-form'
+import { manualFieldDisplay } from '../model/manual-field-view'
+import type { ManualFormValues } from '../model/manual-form'
 import type { QuickAddSlot } from '../model/quick-add-slots'
-
-/** Той самий сканер, що й у пошуку: ліниво й лише після явного натискання. */
-const BarcodeScannerPanel = dynamic(loadBarcodeScannerPanel, { ssr: false })
+import { useManualDraft } from '../model/use-manual-draft'
+import { ManualAuthorsField } from './ManualAuthorsField'
+import { ManualEditionFields } from './ManualEditionFields'
+import { ManualExtraSection } from './ManualExtraSection'
+import { ManualTextInlineField } from './ManualInlineField'
 
 type ManualAddFormProps = {
   initial: ManualFormValues
@@ -29,12 +22,6 @@ type ManualAddFormProps = {
   onUseExistingEdition: (editionId: string) => void
   onAddAnother: () => void
 }
-
-const TEXT_KIND_OPTIONS: readonly { value: EditionTextKind; label: string }[] = [
-  { value: 'UNKNOWN', label: 'Не знаю' },
-  { value: 'ORIGINAL', label: 'Ні — це оригінал' },
-  { value: 'TRANSLATION', label: 'Так — це переклад' },
-]
 
 function existingEditionIdOf(slot: QuickAddSlot | undefined): string | undefined {
   if (slot?.status !== 'rejected' || slot.code !== 'EDITION_ISBN_TAKEN') return undefined
@@ -50,12 +37,14 @@ function existingEditionIdOf(slot: QuickAddSlot | undefined): string | undefined
 }
 
 /**
- * Єдина компактна форма ручного додавання (docs/plan/fast-book-add.md, §2.4): обов'язкова лише назва; автор,
- * мова видання, ISBN і видавничі дані — необов'язкові, невідоме лишається невідомим й уточнюється пізніше.
+ * The one compact manual-add form (docs/plan/fast-book-add.md, §2.4): only the title is required; author,
+ * edition language, ISBN and publishing details are optional, and the unknown stays unknown until refined.
  *
- * «Додати до бібліотеки» зберігає ВСЕ введене й примірник однією операцією. Після невизначеного результату
- * поля заблоковані: повторюється та сама операція з незмінним вмістом, нова неможлива, доки результат не
- * з'ясовано. Однозначна відмова повертає форму до редагування з тим самим введеним.
+ * Every field reads as text with its own local editor (BS-76); an editor's «Зберегти»/«Скасувати» only touch
+ * the draft. «Додати до бібліотеки» is the one action that sends anything: it saves EVERYTHING entered —
+ * open editors included — and the copy as one operation. After an unknown outcome the fields are locked: the
+ * same operation is retried with unchanged content, and no new one can start until the outcome is known. An
+ * unambiguous rejection returns the form to editing with the same input.
  */
 export function ManualAddForm({
   initial,
@@ -66,17 +55,12 @@ export function ManualAddForm({
   onUseExistingEdition,
   onAddAnother,
 }: ManualAddFormProps) {
-  const [values, setValues] = useState(initial)
-  const [errors, setErrors] = useState<ManualFieldErrors>({})
+  const draft = useManualDraft(initial, presetWork?.id)
+  const display = manualFieldDisplay(draft.values)
   const pending = slot?.status === 'pending'
   const unknown = slot?.status === 'unknown'
   const locked = pending || unknown
   const existingEditionId = existingEditionIdOf(slot)
-
-  function change<K extends keyof ManualFormValues>(key: K, value: ManualFormValues[K]): void {
-    setValues((current) => ({ ...current, [key]: value }))
-    setErrors((current) => ({ ...current, [key]: undefined, form: undefined }))
-  }
 
   if (slot?.status === 'done') {
     return (
@@ -98,17 +82,12 @@ export function ManualAddForm({
 
         if (locked) return
 
-        const built = buildManualTarget(values, presetWork?.id)
+        const target = draft.submit()
 
-        if (built.ok) {
-          setErrors({})
-          onSubmit(built.target)
-        } else {
-          setErrors(built.errors)
-        }
+        if (target !== undefined) onSubmit(target)
       }}
     >
-      {errors.form !== undefined && <FormStatus error={new Error(errors.form)} />}
+      {draft.errors.form !== undefined && <FormStatus error={new Error(draft.errors.form)} />}
 
       {slot?.status === 'rejected' && existingEditionId === undefined && (
         <FormStatus error={new Error(slot.message)} />
@@ -122,162 +101,26 @@ export function ManualAddForm({
 
       <fieldset disabled={locked} className="form">
         {presetWork === undefined ? (
-          <TextField
-            id="manual-title"
-            label="Назва"
-            required
-            autoComplete="off"
-            value={values.title}
-            {...(errors.title === undefined ? {} : { error: errors.title })}
-            onChange={(event) => {
-              change('title', event.target.value)
-            }}
-          />
+          <>
+            <ManualTextInlineField
+              draft={draft}
+              name="title"
+              id="manual-title"
+              label="Назва"
+              addLabel="Додати назву"
+              required
+              autoComplete="off"
+              display={display.title}
+            />
+            <ManualAuthorsField draft={draft} names={display.authors} />
+          </>
         ) : (
           <p>
             Твір: <strong>{presetWork.title}</strong>. Додаємо його видання.
           </p>
         )}
 
-        {presetWork === undefined && (
-          <div className="field">
-            <label htmlFor="manual-author-0">Автор</label>
-            {values.authors.map((name, index) => (
-              <div key={index} className="person__actions">
-                <input
-                  id={`manual-author-${String(index)}`}
-                  aria-label={index === 0 ? 'Автор' : `Автор ${String(index + 1)}`}
-                  autoComplete="off"
-                  value={name}
-                  onChange={(event) => {
-                    change(
-                      'authors',
-                      values.authors.map((current, position) =>
-                        position === index ? event.target.value : current,
-                      ),
-                    )
-                  }}
-                />
-                {values.authors.length > 1 && (
-                  <button
-                    type="button"
-                    className="button--ghost"
-                    aria-label={`Прибрати автора ${String(index + 1)}`}
-                    onClick={() => {
-                      change(
-                        'authors',
-                        values.authors.filter((_, position) => position !== index),
-                      )
-                    }}
-                  >
-                    Прибрати
-                  </button>
-                )}
-              </div>
-            ))}
-            {values.authors.length < 10 && (
-              <button
-                type="button"
-                className="button--ghost"
-                onClick={() => {
-                  change('authors', [...values.authors, ''])
-                }}
-              >
-                Додати автора
-              </button>
-            )}
-            {errors.authors !== undefined && (
-              <p className="field__error" role="alert">
-                {errors.authors}
-              </p>
-            )}
-          </div>
-        )}
-
-        <LanguageSelect
-          id="manual-lang"
-          label="Мова видання"
-          emptyLabel="Не вказано"
-          value={values.lang}
-          {...(errors.lang === undefined ? {} : { error: errors.lang })}
-          onChange={(value) => {
-            change('lang', value)
-          }}
-        />
-
-        <fieldset className="field">
-          <legend>Це переклад?</legend>
-          {TEXT_KIND_OPTIONS.map((option) => (
-            <label key={option.value} className="field--checkbox">
-              <input
-                type="radio"
-                name="manual-text-kind"
-                value={option.value}
-                checked={values.textKind === option.value}
-                onChange={() => {
-                  change('textKind', option.value)
-                }}
-              />{' '}
-              {option.label}
-            </label>
-          ))}
-        </fieldset>
-
-        {values.textKind === 'TRANSLATION' && (
-          <details open={values.translator !== ''}>
-            <summary>Переклад (необов’язково)</summary>
-            <TextField
-              id="manual-translator"
-              label="Перекладач"
-              autoComplete="off"
-              value={values.translator}
-              {...(errors.translator === undefined ? {} : { error: errors.translator })}
-              onChange={(event) => {
-                change('translator', event.target.value)
-              }}
-            />
-            <LanguageSelect
-              id="manual-translation-lang"
-              label="Мова перекладу"
-              emptyLabel="Така сама, як мова видання"
-              value={values.translationLang}
-              {...(errors.translationLang === undefined ? {} : { error: errors.translationLang })}
-              onChange={(value) => {
-                change('translationLang', value)
-              }}
-            />
-            <LanguageSelect
-              id="manual-translation-source"
-              label="З якої мови перекладено"
-              emptyLabel="Не вказано"
-              value={values.translationSourceLang}
-              {...(errors.translationSourceLang === undefined
-                ? {}
-                : { error: errors.translationSourceLang })}
-              onChange={(value) => {
-                change('translationSourceLang', value)
-              }}
-            />
-          </details>
-        )}
-
-        <TextField
-          id="manual-isbn"
-          label="ISBN-13"
-          inputMode="numeric"
-          autoComplete="off"
-          hint="Необов’язково. Дефіси можна лишити."
-          value={values.isbn}
-          {...(errors.isbn === undefined ? {} : { error: errors.isbn })}
-          onChange={(event) => {
-            change('isbn', event.target.value)
-          }}
-        />
-        <BarcodeScannerPanel
-          onValidIsbn={(isbn) => {
-            change('isbn', isbn)
-          }}
-        />
+        <ManualEditionFields draft={draft} display={display} />
 
         {existingEditionId !== undefined && (
           <div className="alert alert--warn" role="alert">
@@ -293,75 +136,11 @@ export function ManualAddForm({
           </div>
         )}
 
-        <details>
-          <summary>Додатково</summary>
-          <TextField
-            id="manual-publisher"
-            label="Видавництво"
-            value={values.publisher}
-            {...(errors.publisher === undefined ? {} : { error: errors.publisher })}
-            onChange={(event) => {
-              change('publisher', event.target.value)
-            }}
-          />
-          <TextField
-            id="manual-year"
-            label="Рік видання"
-            inputMode="numeric"
-            value={values.year}
-            {...(errors.year === undefined ? {} : { error: errors.year })}
-            onChange={(event) => {
-              change('year', event.target.value)
-            }}
-          />
-          <TextField
-            id="manual-pages"
-            label="Сторінок"
-            inputMode="numeric"
-            value={values.pageCount}
-            {...(errors.pageCount === undefined ? {} : { error: errors.pageCount })}
-            onChange={(event) => {
-              change('pageCount', event.target.value)
-            }}
-          />
-          <SelectField
-            id="manual-format"
-            label="Палітурка"
-            value={values.format}
-            onChange={(event) => {
-              change('format', event.target.value as ManualFormValues['format'])
-            }}
-          >
-            <option value="">Не вказано</option>
-            {EDITION_FORMAT.map((value) => (
-              <option key={value} value={value}>
-                {EDITION_FORMAT_LABELS[value]}
-              </option>
-            ))}
-          </SelectField>
-          <TextField
-            id="manual-cover"
-            label="Обкладинка (посилання)"
-            type="url"
-            value={values.coverUrl}
-            {...(errors.coverUrl === undefined ? {} : { error: errors.coverUrl })}
-            onChange={(event) => {
-              change('coverUrl', event.target.value)
-            }}
-          />
-          {presetWork === undefined && (
-            <TextField
-              id="manual-first-year"
-              label="Рік першого видання твору"
-              inputMode="numeric"
-              value={values.firstPubYear}
-              {...(errors.firstPubYear === undefined ? {} : { error: errors.firstPubYear })}
-              onChange={(event) => {
-                change('firstPubYear', event.target.value)
-              }}
-            />
-          )}
-        </details>
+        <ManualExtraSection
+          draft={draft}
+          display={display}
+          hasPresetWork={presetWork !== undefined}
+        />
       </fieldset>
 
       {unknown ? (

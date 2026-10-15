@@ -16,6 +16,8 @@ import {
 
 export type BarcodeScannerPanelProps = {
   onValidIsbn: (isbn: string) => void
+  /** The scan button's look: solid beside the search input, ghost among a form's quiet actions. */
+  variant?: 'default' | 'ghost'
   /** Test-only injection, forwarded verbatim to `startBarcodeScanner`. */
   loadScannerModules?: StartScannerOptions['loadScannerModules']
 }
@@ -42,7 +44,11 @@ const ERROR_MESSAGES: Record<BarcodeScanErrorReason, string> = {
  * монтуванні. `<video>` рендериться завжди (щоб `videoRef` був доступний до
  * кліку), але прихована поза активним скануванням.
  */
-export function BarcodeScannerPanel({ onValidIsbn, loadScannerModules }: BarcodeScannerPanelProps) {
+export function BarcodeScannerPanel({
+  onValidIsbn,
+  variant = 'default',
+  loadScannerModules,
+}: BarcodeScannerPanelProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const handleRef = useRef<ScannerHandle | undefined>(undefined)
   const [phase, setPhase] = useState<ScanPhase>({ kind: 'idle' })
@@ -101,6 +107,7 @@ export function BarcodeScannerPanel({ onValidIsbn, loadScannerModules }: Barcode
           розтягується під ним на всю ширину. Камера відкривається попапом поверх сторінки. */}
       <Button
         type="button"
+        variant={variant}
         size="icon"
         className="size-11 cursor-pointer"
         aria-label={startLabel}
