@@ -261,6 +261,26 @@ function renderScreen() {
   return render(withQueryClient(<AddBookScreen />))
 }
 
+type User = ReturnType<typeof userEvent.setup>
+
+/** BS-76: a manual-form field reads as text inside a group named by the field. */
+function manualField(label: string): Promise<HTMLElement> {
+  return screen.findByRole('group', { name: label })
+}
+
+/**
+ * Opens a manual-form field's editor — its own action: the pencil, or «Додати …» when it is empty.
+ * Named, not "the group's button": the ISBN row also holds the scanner.
+ */
+async function openManualEditor(user: User, label: string): Promise<void> {
+  const field = within(await manualField(label))
+
+  await user.click(
+    field.queryByRole('button', { name: `Редагувати: ${label}` }) ??
+      field.getByRole('button', { name: /^Додати/ }),
+  )
+}
+
 describe('результати: одна картка — одне видання', () => {
   it('питає локальний пошук з q, page і pageSize та показує ознаки видання', async () => {
     renderScreen()
@@ -883,7 +903,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
 
     renderScreen()
 
-    expect(await screen.findByLabelText('Назва')).toHaveValue('Нова книжка')
+    expect(within(await manualField('Назва')).getByText('Нова книжка')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
@@ -918,7 +938,8 @@ describe('ручне додавання: одна форма (QA9)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.type(await screen.findByLabelText('ISBN-13'), '1234567890123')
+    await openManualEditor(user, 'ISBN-13')
+    await user.type(screen.getByLabelText('ISBN-13'), '1234567890123')
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
 
     expect(await screen.findByText(/Некоректний ISBN-13/)).toBeInTheDocument()
@@ -929,14 +950,21 @@ describe('ручне додавання: одна форма (QA9)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.type(await screen.findByLabelText('Автор'), 'Тарас Шевченко')
+    await openManualEditor(user, 'Автори')
+    await user.type(screen.getByLabelText('Автор'), 'Тарас Шевченко')
     await user.click(screen.getByRole('button', { name: 'Додати автора' }))
     await user.type(screen.getByLabelText('Автор 2'), 'Співавтор')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Автори' }))
+    await openManualEditor(user, 'Мова видання')
     await user.selectOptions(screen.getByLabelText('Мова видання'), 'uk')
+    await openManualEditor(user, 'Це переклад?')
     await user.click(screen.getByLabelText('Ні — це оригінал'))
+    await openManualEditor(user, 'ISBN-13')
     await user.type(screen.getByLabelText('ISBN-13'), '978-3-16-148410-0')
     await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Видавництво')
     await user.type(screen.getByLabelText('Видавництво'), 'Наука')
+    // The editors except the authors' stay open: «Додати до бібліотеки» takes what they hold.
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
 
@@ -956,10 +984,14 @@ describe('ручне додавання: одна форма (QA9)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.click(await screen.findByLabelText('Так — це переклад'))
+    await openManualEditor(user, 'Це переклад?')
+    await user.click(screen.getByLabelText('Так — це переклад'))
     await user.click(screen.getByText('Переклад (необов’язково)'))
+    await openManualEditor(user, 'Перекладач')
     await user.type(screen.getByLabelText('Перекладач'), 'Олена Оніщук')
+    await openManualEditor(user, 'Мова перекладу')
     await user.selectOptions(screen.getByLabelText('Мова перекладу'), 'uk')
+    await openManualEditor(user, 'З якої мови перекладено')
     await user.selectOptions(screen.getByLabelText('З якої мови перекладено'), 'en')
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
@@ -994,7 +1026,8 @@ describe('ручне додавання: одна форма (QA9)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.type(await screen.findByLabelText('ISBN-13'), MANUAL_ISBN)
+    await openManualEditor(user, 'ISBN-13')
+    await user.type(screen.getByLabelText('ISBN-13'), MANUAL_ISBN)
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
 
     expect(
@@ -1029,7 +1062,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
     await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
 
     expect(await screen.findByText(/Не вдалося підтвердити додавання/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Назва')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: 'Перевірити ще раз' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
@@ -1057,11 +1090,12 @@ describe('ручне додавання: одна форма (QA9)', () => {
     const user = userEvent.setup()
 
     renderScreen()
-    await user.type(await screen.findByLabelText('Автор'), 'Автор')
+    await openManualEditor(user, 'Автори')
+    await user.type(screen.getByLabelText('Автор'), 'Автор')
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
 
     expect(await screen.findByText('Відхилено сервером')).toBeInTheDocument()
-    expect(screen.getByLabelText('Автор')).toHaveValue('Автор')
+    expect(within(await manualField('Автори')).getByText('Автор')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
@@ -1078,7 +1112,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
     await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
     await user.click(await screen.findByRole('button', { name: 'Додати ще одну книжку' }))
 
-    expect(await screen.findByLabelText('Назва')).toHaveValue('Нова книжка')
+    expect(within(await manualField('Назва')).getByText('Нова книжка')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await waitFor(() => {
@@ -1110,7 +1144,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
     renderScreen()
 
     expect(await screen.findByText('Наявний твір')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Назва')).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Назва' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
@@ -1118,6 +1152,496 @@ describe('ручне додавання: одна форма (QA9)', () => {
     expect(quickAddCalls()[0]).toMatchObject({
       target: { kind: 'MANUAL', work: { workId: 'w-77' } },
     })
+  })
+})
+
+describe('ручна форма: поля текстом, редактор на місці (BS-76)', () => {
+  const ISBN = '9783161484100'
+  const PREFILLED =
+    'mode=manual&title=Кобзар&author=Тарас Шевченко&author=Друга Особа&isbn=9783161484100&firstPubYear=1840'
+
+  beforeEach(() => {
+    searchParams = new URLSearchParams('mode=manual')
+    items = []
+  })
+
+  function expectNoControls(): void {
+    for (const role of ['textbox', 'combobox', 'radio', 'spinbutton', 'checkbox'] as const) {
+      expect(screen.queryAllByRole(role)).toHaveLength(0)
+    }
+  }
+
+  /** The manual form alone never reads anything; only «Додати до бібліотеки» writes. */
+  function expectNoRequests(): void {
+    expect(mockApiRequest).not.toHaveBeenCalled()
+  }
+
+  it('порожня форма: назви полів текстом і «Додати», жодного поля вводу', async () => {
+    renderScreen()
+    await manualField('Назва')
+
+    expectNoControls()
+    // An empty field shows, in its value's place, a text action that names what it adds.
+    for (const [field, action] of [
+      ['Назва', 'Додати назву'],
+      ['Автори', 'Додати автора'],
+      ['Мова видання', 'Додати мову видання'],
+      ['ISBN-13', 'Додати ISBN'],
+    ] as const) {
+      expect(within(await manualField(field)).getByRole('button', { name: action })).toBeVisible()
+    }
+    // The scanner (mocked here) sits in the ISBN row, beside «Додати ISBN».
+    expect(
+      within(await manualField('ISBN-13')).getByRole('button', { name: 'Simulate scan' }),
+    ).toBeInTheDocument()
+    // UNKNOWN is an answer, not an empty field: it reads «Не знаю», no open radio group.
+    expect(within(await manualField('Це переклад?')).getByText('Не знаю')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Це переклад?' })).toBeInTheDocument()
+
+    await userEvent.setup().click(screen.getByText('Додатково'))
+
+    for (const action of [
+      'Додати видавництво',
+      'Додати рік видання',
+      'Додати кількість сторінок',
+      'Додати палітурку',
+      'Додати посилання на обкладинку',
+      'Додати рік першого видання',
+    ]) {
+      expect(screen.getByRole('button', { name: action })).toBeVisible()
+    }
+    expectNoControls()
+    expectNoRequests()
+  })
+
+  it('передзаповнені з адреси назва, автори, ISBN і рік першого видання — текстом', async () => {
+    searchParams = new URLSearchParams(PREFILLED)
+    renderScreen()
+
+    expect(within(await manualField('Назва')).getByText('Кобзар')).toBeInTheDocument()
+    expect(
+      within(await manualField('Автори'))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Тарас Шевченко', 'Друга Особа'])
+    expect(within(await manualField('ISBN-13')).getByText(ISBN)).toBeInTheDocument()
+    expect(
+      within(await manualField('Рік першого видання твору')).getByText('1840'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Автори' })).toBeInTheDocument()
+    expectNoControls()
+  })
+
+  it('олівець і «Додати» відкривають саме свій контрол із фокусом і нічого не міняють', async () => {
+    searchParams = new URLSearchParams(PREFILLED)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    await openManualEditor(user, 'Назва')
+    expect(screen.getByRole('textbox', { name: 'Назва' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: 'Назва' })).toHaveValue('Кобзар')
+
+    await openManualEditor(user, 'Автори')
+    expect(screen.getByRole('textbox', { name: 'Автор' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: 'Автор 2' })).toHaveValue('Друга Особа')
+
+    await openManualEditor(user, 'Мова видання')
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveFocus()
+
+    await openManualEditor(user, 'Це переклад?')
+    expect(screen.getByRole('radio', { name: 'Не знаю' })).toHaveFocus()
+    expect(screen.getByRole('radio', { name: 'Не знаю' })).toBeChecked()
+
+    await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Палітурка')
+    expect(screen.getByRole('combobox', { name: 'Палітурка' })).toHaveFocus()
+
+    await openManualEditor(user, 'Рік видання')
+    expect(screen.getByRole('textbox', { name: 'Рік видання' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: 'Рік видання' })).toHaveValue('')
+    expectNoRequests()
+  })
+
+  it('«Зберегти» біля поля повертає текст і фокус на олівець; запиту немає', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Назва')
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Кобзар')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Назва' }))
+
+    expect(within(await manualField('Назва')).getByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toHaveFocus()
+    expect(screen.queryByRole('textbox', { name: 'Назва' })).not.toBeInTheDocument()
+
+    // An empty optional field confirms back to its «Додати», which gets the focus back.
+    await openManualEditor(user, 'ISBN-13')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: ISBN-13' }))
+
+    expect(screen.getByRole('button', { name: 'Додати ISBN' })).toHaveFocus()
+    expect(quickAddCalls()).toHaveLength(0)
+    expectNoRequests()
+  })
+
+  it('Enter в однорядковому полі підтверджує лише це поле, а не створює книжку', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Назва')
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Кобзар{Enter}')
+
+    expect(within(await manualField('Назва')).getByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toHaveFocus()
+
+    await openManualEditor(user, 'Автори')
+    await user.type(screen.getByRole('textbox', { name: 'Автор' }), 'Тарас Шевченко{Enter}')
+
+    expect(within(await manualField('Автори')).getByText('Тарас Шевченко')).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(0)
+    expectNoRequests()
+  })
+
+  it('«Скасувати» повертає значення до відкриття редактора, не чіпаючи інших змін; фокус — на олівець', async () => {
+    searchParams = new URLSearchParams(PREFILLED)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Мова видання')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Мова видання' }), 'uk')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Мова видання' }))
+
+    await openManualEditor(user, 'Назва')
+    await user.clear(screen.getByRole('textbox', { name: 'Назва' }))
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Інша')
+    await user.click(screen.getByRole('button', { name: 'Скасувати: Назва' }))
+
+    expect(within(await manualField('Назва')).getByText('Кобзар')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toHaveFocus()
+    expect(within(await manualField('Мова видання')).getByText('українська')).toBeInTheDocument()
+
+    // An empty field cancelled after typing is empty again, its «Додати» focused.
+    await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Видавництво')
+    await user.type(screen.getByRole('textbox', { name: 'Видавництво' }), 'Наука')
+    await user.click(screen.getByRole('button', { name: 'Скасувати: Видавництво' }))
+
+    expect(screen.getByRole('button', { name: 'Додати видавництво' })).toHaveFocus()
+    expect(quickAddCalls()).toHaveLength(0)
+    expectNoRequests()
+  })
+
+  it('перехід з поля нічого не зберігає й не скасовує: редактор лишається з введеним', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Назва')
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Кобзар')
+    await user.click(screen.getByRole('heading', { name: 'Додати книжку вручну' }))
+    await user.tab()
+
+    expect(screen.getByRole('textbox', { name: 'Назва' })).toHaveValue('Кобзар')
+  })
+
+  it('автори: «Скасувати» після зміни лише імені повертає попереднє імʼя', async () => {
+    searchParams = new URLSearchParams(PREFILLED)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Автори')
+    await user.clear(screen.getByRole('textbox', { name: 'Автор' }))
+    await user.type(screen.getByRole('textbox', { name: 'Автор' }), 'Інше Імʼя')
+    await user.click(screen.getByRole('button', { name: 'Скасувати: Автори' }))
+
+    expect(
+      within(await manualField('Автори'))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Тарас Шевченко', 'Друга Особа'])
+    expect(screen.getByRole('button', { name: 'Редагувати: Автори' })).toHaveFocus()
+  })
+
+  it('автори: «Скасувати» після додавання й видалення рядків відновлює весь попередній список', async () => {
+    searchParams = new URLSearchParams(PREFILLED)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+
+    // Twice: the second cancel proves the first one's restored list is still independent of the edits.
+    for (let round = 0; round < 2; round += 1) {
+      await openManualEditor(user, 'Автори')
+      await user.click(screen.getByRole('button', { name: 'Прибрати автора 1' }))
+      await user.click(screen.getByRole('button', { name: 'Додати автора' }))
+      await user.type(screen.getByRole('textbox', { name: 'Автор 2' }), 'Третя')
+      await user.clear(screen.getByRole('textbox', { name: 'Автор' }))
+      await user.type(screen.getByRole('textbox', { name: 'Автор' }), 'Змінена')
+      await user.click(screen.getByRole('button', { name: 'Скасувати: Автори' }))
+
+      expect(
+        within(await manualField('Автори'))
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['Тарас Шевченко', 'Друга Особа'])
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Книжку додано до вашої бібліотеки.')
+
+    expect(quickAddCalls()[0]).toMatchObject({
+      target: { work: { authors: [{ name: 'Тарас Шевченко' }, { name: 'Друга Особа' }] } },
+    })
+  })
+
+  it('автори: ліміт рядків чинний — після десятого «Додати автора» в редакторі немає', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Автори')
+
+    for (let row = 1; row < 10; row += 1) {
+      await user.click(screen.getByRole('button', { name: 'Додати автора' }))
+    }
+
+    expect(screen.getAllByRole('textbox', { name: /^Автор/ })).toHaveLength(10)
+    expect(screen.queryByRole('button', { name: 'Додати автора' })).not.toBeInTheDocument()
+  })
+
+  it('лише назва: мінімальний payload, як і до BS-76', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Назва')
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Кобзар')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Назва' }))
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Книжку додано до вашої бібліотеки.')
+
+    const calls = quickAddCalls() as unknown as { entryMethod: string; target: unknown }[]
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.entryMethod).toBe('MANUAL')
+    expect(calls[0]?.target).toEqual({
+      kind: 'MANUAL',
+      work: { title: 'Кобзар' },
+      edition: { textKind: 'UNKNOWN' },
+    })
+  })
+
+  it('загальне додавання враховує відкриті редактори й закриває їх', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Назва')
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Кобзар')
+    await openManualEditor(user, 'ISBN-13')
+    await user.type(screen.getByRole('textbox', { name: 'ISBN-13' }), ISBN)
+    quickAddHandler = () => new Promise(() => undefined)
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    expect(await screen.findByRole('button', { name: 'Додаю…' })).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(1)
+    expect(quickAddCalls()[0]).toMatchObject({
+      target: { work: { title: 'Кобзар' }, edition: { isbn13: ISBN } },
+    })
+    expectNoControls()
+  })
+
+  it('невалідне значення: «Зберегти» біля поля лишає редактор відкритим з доступною помилкою й фокусом', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'ISBN-13')
+    await user.type(screen.getByRole('textbox', { name: 'ISBN-13' }), '1234567890123')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: ISBN-13' }))
+
+    const isbn = screen.getByRole('textbox', { name: 'ISBN-13' })
+
+    expect(isbn).toHaveFocus()
+    expect(isbn).toHaveAttribute('aria-invalid', 'true')
+    expect(isbn).toHaveAccessibleDescription(expect.stringContaining('Некоректний ISBN-13'))
+    expect(screen.getByRole('alert')).toHaveTextContent(/Некоректний ISBN-13/)
+    expect(quickAddCalls()).toHaveLength(0)
+
+    // «Скасувати» drops the invalid value and its error together.
+    await user.click(screen.getByRole('button', { name: 'Скасувати: ISBN-13' }))
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Додати ISBN' })).toHaveFocus()
+  })
+
+  it('підтвердження необовʼязкового поля не вимагає спершу назви', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Рік видання')
+    await user.type(screen.getByRole('textbox', { name: 'Рік видання' }), '20x0')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Рік видання' }))
+
+    expect(screen.getByText('Потрібне ціле число')).toBeInTheDocument()
+
+    await user.clear(screen.getByRole('textbox', { name: 'Рік видання' }))
+    await user.type(screen.getByRole('textbox', { name: 'Рік видання' }), '2020')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Рік видання' }))
+
+    expect(within(await manualField('Рік видання')).getByText('2020')).toBeInTheDocument()
+    expect(screen.queryByText('Вкажіть назву')).not.toBeInTheDocument()
+  })
+
+  it('без назви «Додати до бібліотеки» відкриває редактор назви з помилкою й фокусом', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+
+    const title = screen.getByRole('textbox', { name: 'Назва' })
+
+    expect(title).toHaveFocus()
+    expect(title).toHaveAccessibleDescription('Вкажіть назву')
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  it('помилка в згорнутому «Додатково» відкриває розділ і поле з помилкою', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Кобзар&firstPubYear=184x')
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await manualField('Назва')
+
+    expect(screen.getByText('Додатково').closest('details')).not.toHaveAttribute('open')
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    const year = screen.getByRole('textbox', { name: 'Рік першого видання твору' })
+
+    expect(screen.getByText('Додатково').closest('details')).toHaveAttribute('open')
+    expect(year).toBeVisible()
+    expect(year).toHaveFocus()
+    expect(year).toHaveAccessibleDescription('Потрібне ціле число')
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  it('помилка в згорнутому розділі перекладу відкриває розділ і поле перекладача', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Кобзар')
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Це переклад?')
+    await user.click(screen.getByRole('radio', { name: 'Так — це переклад' }))
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Це переклад?' }))
+
+    expect(
+      within(await manualField('Це переклад?')).getByText('Так — це переклад'),
+    ).toBeInTheDocument()
+
+    const summary = screen.getByText('Переклад (необов’язково)')
+
+    await user.click(summary)
+    await openManualEditor(user, 'З якої мови перекладено')
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'З якої мови перекладено' }),
+      'en',
+    )
+    // The source language alone is fine for ITS editor; the missing translator is not its error.
+    await user.click(screen.getByRole('button', { name: 'Зберегти: З якої мови перекладено' }))
+
+    expect(
+      within(await manualField('З якої мови перекладено')).getByText('англійська'),
+    ).toBeInTheDocument()
+
+    await user.click(summary)
+    expect(summary.closest('details')).not.toHaveAttribute('open')
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    const translator = screen.getByRole('textbox', { name: 'Перекладач' })
+
+    expect(summary.closest('details')).toHaveAttribute('open')
+    expect(translator).toHaveFocus()
+    expect(translator).toHaveAttribute('aria-invalid', 'true')
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  it('поки додавання триває: поля не відкриваються, повторного запиту немає', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Кобзар')
+    quickAddHandler = () => new Promise(() => undefined)
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(await screen.findByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByRole('button', { name: 'Додаю…' })
+
+    expect(screen.getByRole('button', { name: 'Редагувати: Назва' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Додати автора' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Додаю…' }))
+
+    expect(quickAddCalls()).toHaveLength(1)
+  })
+
+  it('сканер ISBN доступний у ручній формі й лише підставляє ISBN у чернетку', async () => {
+    searchParams = new URLSearchParams('mode=manual&title=Кобзар')
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(await screen.findByRole('button', { name: 'Simulate scan' }))
+
+    expect(within(await manualField('ISBN-13')).getByText(ISBN)).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Книжку додано до вашої бібліотеки.')
+
+    expect(quickAddCalls()[0]).toMatchObject({ target: { edition: { isbn13: ISBN } } })
+  })
+
+  it('наявний твір: назва фіксована, полів автора й року першого видання немає', async () => {
+    searchParams = new URLSearchParams('mode=manual&workId=w-77')
+    mockApiRequest.mockImplementation((path: string, options?: { body?: unknown }) => {
+      if (path === '/works/w-77') {
+        return Promise.resolve({
+          work: { ...WORK, id: 'w-77', title: 'Наявний твір' },
+          authors: AUTHORS,
+          translations: [],
+          editions: [],
+        })
+      }
+
+      if (path === '/me/library/quick-add') return quickAddHandler(options?.body as QuickAddBody)
+
+      return Promise.reject(new Error(`Неочікуваний запит ${path}`))
+    })
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Наявний твір')
+    await user.click(screen.getByText('Додатково'))
+
+    expect(screen.queryByRole('group', { name: 'Автори' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('group', { name: 'Рік першого видання твору' }),
+    ).not.toBeInTheDocument()
+    expect(await manualField('Видавництво')).toBeInTheDocument()
+
+    await openManualEditor(user, 'Видавництво')
+    await user.type(screen.getByRole('textbox', { name: 'Видавництво' }), 'Наука')
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+    await screen.findByText('Книжку додано до вашої бібліотеки.')
+
+    expect(quickAddCalls()[0]).toMatchObject({
+      target: { work: { workId: 'w-77' }, edition: { publisher: 'Наука' } },
+    })
+    expect(JSON.stringify(quickAddCalls()[0])).not.toMatch(/authors|title/)
   })
 })
 
@@ -1198,7 +1722,11 @@ describe('«← До пошуку» повертає до того самого 
       navigate(hrefOf('Додати вручну'))
     })
 
-    const title = await screen.findByLabelText('Назва')
+    expect(within(await manualField('Назва')).getByText('кобзар')).toBeInTheDocument()
+
+    await openManualEditor(user, 'Назва')
+
+    const title = screen.getByLabelText('Назва')
 
     expect(title).toHaveValue('кобзар')
     await user.clear(title)
@@ -1225,7 +1753,7 @@ describe('«← До пошуку» повертає до того самого 
       navigate(hrefOf('Додати вручну'))
     })
 
-    expect(await screen.findByLabelText('ISBN-13')).toHaveValue(ISBN)
+    expect(within(await manualField('ISBN-13')).getByText(ISBN)).toBeInTheDocument()
 
     mockApiRequest.mockClear()
     act(() => {
@@ -1264,7 +1792,7 @@ describe('«← До пошуку» повертає до того самого 
     searchParams = new URLSearchParams('mode=manual&title=кобзар&q=кобзар&page=3&pageSize=20')
     renderScreen()
 
-    expect(await screen.findByLabelText('Назва')).toHaveValue('кобзар')
+    expect(within(await manualField('Назва')).getByText('кобзар')).toBeInTheDocument()
     expect(hrefOf('← До пошуку')).toBe(
       `/catalog/new?${new URLSearchParams({ q: 'кобзар', page: '3', pageSize: '20' }).toString()}`,
     )
@@ -1273,7 +1801,7 @@ describe('«← До пошуку» повертає до того самого 
   it('з автопідказок повертає до підказок того самого тексту', async () => {
     searchParams = new URLSearchParams('mode=manual&title=Кобз&q=Кобз&auto=1')
     renderScreen()
-    await screen.findByLabelText('Назва')
+    await manualField('Назва')
 
     act(() => {
       navigate(hrefOf('← До пошуку'))
@@ -1291,7 +1819,7 @@ describe('«← До пошуку» повертає до того самого 
   it('пряме відкриття форми: повернення до порожнього пошуку без запитів', async () => {
     searchParams = new URLSearchParams('mode=manual')
     renderScreen()
-    await screen.findByLabelText('Назва')
+    await manualField('Назва')
 
     expect(hrefOf('← До пошуку')).toBe('/catalog/new?q=')
 

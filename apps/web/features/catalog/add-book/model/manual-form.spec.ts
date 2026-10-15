@@ -1,5 +1,6 @@
 import {
   buildManualTarget,
+  manualFieldError,
   manualInitialFrom,
   EMPTY_MANUAL_FORM,
   type ManualFormValues,
@@ -138,6 +139,43 @@ describe('buildManualTarget — переклад як необовʼязкови
     const built = buildManualTarget(values({ textKind: 'ORIGINAL', translator: 'Хтось' }))
 
     expect(JSON.stringify(built)).not.toContain('translation')
+  })
+})
+
+describe('manualFieldError — «Зберегти» одного поля (BS-76)', () => {
+  it('ті самі правила, що й у buildManualTarget: ISBN, цілі числа, назва, контракт', () => {
+    expect(manualFieldError(values({ isbn: '1234567890123' }), 'isbn')).toContain('ISBN')
+    expect(manualFieldError(values({ year: '20x0' }), 'year')).toBe('Потрібне ціле число')
+    expect(manualFieldError(values({ title: ' ' }), 'title')).toBe('Вкажіть назву')
+    expect(manualFieldError(values({ coverUrl: 'не посилання' }), 'coverUrl')).toBe(
+      'Некоректне посилання',
+    )
+    expect(manualFieldError(values({ firstPubYear: '99999' }), 'firstPubYear')).toBeDefined()
+  })
+
+  it('валідне поле — без помилки', () => {
+    expect(manualFieldError(values({ isbn: '978-3-16-148410-0' }), 'isbn')).toBeUndefined()
+    expect(manualFieldError(values({ year: '2020' }), 'year')).toBeUndefined()
+  })
+
+  it('помилки інших полів не рахуються: необовʼязкове поле не вимагає спершу назви', () => {
+    const draft = values({ title: '', isbn: '1', year: '2020', publisher: 'Наука' })
+
+    expect(manualFieldError(draft, 'year')).toBeUndefined()
+    expect(manualFieldError(draft, 'publisher')).toBeUndefined()
+    expect(manualFieldError(draft, 'title')).toBe('Вкажіть назву')
+    expect(manualFieldError(draft, 'isbn')).toContain('ISBN')
+  })
+
+  it('розділ перекладу: кожне поле відповідає лише за свою помилку', () => {
+    const draft = values({ textKind: 'TRANSLATION', translationSourceLang: 'en' })
+
+    expect(manualFieldError(draft, 'translationSourceLang')).toBeUndefined()
+    expect(manualFieldError(draft, 'translator')).toBeDefined()
+  })
+
+  it('з наявним твором назва не потрібна', () => {
+    expect(manualFieldError(values({ title: '' }), 'title', 'work-1')).toBeUndefined()
   })
 })
 

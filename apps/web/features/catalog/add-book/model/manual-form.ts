@@ -30,7 +30,10 @@ export interface ManualFormValues {
   translationSourceLang: string
 }
 
-export type ManualFieldKey = keyof ManualFormValues | 'form'
+/** One field of the form — and the name of its inline editor (BS-76). */
+export type ManualFieldName = keyof ManualFormValues
+
+export type ManualFieldKey = ManualFieldName | 'form'
 
 export type ManualFieldErrors = Partial<Record<ManualFieldKey, string>>
 
@@ -49,6 +52,13 @@ export const EMPTY_MANUAL_FORM: ManualFormValues = {
   translator: '',
   translationLang: '',
   translationSourceLang: '',
+}
+
+/** «Це переклад?» — how the answer reads, both as a radio and as the field's text. */
+export const TEXT_KIND_LABELS: Readonly<Record<EditionTextKind, string>> = {
+  UNKNOWN: 'Не знаю',
+  ORIGINAL: 'Ні — це оригінал',
+  TRANSLATION: 'Так — це переклад',
 }
 
 const trimmed = (value: string): string | undefined => {
@@ -113,16 +123,14 @@ function fieldOf(path: readonly PropertyKey[]): ManualFieldKey {
 }
 
 /**
- * Значення форми → ручна ціль додавання.
- *
- * Невідоме лишається невідомим: порожні поля просто не потрапляють у запит. Розділ перекладу необов'язковий:
- * порожній нічого не створює, а відкритий і заповнений проходить чинну перевірку своїх полів. Остаточне слово за
- * спільною схемою контракту — тією самою, що й на сервері.
+ * The checks that need no contract — ISBN checksum, whole numbers, the required title — plus the
+ * candidate target built from what passed them. An invalid value stays out of the candidate, so it
+ * cannot add a second, contract-level error for the same field.
  */
-export function buildManualTarget(
+function checkLocally(
   values: ManualFormValues,
-  presetWorkId?: string,
-): { ok: true; target: QuickAddManualTarget } | { ok: false; errors: ManualFieldErrors } {
+  presetWorkId: string | undefined,
+): { errors: ManualFieldErrors; candidate: unknown } {
   const errors: ManualFieldErrors = {}
   const isbn = trimmed(values.isbn)
   let isbn13: string | undefined
@@ -151,8 +159,6 @@ export function buildManualTarget(
 
   if (presetWorkId === undefined && title === undefined) errors.title = 'Вкажіть назву'
 
-  if (Object.keys(errors).length > 0) return { ok: false, errors }
-
   const candidate = {
     kind: 'MANUAL',
     work:
@@ -177,13 +183,32 @@ export function buildManualTarget(
       ? {
           translation: {
             translator: values.translator.trim(),
-            // Мова перекладу за замовчуванням — мова видання, яку людина вже назвала.
+            // The translation's language defaults to the edition language the person already named.
             lang: values.translationLang.trim() || values.lang.trim(),
             sourceLang: values.translationSourceLang.trim(),
           },
         }
       : {}),
   }
+
+  return { errors, candidate }
+}
+
+/**
+ * Значення форми → ручна ціль додавання.
+ *
+ * Невідоме лишається невідомим: порожні поля просто не потрапляють у запит. Розділ перекладу необов'язковий:
+ * порожній нічого не створює, а відкритий і заповнений проходить чинну перевірку своїх полів. Остаточне слово за
+ * спільною схемою контракту — тією самою, що й на сервері.
+ */
+export function buildManualTarget(
+  values: ManualFormValues,
+  presetWorkId?: string,
+): { ok: true; target: QuickAddManualTarget } | { ok: false; errors: ManualFieldErrors } {
+  const { errors, candidate } = checkLocally(values, presetWorkId)
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors }
+
   const parsed = quickAddManualTargetSchema.safeParse(candidate)
 
   if (parsed.success) return { ok: true, target: parsed.data }
@@ -195,6 +220,27 @@ export function buildManualTarget(
   }
 
   return { ok: false, errors }
+}
+
+/**
+ * The rules of `buildManualTarget`, for ONE field — what an inline editor's own «Зберегти» checks
+ * (BS-76). Other fields do not count: confirming the year must not first demand a title.
+ */
+export function manualFieldError(
+  values: ManualFormValues,
+  field: ManualFieldName,
+  presetWorkId?: string,
+): string | undefined {
+  const { errors, candidate } = checkLocally(values, presetWorkId)
+  const local = errors[field]
+
+  if (local !== undefined) return local
+
+  const parsed = quickAddManualTargetSchema.safeParse(candidate)
+
+  return parsed.success
+    ? undefined
+    : parsed.error.issues.find((issue) => fieldOf(issue.path) === field)?.message
 }
 
 /** Початкові значення форми з адреси: назва, ISBN, автори, рік — те, що вже відомо з пошуку чи запису. */
