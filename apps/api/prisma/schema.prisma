@@ -277,6 +277,9 @@ model Work {
   wishlistedBy    WishlistItem[]
   readingStatuses WorkReadingStatus[]
 
+  /// Підтверджені джерелом записи зовнішніх творів, що відповідають цьому (BS-114).
+  externalReferences WorkExternalReference[]
+
   /// Зворотний бік `Review.archivedByMergeSource` (R5). Іменований зв'язок потрібен
   /// суто тому, що між `Review` і `Work` їх стало два — сам по собі цей список
   /// нікому не читається.
@@ -358,6 +361,9 @@ model Edition {
   /// Точні зовнішні ідентифікатори цього видання (docs/plan/fast-book-add.md, §5.3).
   externalReferences EditionExternalReference[]
 
+  /// Записи зовнішніх творів, пряме додавання яких веде до цього видання (BS-114).
+  workReferences WorkExternalReference[]
+
   @@index([workId])
   @@index([translationId])
 }
@@ -377,6 +383,30 @@ model EditionExternalReference {
   edition Edition @relation(fields: [editionId], references: [id], onDelete: Cascade)
 
   @@unique([source, externalId])
+  @@index([editionId])
+}
+
+/// Підтверджене джерелом зіставлення «зовнішній запис ТВОРУ → наш твір» (BS-114, docs/plan/fast-book-add.md, §13).
+/// Окремо від `EditionExternalReference`: ID твору джерела (Open Library `OL…W`) ніколи не видається за ID видання.
+///
+/// `editionId` — видання «без уточнення», створене прямим додаванням цього запису (невідомі видавничі дані,
+/// обкладинка запису). Повторне пряме додавання знаходить саме його, а не довільне видання твору. `NULL` — твір
+/// пов'язали через «Уточнити дані», а прямого додавання ще не було.
+///
+/// `workId` не переприв'язується при злитті: читачі беруть канонічний твір через `mergedIntoId` (інваріант R4).
+model WorkExternalReference {
+  id         String             @id @default(cuid())
+  source     ExternalBookSource
+  externalId String
+  workId     String
+  editionId  String?
+  createdAt  DateTime           @default(now())
+
+  work    Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  edition Edition? @relation(fields: [editionId], references: [id], onDelete: SetNull)
+
+  @@unique([source, externalId])
+  @@index([workId])
   @@index([editionId])
 }
 
@@ -500,6 +530,8 @@ enum LibraryAddTargetKind {
   EXISTING_EDITION
   EXTERNAL_EDITION
   MANUAL
+  /// BS-114: запис зовнішнього твору без конкретного видання.
+  EXTERNAL_WORK
 }
 
 /// Серверна ідемпотентність швидкого додавання: один рядок на (користувач, `operationId`).

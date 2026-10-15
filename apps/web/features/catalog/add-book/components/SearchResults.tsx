@@ -111,7 +111,12 @@ export function SearchResults({
     const subject: AddResultSubject = { kind: 'EXTERNAL', result: item.result }
 
     return item.result.kind === 'WORK' ? (
-      <ExternalWorkCard key={item.key} result={item.result} onSelect={choose(subject)} />
+      <ExternalWorkCard
+        key={item.key}
+        result={item.result}
+        slot={slotOf(subject)}
+        onSelect={choose(subject)}
+      />
     ) : (
       <ExternalEditionCard
         key={item.key}

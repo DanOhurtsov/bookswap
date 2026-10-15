@@ -146,6 +146,13 @@ function AddResultDialogBody({
           </p>
         )}
 
+        {view.editionUnknown && (
+          <p className="m-0">
+            Це запис про твір: видавництво, рік видання й ISBN лишаться невідомими. Їх можна вказати
+            через «Уточнити дані».
+          </p>
+        )}
+
         {archivedOnly && (
           <p className="m-0">
             Це видання є у вашому архіві.{' '}

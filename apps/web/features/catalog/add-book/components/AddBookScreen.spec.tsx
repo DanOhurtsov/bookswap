@@ -3700,8 +3700,14 @@ describe('різні ручні форми — різні наміри (рев�
     await waitFor(() => {
       expect(push).toHaveBeenCalledWith('/library')
     })
+    // The form was not changed, so the record keeps its identity (BS-114 «Уточнити дані»).
     expect(quickAddCalls()[0]).toMatchObject({
-      target: { kind: 'MANUAL', work: { title: 'Книжка B' }, edition: { isbn13: '9780306406157' } },
+      target: {
+        kind: 'EXTERNAL_EDITION',
+        source: 'GOOGLE_BOOKS',
+        externalId: 'vol-b',
+        isbn13: '9780306406157',
+      },
     })
   })
 
@@ -3728,5 +3734,205 @@ describe('різні ручні форми — різні наміри (рев�
     await refine(user, 1)
 
     expect(screen.getByRole('button', { name: 'Додати до бібліотеки' })).toBeInTheDocument()
+  })
+})
+
+describe('зовнішній запис твору без видання (BS-114)', () => {
+  const COVER = 'https://covers.openlibrary.org/b/id/6498519-M.jpg'
+  const WORK_RECORD: AddSearchExternalItem = {
+    kind: 'EXTERNAL',
+    key: 'external:OPEN_LIBRARY:OL45804W',
+    result: {
+      id: 'OPEN_LIBRARY:OL45804W',
+      kind: 'WORK',
+      sources: ['OPEN_LIBRARY'],
+      title: 'Fantastic Mr Fox',
+      authors: ['Roald Dahl'],
+      firstPublishedYear: 1970,
+      coverUrl: COVER,
+      externalId: 'OL45804W',
+      workExternalId: 'OL45804W',
+    },
+  }
+
+  beforeEach(() => {
+    items = []
+    externalItems = [WORK_RECORD]
+    quickAddHandler = (body) =>
+      Promise.resolve(
+        addedResponse({ operationId: body.operationId, target: { editionId: 'e-olw' } }),
+      )
+  })
+
+  async function refineFromDialog(user: User): Promise<URLSearchParams> {
+    const dialog = await openCard(user)
+    const href =
+      within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href') ?? ''
+
+    act(() => {
+      navigate(href)
+    })
+    await screen.findByRole('heading', { name: 'Додати книжку вручну' })
+
+    return new URLSearchParams(href.split('?')[1])
+  }
+
+  it('додається одним натисканням без форми: на сервер іде лише запис, діалог і пошук лишаються', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Fantastic Mr Fox')
+
+    const dialog = await openCard(user)
+
+    expect(
+      within(dialog).getByRole('img', { name: 'Обкладинка «Fantastic Mr Fox»' }),
+    ).toHaveAttribute('src', expect.stringContaining('6498519'))
+    expect(within(dialog).getByText('Уперше видано')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Рік видання')).not.toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/видавництво, рік видання й ISBN лишаться невідомими/),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'Уточнити дані' })).toBeInTheDocument()
+    // Opening the dialog sends nothing.
+    expect(quickAddCalls()).toHaveLength(0)
+
+    await user.click(within(dialog).getByRole('button', { name: 'Додати до бібліотеки' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+
+    expect(quickAddCalls()).toEqual([
+      {
+        operationId: expect.any(String),
+        entryMethod: 'MANUAL',
+        target: { kind: 'EXTERNAL_WORK', source: 'OPEN_LIBRARY', externalId: 'OL45804W' },
+      },
+    ])
+    expect(push).not.toHaveBeenCalled()
+    expect(searchParams.toString()).toBe(new URLSearchParams({ q: 'кобзар' }).toString())
+    // A second copy of the same book is a separate, explicit action.
+    expect(
+      within(dialog).getByRole('button', { name: 'Додати ще один примірник' }),
+    ).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Закрити' }))
+
+    expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+  })
+
+  it('подвійне натискання — один запит; невизначений результат повторюється тим самим operationId', async () => {
+    let attempt = 0
+    let release!: () => void
+
+    quickAddHandler = (body) => {
+      attempt += 1
+
+      if (attempt === 1) {
+        return new Promise((_, reject) => {
+          release = () => {
+            reject(new TypeError('Failed to fetch'))
+          }
+        })
+      }
+
+      return Promise.resolve(
+        addedResponse({ operationId: body.operationId, target: { editionId: 'e-olw' } }),
+      )
+    }
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Fantastic Mr Fox')
+
+    const dialog = await openCard(user)
+    const add = within(dialog).getByRole('button', { name: 'Додати до бібліотеки' })
+
+    await user.click(add)
+    await user.click(add)
+
+    expect(quickAddCalls()).toHaveLength(1)
+
+    act(() => {
+      release()
+    })
+    await user.click(await within(dialog).findByRole('button', { name: 'Перевірити ще раз' }))
+    await within(dialog).findByRole('button', { name: '✓ У моїй бібліотеці' })
+
+    const [first, second] = quickAddCalls()
+
+    expect(quickAddCalls()).toHaveLength(2)
+    expect(second).toEqual(first)
+  })
+
+  it('«Уточнити дані» несе обкладинку й запис; відкриття форми нічого не створює', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Fantastic Mr Fox')
+
+    const parameters = await refineFromDialog(user)
+
+    expect(parameters.get('coverUrl')).toBe(COVER)
+    expect(parameters.get('record')).toBe('OPEN_LIBRARY:OL45804W')
+    expect(parameters.get('firstPubYear')).toBe('1970')
+    expect(parameters.has('year')).toBe(false)
+    expect(parameters.has('isbn')).toBe(false)
+    expect(quickAddCalls()).toHaveLength(0)
+
+    await user.click(screen.getByText('Додатково'))
+
+    expect(within(await manualField('Обкладинка (посилання)')).getByText(COVER)).toBeInTheDocument()
+  })
+
+  it('уточнення без змін у полях твору зберігає запис: додані поля видання — лише як доповнення', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Fantastic Mr Fox')
+    await refineFromDialog(user)
+    await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Видавництво')
+    await user.type(screen.getByLabelText('Видавництво'), 'Puffin')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Видавництво' }))
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/library')
+    })
+    // The cover and the work's data are the record's: the server takes them from the source.
+    expect(quickAddCalls()).toEqual([
+      {
+        operationId: expect.any(String),
+        entryMethod: 'MANUAL',
+        target: {
+          kind: 'EXTERNAL_WORK',
+          source: 'OPEN_LIBRARY',
+          externalId: 'OL45804W',
+          edition: { publisher: 'Puffin' },
+        },
+      },
+    ])
+  })
+
+  it('змінена назва — власний запис людини без звʼязку, обкладинка зберігається', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Fantastic Mr Fox')
+    await refineFromDialog(user)
+    await openManualEditor(user, 'Назва')
+    await user.clear(screen.getByRole('textbox', { name: 'Назва' }))
+    await user.type(screen.getByRole('textbox', { name: 'Назва' }), 'Незвичайний пан Лис')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Назва' }))
+    await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
+
+    await waitFor(() => {
+      expect(quickAddCalls()).toHaveLength(1)
+    })
+    expect(quickAddCalls()[0]?.target).toEqual({
+      kind: 'MANUAL',
+      work: { title: 'Незвичайний пан Лис', firstPubYear: 1970, authors: [{ name: 'Roald Dahl' }] },
+      edition: { textKind: 'UNKNOWN', coverUrl: COVER },
+    })
   })
 })

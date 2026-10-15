@@ -67,8 +67,6 @@ const EDITION_ONLY_FIELDS = [
   // hands, so a `WORK` leaves the field empty rather than filling it with an
   // "approximately right" number.
   'pageCount',
-  // Fast-add: the local edition this printing is already known as (see `localEditionId`).
-  'localEditionId',
 ] as const
 
 /**
@@ -124,10 +122,14 @@ export const externalSearchResultSchema = z
     /** Open Library Work (`OL…W`) — reference metadata, never a FK. */
     workExternalId: z.string().optional(),
     /**
-     * Fast-add (`/me/library/add-search/external`) only, `EDITION` only: this printing is ALREADY a
-     * `Edition` of ours (matched by ISBN or by a confirmed external reference) although the local search
-     * did not find it under this query. The server substitutes it in place BEFORE the page is cut, so
-     * the card shows the same state as the local one and adding it never depends on the provider.
+     * Fast-add (`/me/library/add-search/external`) only: this record is ALREADY an `Edition` of ours
+     * although the local search did not find it under this query. The server substitutes it in place
+     * BEFORE the page is cut, so the card shows the same state as the local one and adding it never
+     * depends on the provider.
+     *
+     * An `EDITION` is matched by ISBN or by a confirmed edition reference. A `WORK` is matched only by a
+     * confirmed WORK reference, and only to the edition its direct add created (BS-114,
+     * `WorkExternalReference.editionId`) — never to some printing that merely shares the title or the work.
      */
     localEditionId: z.string().optional(),
   })

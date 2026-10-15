@@ -8,6 +8,8 @@
 | `20261001100000_fast_add_edition_text_expand` | `Work.origLang`, `Edition.format` — nullable; `Edition.textKind` (nullable), `Edition.lang`; enum `EditionTextKind` | expand |
 | `20261001110000_fast_add_edition_text_contract` | ідемпотентний backfill, `textKind NOT NULL`, CHECK `edition_translation_implies_translation_kind` | contract |
 | `20261001120000_fast_add_external_refs` | таблиця `EditionExternalReference`, enum `ExternalBookSource`, зняття `DEFAULT PAPERBACK` з `Edition.format` | expand |
+| `20261015090000_external_work_target_enum` | значення `EXTERNAL_WORK` в enum `LibraryAddTargetKind` (BS-114, план §13) | expand |
+| `20261015090100_external_work_refs` | таблиця `WorkExternalReference` (BS-114, план §13) | expand |
 
 Золоте правило [catalog-correction-migration-rollback.md](./catalog-correction-migration-rollback.md) діє й тут: застосований `migration.sql` не редагується, `prisma migrate reset` не є способом «скасувати». Відкат — це відновлення з backup до відновлення записів або **нова forward-міграція** (§6). **Назвати зміни «сумісними» лише тому, що старі дані не видаляються, не можна:** сумісність визначається тим, що й коли пише кожна версія коду.
 
@@ -106,12 +108,33 @@ Backfill відтворив рівно те, що старий код обчис
 Проміжних цілей відкату («R1», «R2», «R3») не існує (§1). Не прирівнювати «дані не видалено» до «старий код сумісний»: сумісність визначається тим, що й коли пише кожна версія коду.
 
 
+### 6.1. Додавання зовнішнього твору (BS-114)
+
+Дві міграції BS-114 лише додають: значення enum і нову таблицю, наявні рядки не змінюються (`external-work-refs-migration.db-spec.ts`). Їх можна застосувати до запуску нового коду (`db:deploy` → рестарт `api` → web): попередня збірка таблицю ігнорує й значення `EXTERNAL_WORK` не пише.
+
+Відкат **коду** на попередню збірку після появи записів BS-114:
+
+- твори й видання «без уточнення» — звичайні неповні записи (`textKind = UNKNOWN`, `null`), які попередня збірка вже читає;
+- `WorkExternalReference` попередня збірка ігнорує: запис твору знову показується зовнішнім і не додається напряму, а нічого не видаляється;
+- повтор (replay) операції з `targetKind = EXTERNAL_WORK` попередньою збіркою не підтримується (її Prisma-клієнт не знає значення enum) — лише тим самим `operationId` після відкату; нові операції не зачеплені.
+
+Відкат **схеми** (видалення таблиці чи значення enum) не передбачено: лише forward-міграція, якщо колись знадобиться.
+
+Перевірка після міграції (має повернути **0**): посилання на твір, чиє видання належить іншому твору, ніж канонічний твір посилання.
+
+```sql
+SELECT count(*) FROM "WorkExternalReference" r
+JOIN "Work" w ON w.id = r."workId"
+JOIN "Edition" e ON e.id = r."editionId"
+WHERE e."workId" <> COALESCE(w."mergedIntoId", w.id);
+```
+
 ## 7. Метрики (baseline перед rollout і порівняння після)
 
 `BOOK_ADDED` зберігається як є; нових подій немає. Для часток і повторів — таблиця `LibraryAddOperation`:
 
 ```sql
--- Скільки додавань за днями й типом цілі (EXISTING_EDITION / EXTERNAL_EDITION / MANUAL)
+-- Скільки додавань за днями й типом цілі (EXISTING_EDITION / EXTERNAL_EDITION / EXTERNAL_WORK / MANUAL)
 SELECT date_trunc('day', "createdAt") AS day, "targetKind", count(*)
 FROM "LibraryAddOperation" GROUP BY 1, 2 ORDER BY 1, 2;
 
@@ -135,9 +158,10 @@ WHERE r."entityType" = 'EDITION' AND o."targetKind" = 'EXTERNAL_EDITION';
 - `apps/api/test/quick-add.e2e-spec.ts` — ідемпотентність наявного видання, рестарт, видимість, аналітика, відкат.
 - `apps/api/test/quick-add-external.e2e-spec.ts` — перше зовнішнє додавання, локальне видання без мережі, конфлікти ідентичності, змагання двох користувачів (одне `Edition`, два `Copy`), відкат.
 - `apps/api/test/quick-add-manual.e2e-spec.ts` — ручна форма, переклад, ISBN, наявний твір, відкат.
+- `apps/api/test/quick-add-external-work.e2e-spec.ts` (BS-114) — запис твору Open Library: пряме додавання з обкладинкою, назвою, авторами й роком першої публікації; нічого не вигадано; повтор і «ще один»; 8 паралельних повторів; змагання двох перших додавань (один `Work`, одне видання, одне посилання); відкат; злиття; уточнення (обкладинка, переклад, ISBN уже є); уточнення тому Google Books; повторний пошук пов'язує запис із локальним виданням і не дублює його.
 - `apps/api/test/add-search.e2e-spec.ts` — видання як одиниця списку, сторінки, володіння, зовнішня половина.
 - `apps/api/test/edition-language.e2e-spec.ts` — матриця переходів, каскади, злиття, конкурентність блокувань.
-- `apps/api/test/db/fast-add-text-migration.db-spec.ts`, `fast-add-external-refs-migration.db-spec.ts` — міграції на наповненій scratch-БД.
+- `apps/api/test/db/fast-add-text-migration.db-spec.ts`, `fast-add-external-refs-migration.db-spec.ts`, `external-work-refs-migration.db-spec.ts` — міграції на наповненій scratch-БД.
 - `apps/web/features/catalog/add-book/**` — jsdom/Testing Library.
 
 ## 9. Ручна перевірка в реальних браузерах (NOT RUN)

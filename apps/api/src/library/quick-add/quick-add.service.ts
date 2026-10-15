@@ -2,6 +2,8 @@ import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import {
   API_ERROR_CODES,
   type QuickAddExternalEditionTarget,
+  type QuickAddExternalWorkTarget,
+  type QuickAddManualTarget,
   type QuickAddRequest,
   type QuickAddResponse,
   type QuickAddTargetKind,
@@ -21,6 +23,13 @@ import {
   type ConfirmedExternalEdition,
   type ExternalReferenceKey,
 } from './external-edition.resolver'
+import {
+  editionFromSource,
+  editionOfWorkRecord,
+  needsWorkSource,
+  originalLanguageOf,
+} from './external-details'
+import { ExternalWorkResolver, type ConfirmedExternalWork } from './external-work.resolver'
 import { requestHashOf } from './quick-add.hash'
 import type { Prisma } from '../../generated/prisma/client'
 
@@ -37,6 +46,7 @@ const TRANSACTION_OPTIONS = { timeout: 10_000, maxWait: 5_000 } as const
 const RACE_CONSTRAINTS = [
   'Edition_isbn13_key',
   'EditionExternalReference_source_externalId_key',
+  'WorkExternalReference_source_externalId_key',
   'LibraryAddOperation_userId_operationId_key',
 ] as const
 
@@ -47,9 +57,17 @@ interface Outcome {
   copyId: string
 }
 
-/** Що відомо про зовнішнє видання ДО транзакції: або воно вже наше (мережі не було), або підтверджене джерелом. */
+/** Що відомо про зовнішній запис ДО транзакції: або він уже наш (мережі не було), або підтверджений джерелом. */
 interface PreparedExternal {
   confirmed?: ConfirmedExternalEdition
+  work?: ConfirmedExternalWork
+}
+
+type ExternalTarget = QuickAddExternalEditionTarget | QuickAddExternalWorkTarget
+
+/** «Уточнити дані» (BS-114): людина додала до зовнішнього запису поля видання чи переклад. */
+function hasDetails(target: ExternalTarget): boolean {
+  return target.edition !== undefined || target.translation !== undefined
 }
 
 /**
@@ -79,6 +97,7 @@ export class QuickAddService {
     private readonly network: NetworkActivationService,
     private readonly copies: CopyWriter,
     private readonly external: ExternalEditionResolver,
+    private readonly works: ExternalWorkResolver,
     private readonly chain: CatalogChainWriter,
   ) {}
 
@@ -92,11 +111,11 @@ export class QuickAddService {
     return outcome.response
   }
 
-  /** Мережа — до транзакції й лише коли вона справді потрібна: не для повтору й не для вже відомого видання. */
+  /** Мережа — до транзакції й лише коли вона справді потрібна: не для повтору й не для вже відомого запису. */
   private async prepare(userId: string, request: QuickAddRequest): Promise<PreparedExternal> {
     const { target } = request
 
-    if (target.kind !== 'EXTERNAL_EDITION') return {}
+    if (target.kind !== 'EXTERNAL_EDITION' && target.kind !== 'EXTERNAL_WORK') return {}
 
     const repeated = await this.prisma.libraryAddOperation.findUnique({
       where: { userId_operationId: { userId, operationId: request.operationId } },
@@ -105,6 +124,13 @@ export class QuickAddService {
 
     // Повтор виконаної дії: транзакція сама поверне результат або поверне пояснення конфлікту — провайдер не потрібен.
     if (repeated !== null) return {}
+
+    if (target.kind === 'EXTERNAL_WORK') {
+      const key = ExternalWorkResolver.keyOf(target)
+      const known = await this.works.findLocal(this.prisma, key)
+
+      return needsWorkSource(target, known) ? { work: await this.works.fetch(key) } : {}
+    }
 
     const known = await this.external.findLocal(
       this.prisma,
@@ -209,12 +235,7 @@ export class QuickAddService {
     prepared: PreparedExternal,
   ): Promise<{ copy: CopyWithCatalog; targetKind: QuickAddTargetKind }> {
     const { target } = request
-    const editionId =
-      target.kind === 'EXISTING_EDITION'
-        ? await this.existingEditionId(tx, target.editionId)
-        : target.kind === 'MANUAL'
-          ? await this.chain.createManual(tx, userId, target)
-          : await this.externalEditionId(tx, userId, target, prepared)
+    const editionId = await this.editionIdFor(tx, userId, target, prepared)
 
     const copy = await this.copies.create(tx, {
       ownerId: userId,
@@ -223,6 +244,24 @@ export class QuickAddService {
     })
 
     return { copy, targetKind: target.kind }
+  }
+
+  private async editionIdFor(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    target: QuickAddRequest['target'],
+    prepared: PreparedExternal,
+  ): Promise<string> {
+    switch (target.kind) {
+      case 'EXISTING_EDITION':
+        return this.existingEditionId(tx, target.editionId)
+      case 'MANUAL':
+        return this.chain.createManual(tx, userId, target)
+      case 'EXTERNAL_EDITION':
+        return this.externalEditionId(tx, userId, target, prepared)
+      case 'EXTERNAL_WORK':
+        return this.externalWorkEditionId(tx, userId, target, prepared.work)
+    }
   }
 
   private async existingEditionId(
@@ -259,6 +298,9 @@ export class QuickAddService {
     const found = await this.external.findLocal(tx, identity)
 
     if (found.editionId !== undefined) {
+      // Уточнення не дописується в чуже спільне видання мовчки: людина бачить наявне й додає його як є.
+      if (hasDetails(target)) throw editionAlreadyInCatalog(found.editionId)
+
       if (confirmed?.reference !== undefined && !found.referenceKnown) {
         await this.rememberReference(tx, found.editionId, confirmed.reference)
       }
@@ -271,14 +313,105 @@ export class QuickAddService {
       throw new Error('Зовнішнє видання не знайдено локально й не було підтверджене джерелом')
     }
 
-    const editionId = await this.chain.createFromExternal(tx, userId, {
-      metadata: confirmed.metadata,
-      isbn13: confirmed.isbn13,
-    })
+    const editionId = hasDetails(target)
+      ? await this.createRefinedEdition(tx, userId, target, confirmed)
+      : await this.chain.createFromExternal(tx, userId, {
+          metadata: confirmed.metadata,
+          isbn13: confirmed.isbn13,
+        })
 
     if (confirmed.reference !== undefined) {
       await this.rememberReference(tx, editionId, confirmed.reference)
     }
+
+    return editionId
+  }
+
+  /**
+   * «Уточнити дані» зовнішнього видання (BS-114): твір — з підтвердженого джерелом, видання — підтверджене
+   * джерелом із доданим людиною на місці прогалин (`editionFromSource`). Переклад, тип тексту й ISBN, що вже є
+   * в каталозі, проходять ті самі правила, що й ручна форма.
+   */
+  private async createRefinedEdition(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    target: QuickAddExternalEditionTarget,
+    confirmed: ConfirmedExternalEdition,
+  ): Promise<string> {
+    const edition = editionFromSource(confirmed, target.edition)
+    const workId = await this.chain.createWorkFromSource(tx, userId, {
+      title: confirmed.metadata.title,
+      authors: confirmed.metadata.authors,
+      description: confirmed.metadata.description,
+      origLang: originalLanguageOf(edition),
+    })
+
+    return this.chain.createManual(tx, userId, manualOn(workId, edition, target.translation))
+  }
+
+  /**
+   * Запис ТВОРУ (BS-114). Під advisory-блокуванням запису (два перші додавання не створять двох творів)
+   * підтверджене посилання веде до НАШОГО твору; без нього твір створюється з відповіді джерела й посилання
+   * записується. Пряме додавання потрапляє на видання «без уточнення» цього запису — знаходить наявне, а не
+   * створює ще одне; уточнене — нове видання того самого твору з даними людини.
+   *
+   * Назва чи автор, що просто збігаються, нічого не зв'язують: лише посилання.
+   */
+  private async externalWorkEditionId(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    target: QuickAddExternalWorkTarget,
+    confirmed: ConfirmedExternalWork | undefined,
+  ): Promise<string> {
+    const key = ExternalWorkResolver.keyOf(target)
+
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quick-add-work:${key.source}:${key.externalId}`}))`
+
+    const known = await this.works.findLocal(tx, key)
+
+    if (needsWorkSource(target, known) && confirmed === undefined) {
+      // `prepare` питав джерело щоразу, коли воно потрібне; посилання й видання не зникають — без втручання це неможливо.
+      throw new Error('Запис твору потребує відповіді джерела, але її не отримано')
+    }
+
+    let workId: string
+
+    if (known === null) {
+      if (confirmed === undefined) throw new Error('Новий твір без підтверджених метаданих')
+
+      workId = await this.chain.createWorkFromSource(tx, userId, {
+        title: confirmed.title,
+        authors: confirmed.authors,
+        firstPubYear: confirmed.firstPubYear,
+      })
+      await tx.workExternalReference.create({ data: { ...key, workId } })
+    } else {
+      workId = await canonicalWorkId(tx, known.workId)
+    }
+
+    if (hasDetails(target)) {
+      return this.chain.createManual(
+        tx,
+        userId,
+        manualOn(
+          workId,
+          editionOfWorkRecord(target.edition, confirmed?.coverUrl),
+          target.translation,
+        ),
+      )
+    }
+
+    if (known !== null && known.editionId !== null) return known.editionId
+
+    const editionId = await this.chain.createUnspecifiedEdition(tx, userId, {
+      workId,
+      coverUrl: confirmed?.coverUrl,
+    })
+
+    await tx.workExternalReference.update({
+      where: { source_externalId: key },
+      data: { editionId },
+    })
 
     return editionId
   }
@@ -330,6 +463,35 @@ export class QuickAddService {
       this.logger.warn('Післязаписні дії швидкого додавання не виконано; примірник збережено')
     }
   }
+}
+
+/** Злитий твір відповідає своїм канонічним (інваріант R4: один крок, ланцюгів немає). */
+async function canonicalWorkId(tx: Prisma.TransactionClient, workId: string): Promise<string> {
+  const work = await tx.work.findUnique({ where: { id: workId }, select: { mergedIntoId: true } })
+
+  return work?.mergedIntoId ?? workId
+}
+
+function manualOn(
+  workId: string,
+  edition: QuickAddManualTarget['edition'],
+  translation: QuickAddManualTarget['translation'],
+): QuickAddManualTarget {
+  return {
+    kind: 'MANUAL',
+    work: { workId },
+    edition,
+    ...(translation === undefined ? {} : { translation }),
+  }
+}
+
+function editionAlreadyInCatalog(editionId: string): ApiException {
+  return new ApiException(
+    API_ERROR_CODES.EDITION_ISBN_TAKEN,
+    'Це видання вже є в каталозі',
+    HttpStatus.CONFLICT,
+    { editionId },
+  )
 }
 
 function toResponse(

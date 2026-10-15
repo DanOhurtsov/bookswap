@@ -167,40 +167,9 @@ export class ExternalEditionResolver {
 
     if (reference === undefined) throw new Error('fetchVolume без посилання')
 
-    const outcome = await runWithTimeout(lookupTimeoutMs(), (signal) =>
+    const volume = await fromProvider('Зовнішній провайдер не знає цього видання', (signal) =>
       this.volumes.fetchVolume(reference.externalId, signal),
     )
-
-    if (outcome.kind === 'timeout') {
-      throw new ApiException(
-        API_ERROR_CODES.CATALOG_LOOKUP_TIMEOUT,
-        'Зовнішній провайдер не відповів вчасно',
-        HttpStatus.GATEWAY_TIMEOUT,
-      )
-    }
-
-    if (outcome.kind === 'error') {
-      const description =
-        outcome.error instanceof BookLookupProviderError
-          ? outcome.error.message
-          : String(outcome.error)
-
-      throw new ApiException(
-        API_ERROR_CODES.CATALOG_LOOKUP_PROVIDER_ERROR,
-        `Зовнішній провайдер повернув помилку: ${description}`,
-        HttpStatus.BAD_GATEWAY,
-      )
-    }
-
-    const volume = outcome.value
-
-    if (volume === undefined) {
-      throw new ApiException(
-        API_ERROR_CODES.CATALOG_LOOKUP_NOT_FOUND,
-        'Зовнішній провайдер не знає цього видання',
-        HttpStatus.NOT_FOUND,
-      )
-    }
 
     // ISBN, названий клієнтом, не може суперечити тому: інакше це не те видання, яке людина вибрала.
     if (
@@ -222,6 +191,44 @@ export class ExternalEditionResolver {
       metadata: toMetadata(volume.result),
     }
   }
+}
+
+/**
+ * One provider call, bounded by the lookup timeout, as the API answers it: timeout — 504, provider failure — 502,
+ * no such record — 404. Shared by every quick-add that needs a source's own answer (a volume, a work).
+ */
+export async function fromProvider<T>(
+  notFound: string,
+  call: (signal: AbortSignal) => Promise<T | undefined>,
+): Promise<T> {
+  const outcome = await runWithTimeout(lookupTimeoutMs(), call)
+
+  if (outcome.kind === 'timeout') {
+    throw new ApiException(
+      API_ERROR_CODES.CATALOG_LOOKUP_TIMEOUT,
+      'Зовнішній провайдер не відповів вчасно',
+      HttpStatus.GATEWAY_TIMEOUT,
+    )
+  }
+
+  if (outcome.kind === 'error') {
+    const description =
+      outcome.error instanceof BookLookupProviderError
+        ? outcome.error.message
+        : String(outcome.error)
+
+    throw new ApiException(
+      API_ERROR_CODES.CATALOG_LOOKUP_PROVIDER_ERROR,
+      `Зовнішній провайдер повернув помилку: ${description}`,
+      HttpStatus.BAD_GATEWAY,
+    )
+  }
+
+  if (outcome.value === undefined) {
+    throw new ApiException(API_ERROR_CODES.CATALOG_LOOKUP_NOT_FOUND, notFound, HttpStatus.NOT_FOUND)
+  }
+
+  return outcome.value
 }
 
 function toMetadata(result: BookLookupResult): ExternalMetadata {

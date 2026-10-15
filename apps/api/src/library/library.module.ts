@@ -16,6 +16,7 @@ import { LibraryController } from './library.controller'
 import { LibraryService } from './library.service'
 import { CatalogChainWriter } from './quick-add/catalog-chain.writer'
 import { ExternalEditionResolver } from './quick-add/external-edition.resolver'
+import { ExternalWorkResolver } from './quick-add/external-work.resolver'
 import { QuickAddController } from './quick-add/quick-add.controller'
 import { QuickAddService } from './quick-add/quick-add.service'
 
@@ -40,6 +41,7 @@ import { QuickAddService } from './quick-add/quick-add.service'
     LibraryService,
     QuickAddService,
     ExternalEditionResolver,
+    ExternalWorkResolver,
     CatalogChainWriter,
     AddSearchService,
     CopyWriter,

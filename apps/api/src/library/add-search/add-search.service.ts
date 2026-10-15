@@ -165,27 +165,40 @@ export class AddSearchService {
   /**
    * Які зовнішні записи вже є нашими виданнями. ISBN і підтверджене посилання, що вказують на РІЗНІ видання,
    * не зіставляються взагалі: запис лишається зовнішнім, а додавання поверне явний конфлікт ідентичності.
+   *
+   * Запис ТВОРУ (BS-114) зіставляється лише за підтвердженим посиланням на твір і лише з виданням, яке створило
+   * його пряме додавання. Твір, пов'язаний тільки через «Уточнити дані», лишається зовнішнім записом: інше
+   * видання того самого твору — не «ця книжка вже у вас».
    */
   private async matchLocal(records: readonly ExternalSearchResult[]): Promise<Map<string, string>> {
-    const isbns = records.flatMap((record) => (record.isbn13 === undefined ? [] : [record.isbn13]))
-    const references = records.flatMap((record) => {
-      const reference = referenceOf(record)
+    const editions = records.filter((record) => record.kind === 'EDITION')
+    const works = records.filter((record) => record.kind === 'WORK')
+    const isbns = editions.flatMap((record) => (record.isbn13 === undefined ? [] : [record.isbn13]))
+    const referencesOf = (list: readonly ExternalSearchResult[]) =>
+      list.flatMap((record) => {
+        const reference = referenceOf(record)
 
-      return reference === undefined ? [] : [{ id: record.id, ...reference }]
-    })
-    const [byIsbn, byReference] = await Promise.all([
+        return reference === undefined ? [] : [reference]
+      })
+    const editionReferences = referencesOf(editions)
+    const workReferences = referencesOf(works)
+    const [byIsbn, byReference, byWorkReference] = await Promise.all([
       isbns.length === 0
         ? []
         : this.prisma.edition.findMany({
             where: { isbn13: { in: isbns } },
             select: { id: true, isbn13: true },
           }),
-      references.length === 0
+      editionReferences.length === 0
         ? []
         : this.prisma.editionExternalReference.findMany({
-            where: {
-              OR: references.map(({ source, externalId }) => ({ source, externalId })),
-            },
+            where: { OR: editionReferences },
+            select: { source: true, externalId: true, editionId: true },
+          }),
+      workReferences.length === 0
+        ? []
+        : this.prisma.workExternalReference.findMany({
+            where: { OR: workReferences, editionId: { not: null } },
             select: { source: true, externalId: true, editionId: true },
           }),
     ])
@@ -193,9 +206,20 @@ export class AddSearchService {
     const idByReference = new Map(
       byReference.map((row) => [`${row.source}:${row.externalId}`, row.editionId]),
     )
+    const idByWorkReference = new Map<string, string>(
+      byWorkReference.flatMap((row): [string, string][] =>
+        row.editionId === null ? [] : [[`${row.source}:${row.externalId}`, row.editionId]],
+      ),
+    )
     const matches = new Map<string, string>()
 
-    for (const record of records) {
+    for (const record of works) {
+      const editionId = idByWorkReference.get(record.id)
+
+      if (editionId !== undefined) matches.set(record.id, editionId)
+    }
+
+    for (const record of editions) {
       const viaIsbn = record.isbn13 === undefined ? undefined : idByIsbn.get(record.isbn13)
       const reference = referenceOf(record)
       const viaReference =

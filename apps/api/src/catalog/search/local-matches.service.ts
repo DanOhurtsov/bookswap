@@ -123,19 +123,24 @@ export class LocalMatches {
   }
 
   /**
-   * ISBN-13 усіх видань названих творів — для дедуплікації зовнішніх записів.
-   * Усіх збігів запиту, а не показаної сторінки: пряме посилання на третю сторінку
-   * не бачило перших двох.
+   * Видання названих творів — для дедуплікації зовнішніх записів: їхні ISBN-13 і id (запис, зіставлений із
+   * нашим виданням за посиланням, а не за ISBN, теж не має повторювати локальну картку). Усіх збігів запиту, а
+   * не показаної сторінки: пряме посилання на третю сторінку не бачило перших двох.
    */
-  async isbnsOf(workIds: string[]): Promise<Set<string>> {
-    if (workIds.length === 0) return new Set()
+  async knownEditionsOf(workIds: string[]): Promise<{ isbns: Set<string>; ids: Set<string> }> {
+    if (workIds.length === 0) return { isbns: new Set(), ids: new Set() }
 
     const editions = await this.prisma.edition.findMany({
-      where: { workId: { in: workIds }, isbn13: { not: null } },
-      select: { isbn13: true },
+      where: { workId: { in: workIds } },
+      select: { id: true, isbn13: true },
     })
 
-    return new Set(editions.flatMap((edition) => (edition.isbn13 === null ? [] : [edition.isbn13])))
+    return {
+      isbns: new Set(
+        editions.flatMap((edition) => (edition.isbn13 === null ? [] : [edition.isbn13])),
+      ),
+      ids: new Set(editions.map((edition) => edition.id)),
+    }
   }
 
   /**

@@ -28,7 +28,12 @@ import { copyEntryMethodSchema, LIBRARY_LIMITS, ownCopySchema } from './library'
  * а він мовчки проігнорує (так само, як у решті DTO бібліотеки).
  */
 
-export const QUICK_ADD_TARGET_KIND = ['EXISTING_EDITION', 'EXTERNAL_EDITION', 'MANUAL'] as const
+export const QUICK_ADD_TARGET_KIND = [
+  'EXISTING_EDITION',
+  'EXTERNAL_EDITION',
+  'MANUAL',
+  'EXTERNAL_WORK',
+] as const
 
 export const quickAddTargetKindSchema = z.enum(QUICK_ADD_TARGET_KIND)
 
@@ -57,44 +62,6 @@ export const quickAddExistingEditionTargetSchema = z.strictObject({
 })
 
 export type QuickAddExistingEditionTarget = z.infer<typeof quickAddExistingEditionTargetSchema>
-
-/**
- * Видання із зовнішнього джерела, яке вперше потрапляє в наш каталог (або вже там є).
- *
- * Ідентичність — ISBN-13 і/або зовнішній запис `(source, externalId)`. Метадані з клієнта НЕ приймаються:
- * сервер сам бере їх у джерела (до транзакції), а коли видання вже відоме локально — зовсім обходиться без
- * джерела. Зараз зовнішній запис адресується для Google Books (том за id); решта — через ISBN.
- */
-export const QUICK_ADD_EXTERNAL_SOURCES = ['GOOGLE_BOOKS'] as const
-
-export const quickAddExternalSourceSchema = z.enum(QUICK_ADD_EXTERNAL_SOURCES)
-
-export const quickAddExternalEditionTargetSchema = z
-  .strictObject({
-    kind: z.literal('EXTERNAL_EDITION'),
-    isbn13: isbn13Schema.optional(),
-    source: quickAddExternalSourceSchema.optional(),
-    externalId: z.string().trim().min(1).max(LIBRARY_LIMITS.idMax).optional(),
-  })
-  .superRefine((value, context) => {
-    if ((value.source === undefined) !== (value.externalId === undefined)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['externalId'],
-        message: 'source і externalId задаються разом',
-      })
-    }
-
-    if (value.isbn13 === undefined && value.externalId === undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['isbn13'],
-        message: 'Потрібен ISBN-13 або пара source + externalId',
-      })
-    }
-  })
-
-export type QuickAddExternalEditionTarget = z.infer<typeof quickAddExternalEditionTargetSchema>
 
 /**
  * Ручне додавання: ОДНА компактна форма (docs/plan/fast-book-add.md, §2.4). Обов'язкова лише назва нового
@@ -127,6 +94,83 @@ export const quickAddManualEditionSchema = createEditionRequestSchema
   })
   .strict()
 
+/**
+ * «Уточнити дані» зовнішнього запису (BS-114): що людина ДОДАЛА до запису — поля видання, яких джерело не
+ * повідомило (для запису про твір — усі поля видання, бо видання він не описує).
+ *
+ * Значень, які повідомило джерело, тут немає: сервер бере їх у джерела сам, а додане людиною лише заповнює
+ * прогалини й ніколи не перекриває підтверджене. Тож неперевірені дані не потрапляють під підтверджену
+ * ідентичність. Змінене людиною значення джерела — це вже її власний запис (`MANUAL`), без зв'язку.
+ */
+export const quickAddEditionDetailsSchema = quickAddManualEditionSchema
+  .extend({ textKind: editionTextKindSchema.optional() })
+  .strict()
+
+export type QuickAddEditionDetails = z.infer<typeof quickAddEditionDetailsSchema>
+
+/**
+ * Видання із зовнішнього джерела, яке вперше потрапляє в наш каталог (або вже там є).
+ *
+ * Ідентичність — ISBN-13 і/або зовнішній запис `(source, externalId)`. Метадані з клієнта НЕ приймаються:
+ * сервер сам бере їх у джерела (до транзакції), а коли видання вже відоме локально — зовсім обходиться без
+ * джерела. Зараз зовнішній запис адресується для Google Books (том за id); решта — через ISBN.
+ */
+export const QUICK_ADD_EXTERNAL_SOURCES = ['GOOGLE_BOOKS'] as const
+
+export const quickAddExternalSourceSchema = z.enum(QUICK_ADD_EXTERNAL_SOURCES)
+
+export const quickAddExternalEditionTargetSchema = z
+  .strictObject({
+    kind: z.literal('EXTERNAL_EDITION'),
+    isbn13: isbn13Schema.optional(),
+    source: quickAddExternalSourceSchema.optional(),
+    externalId: z.string().trim().min(1).max(LIBRARY_LIMITS.idMax).optional(),
+    /** «Уточнити дані» (BS-114): лише те, чого джерело не повідомило — див. `quickAddEditionDetailsSchema`. */
+    edition: quickAddEditionDetailsSchema.optional(),
+    translation: createTranslationRequestSchema.strict().optional(),
+  })
+  .superRefine((value, context) => {
+    if ((value.source === undefined) !== (value.externalId === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['externalId'],
+        message: 'source і externalId задаються разом',
+      })
+    }
+
+    if (value.isbn13 === undefined && value.externalId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['isbn13'],
+        message: 'Потрібен ISBN-13 або пара source + externalId',
+      })
+    }
+  })
+
+export type QuickAddExternalEditionTarget = z.infer<typeof quickAddExternalEditionTargetSchema>
+
+/**
+ * Запис зовнішнього ТВОРУ без конкретного видання (BS-114): зараз — Open Library `OL…W`.
+ *
+ * Метадані (назву, авторів, рік першої публікації, обкладинку) сервер бере в джерела сам; клієнт називає лише
+ * запис. Без `edition` — пряме додавання: перше створює `Work → Edition → Copy`, де всі видавничі дані невідомі,
+ * а повторне знаходить той самий твір і те саме видання. З `edition` — «Уточнити дані»: нове видання того самого
+ * пов'язаного твору з даними людини.
+ */
+export const QUICK_ADD_EXTERNAL_WORK_SOURCES = ['OPEN_LIBRARY'] as const
+
+export const OPEN_LIBRARY_WORK_ID_PATTERN = /^OL[1-9][0-9]*W$/
+
+export const quickAddExternalWorkTargetSchema = z.strictObject({
+  kind: z.literal('EXTERNAL_WORK'),
+  source: z.enum(QUICK_ADD_EXTERNAL_WORK_SOURCES),
+  externalId: z.string().max(LIBRARY_LIMITS.idMax).regex(OPEN_LIBRARY_WORK_ID_PATTERN),
+  edition: quickAddEditionDetailsSchema.optional(),
+  translation: createTranslationRequestSchema.strict().optional(),
+})
+
+export type QuickAddExternalWorkTarget = z.infer<typeof quickAddExternalWorkTargetSchema>
+
 export const quickAddManualTargetSchema = z.strictObject({
   kind: z.literal('MANUAL'),
   work: quickAddManualWorkSchema,
@@ -140,6 +184,7 @@ export const quickAddTargetSchema = z.discriminatedUnion('kind', [
   quickAddExistingEditionTargetSchema,
   quickAddExternalEditionTargetSchema,
   quickAddManualTargetSchema,
+  quickAddExternalWorkTargetSchema,
 ])
 
 export type QuickAddTarget = z.infer<typeof quickAddTargetSchema>
