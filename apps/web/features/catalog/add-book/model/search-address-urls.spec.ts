@@ -1,11 +1,16 @@
 import { DEFAULT_SEARCH_PAGE_SIZE } from '@bookswap/shared'
+import { manualPrefillParams } from './manual-form'
 import {
+  addBookModeOf,
   addressKey,
   autoHref,
   backToSearchHref,
   clearedHref,
   manualFormHref,
   manualHref,
+  manualIntentOf,
+  opensLibraryAfterAdd,
+  screenKeyOf,
 } from './search-address-urls'
 
 describe('addressKey', () => {
@@ -171,5 +176,138 @@ describe('backToSearchHref', () => {
         new URLSearchParams(manualFormHref(new URLSearchParams('title=x'), search).split('?')[1]),
       ),
     ).toBe(`/catalog/new?${search.toString()}`)
+  })
+})
+
+describe('backToSearchHref — BS-114 prefill', () => {
+  it('drops the refined edition and every prefilled field, keeping only the search', () => {
+    const prefill = manualPrefillParams({
+      title: 'Назва',
+      authors: ['Автор'],
+      firstPubYear: 1937,
+      isbn: '9783161484100',
+      lang: 'uk',
+      publisher: 'Видавець',
+      year: 2019,
+      pageCount: 320,
+      format: 'HARDCOVER',
+      coverUrl: 'https://covers.example/1.jpg',
+    })
+    const search = new URLSearchParams('q=кобзар&page=2&pageSize=20&auto=1')
+    const form = (extra: URLSearchParams): URLSearchParams =>
+      new URLSearchParams(manualFormHref(extra, search).split('?')[1])
+
+    expect(backToSearchHref(form(prefill))).toBe(backToSearchHref(search))
+    expect(backToSearchHref(form(new URLSearchParams({ editionId: 'e-1', workId: 'w-1' })))).toBe(
+      backToSearchHref(search),
+    )
+  })
+})
+
+describe('addBookModeOf', () => {
+  it('no form parameters — the search', () => {
+    expect(addBookModeOf(new URLSearchParams('q=кобзар'))).toEqual({ kind: 'search' })
+  })
+
+  it('mode=manual — the manual form; workId alone — a new edition of that work', () => {
+    expect(addBookModeOf(new URLSearchParams('mode=manual'))).toEqual({
+      kind: 'manual',
+      presetWorkId: null,
+      form: '',
+    })
+    expect(addBookModeOf(new URLSearchParams('workId=w-1'))).toEqual({
+      kind: 'manual',
+      presetWorkId: 'w-1',
+      form: 'workId=w-1',
+    })
+  })
+
+  it('editionId with its workId — refining that existing edition, also next to mode=manual', () => {
+    expect(addBookModeOf(new URLSearchParams('mode=manual&editionId=e-1&workId=w-1'))).toEqual({
+      kind: 'edition',
+      editionId: 'e-1',
+      workId: 'w-1',
+    })
+  })
+
+  it('editionId without a workId is not enough to name an edition: the manual form', () => {
+    expect(addBookModeOf(new URLSearchParams('mode=manual&editionId=e-1'))).toEqual({
+      kind: 'manual',
+      presetWorkId: null,
+      form: 'editionId=e-1',
+    })
+  })
+})
+
+describe('screenKeyOf / opensLibraryAfterAdd', () => {
+  const search = screenKeyOf({ kind: 'search' }, 0)
+  const manual = screenKeyOf({ kind: 'manual', presetWorkId: null, form: 'title=x' }, 0)
+  const edition = screenKeyOf({ kind: 'edition', editionId: 'e-1', workId: 'w-1' }, 0)
+
+  it('the search has no key: a success in its dialog never leaves it', () => {
+    expect(search).toBeUndefined()
+    expect(opensLibraryAfterAdd(search, search)).toBe(false)
+  })
+
+  it('a form opens the library for its own add while it is still on screen', () => {
+    expect(opensLibraryAfterAdd(manual, manual)).toBe(true)
+    expect(opensLibraryAfterAdd(edition, edition)).toBe(true)
+  })
+
+  it('a late answer after the person moved on does not carry them away', () => {
+    expect(opensLibraryAfterAdd(manual, search)).toBe(false)
+    expect(opensLibraryAfterAdd(edition, search)).toBe(false)
+    expect(
+      opensLibraryAfterAdd(
+        manual,
+        screenKeyOf({ kind: 'manual', presetWorkId: null, form: 'title=x' }, 1),
+      ),
+    ).toBe(false)
+    expect(
+      opensLibraryAfterAdd(
+        edition,
+        screenKeyOf({ kind: 'edition', editionId: 'e-2', workId: 'w-1' }, 0),
+      ),
+    ).toBe(false)
+  })
+
+  it('an operation without a known screen (an old pending entry) opens nothing', () => {
+    expect(opensLibraryAfterAdd(undefined, manual)).toBe(false)
+  })
+})
+
+describe('manualIntentOf — what one manual form was opened for (рев’ю BS-114)', () => {
+  const intentOf = (query: string): string => {
+    const mode = addBookModeOf(new URLSearchParams(query))
+
+    if (mode.kind !== 'manual') throw new Error('not the manual form')
+
+    return manualIntentOf(mode.form, 0)
+  }
+
+  it('another record or another prefill is another intent, even under the same title', () => {
+    expect(intentOf('mode=manual&title=A&record=GOOGLE_BOOKS:1')).not.toBe(
+      intentOf('mode=manual&title=A&record=GOOGLE_BOOKS:2'),
+    )
+    expect(intentOf('mode=manual&title=A&isbn=9783161484100')).not.toBe(
+      intentOf('mode=manual&title=A&isbn=9780306406157'),
+    )
+    expect(intentOf('mode=manual&title=A')).not.toBe(intentOf('mode=manual&title=B'))
+  })
+
+  it('coming back to the same form is the same intent: the search context is not part of it', () => {
+    expect(intentOf('mode=manual&title=A&record=OL:1&q=a&page=2')).toBe(
+      intentOf('mode=manual&record=OL:1&title=A&q=b&auto=1'),
+    )
+  })
+
+  it('«Додати ще одну книжку» turns the same form into a new intent', () => {
+    expect(manualIntentOf('title=A', 0)).not.toBe(manualIntentOf('title=A', 1))
+  })
+
+  it('the way back drops the record together with the rest of the form', () => {
+    expect(backToSearchHref(new URLSearchParams('mode=manual&record=OL:1&title=A&q=a'))).toBe(
+      '/catalog/new?q=a',
+    )
   })
 })

@@ -1,18 +1,13 @@
 'use client'
 
-import {
-  type CopyEntryMethod,
-  type QuickAddRequest,
-  type QuickAddResponse,
-  type QuickAddTarget,
-} from '@bookswap/shared'
+import { type CopyEntryMethod, type QuickAddResponse, type QuickAddTarget } from '@bookswap/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { ApiRequestError } from '@/app/lib/api'
 import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { invalidateActivation } from '@/features/library/activation/index.client'
 import { quickAdd } from '../api/add-search'
-import { forgetPending, readPending, rememberPending } from './quick-add-storage'
+import { forgetPending, readPending, rememberPending, type PendingEntry } from './quick-add-storage'
 import {
   EMPTY_SLOTS,
   classifyFailure,
@@ -30,6 +25,11 @@ export interface QuickAddAttempt {
   entryMethod: CopyEntryMethod
   /** Свідомо ще один фізичний примірник: нова операція навіть після `done`. */
   additional?: boolean
+  /**
+   * The screen whose own intent the success completes (BS-114). The search dialog passes none: its
+   * success stays where it happened. A form passes its screen key, and `onAdded` gets it back.
+   */
+  screen?: string
 }
 
 export interface QuickAddApi {
@@ -52,7 +52,8 @@ export interface QuickAddApi {
  */
 export function useQuickAdd(options: {
   userId: string
-  onAdded: (response: QuickAddResponse) => void
+  /** `screen` — the one the operation was started from (`QuickAddAttempt.screen`), also after a reload. */
+  onAdded: (response: QuickAddResponse, screen: string | undefined) => void
 }): QuickAddApi {
   const { userId, onAdded } = options
   const queryClient = useQueryClient()
@@ -67,17 +68,21 @@ export function useQuickAdd(options: {
   })
 
   const run = useCallback(
-    async (
-      key: string,
-      identities: readonly string[],
-      operationId: string,
-      request: QuickAddRequest,
-    ): Promise<void> => {
+    async (key: string, entry: PendingEntry): Promise<void> => {
       if (inFlight.current.has(key)) return
 
+      const { identities, operationId, request, screen } = entry
+
       inFlight.current.add(key)
-      dispatch({ type: 'started', key, identities, operationId, request })
-      rememberPending(userId, key, { operationId, identities: [...identities], request })
+      dispatch({
+        type: 'started',
+        key,
+        identities,
+        operationId,
+        request,
+        ...(screen === undefined ? {} : { screen }),
+      })
+      rememberPending(userId, key, entry)
 
       try {
         const response = await quickAdd(request)
@@ -92,7 +97,7 @@ export function useQuickAdd(options: {
         })
         // Лише після підтвердженого збереження; збій оновлення чекліста не скасовує додавання.
         await invalidateActivation(queryClient).catch(() => undefined)
-        onAddedRef.current(response)
+        onAddedRef.current(response, screen)
       } catch (error) {
         const message = describeAddBookError(error)
 
@@ -123,7 +128,13 @@ export function useQuickAdd(options: {
 
       if (slot?.status !== 'unknown') return
 
-      void run(key, identities, slot.operationId, slot.request)
+      void run(key, {
+        identities: [...identities],
+        operationId: slot.operationId,
+        request: slot.request,
+        // The operation keeps the intent it was started with, whoever asks to check it again.
+        ...(slot.screen === undefined ? {} : { screen: slot.screen }),
+      })
     },
     [run],
   )
@@ -146,10 +157,11 @@ export function useQuickAdd(options: {
 
       const operationId = newOperationId()
 
-      void run(key, attempt.identities, operationId, {
+      void run(key, {
+        identities: [...attempt.identities],
         operationId,
-        entryMethod: attempt.entryMethod,
-        target: attempt.target,
+        request: { operationId, entryMethod: attempt.entryMethod, target: attempt.target },
+        ...(attempt.screen === undefined ? {} : { screen: attempt.screen }),
       })
     },
     [retry, run],
@@ -164,9 +176,7 @@ export function useQuickAdd(options: {
 
     resumedFor.current = userId
 
-    for (const [key, entry] of Object.entries(readPending(userId))) {
-      void run(key, entry.identities, entry.operationId, entry.request)
-    }
+    for (const [key, entry] of Object.entries(readPending(userId))) void run(key, entry)
   }, [run, userId])
 
   return {

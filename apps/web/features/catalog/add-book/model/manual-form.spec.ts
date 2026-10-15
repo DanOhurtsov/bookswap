@@ -2,6 +2,7 @@ import {
   buildManualTarget,
   manualFieldError,
   manualInitialFrom,
+  manualPrefillParams,
   EMPTY_MANUAL_FORM,
   type ManualFormValues,
 } from './manual-form'
@@ -197,5 +198,86 @@ describe('manualInitialFrom', () => {
 
   it('без параметрів — порожня форма з одним полем автора', () => {
     expect(manualInitialFrom(new URLSearchParams())).toEqual(EMPTY_MANUAL_FORM)
+  })
+})
+
+describe('manualPrefillParams → manualInitialFrom (BS-114)', () => {
+  it('every known field reaches its own form field; work and edition years stay apart', () => {
+    const values = manualInitialFrom(
+      manualPrefillParams({
+        title: 'Назва',
+        authors: ['Перший', 'Другий'],
+        firstPubYear: 1937,
+        isbn: '9783161484100',
+        lang: 'uk',
+        publisher: 'Видавець',
+        year: 2019,
+        pageCount: 320,
+        format: 'HARDCOVER',
+        coverUrl: 'https://covers.example/1.jpg',
+      }),
+    )
+
+    expect(values).toEqual({
+      ...EMPTY_MANUAL_FORM,
+      title: 'Назва',
+      authors: ['Перший', 'Другий'],
+      firstPubYear: '1937',
+      isbn: '9783161484100',
+      lang: 'uk',
+      publisher: 'Видавець',
+      year: '2019',
+      pageCount: '320',
+      format: 'HARDCOVER',
+      coverUrl: 'https://covers.example/1.jpg',
+    })
+  })
+
+  it('unknown values are not written at all', () => {
+    expect(manualPrefillParams({ title: 'Назва', year: undefined, publisher: '' }).toString()).toBe(
+      `title=${encodeURIComponent('Назва')}`,
+    )
+  })
+
+  it('a language or binding that is not a real one stays unknown instead of being guessed', () => {
+    const values = manualInitialFrom(new URLSearchParams('lang=xx&format=SCROLL'))
+
+    expect(values.lang).toBe('')
+    expect(values.format).toBe('')
+  })
+
+  it('what is still known is still carried into the contract: the full target from a prefilled form', () => {
+    const values = manualInitialFrom(
+      manualPrefillParams({
+        title: 'Назва',
+        authors: ['Автор'],
+        firstPubYear: 1937,
+        isbn: '9783161484100',
+        lang: 'en',
+        publisher: 'Видавець',
+        year: 2019,
+        pageCount: 320,
+        format: 'PAPERBACK',
+        coverUrl: 'https://covers.example/1.jpg',
+      }),
+    )
+
+    expect(buildManualTarget(values)).toEqual({
+      ok: true,
+      target: {
+        kind: 'MANUAL',
+        work: { title: 'Назва', firstPubYear: 1937, authors: [{ name: 'Автор' }] },
+        edition: {
+          textKind: 'UNKNOWN',
+          lang: 'en',
+          isbn13: '9783161484100',
+          publisher: 'Видавець',
+          year: 2019,
+          pageCount: 320,
+          format: 'PAPERBACK',
+          coverUrl: 'https://covers.example/1.jpg',
+        },
+      },
+    })
   })
 })

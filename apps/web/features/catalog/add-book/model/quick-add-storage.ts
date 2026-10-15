@@ -5,7 +5,7 @@ import { z } from 'zod'
  * Незавершені додавання переживають перезавантаження сторінки (`sessionStorage`).
  *
  * Зберігається лише те, що потрібно для ПОВТОРУ ТІЄЇ САМОЇ операції: слот, `operationId`, заморожений
- * запит. Ключ містить ідентифікатор користувача: чужий запис не повторюється під іншою сесією.
+ * запит — і екран, з якого її почали (від нього залежить, що означає успіх, BS-114). Ключ містить ідентифікатор користувача: чужий запис не повторюється під іншою сесією.
  * `sessionStorage` може бути недоступний (приватне вікно, заблоковані дані) — тоді все працює без нього.
  */
 const STORAGE_KEY_PREFIX = 'bookswap.quick-add.'
@@ -14,6 +14,7 @@ const entrySchema = z.object({
   operationId: z.uuid(),
   identities: z.array(z.string()).min(1),
   request: quickAddRequestSchema,
+  screen: z.string().optional(),
 })
 
 const stateSchema = z.record(z.string(), entrySchema)
@@ -22,6 +23,7 @@ export interface PendingEntry {
   operationId: string
   identities: string[]
   request: QuickAddRequest
+  screen?: string
 }
 
 function storageKey(userId: string): string {
