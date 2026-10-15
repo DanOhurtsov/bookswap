@@ -155,7 +155,7 @@ describe('addResultView — an external edition', () => {
 })
 
 describe('addResultView — an external work record', () => {
-  it('only work-level data: no ISBN, publisher, edition year or cover of some printing', () => {
+  it('added as is (BS-114); only work-level data and the shown cover — no ISBN, publisher or edition year', () => {
     const view = addResultView({
       kind: 'EXTERNAL',
       result: external({
@@ -171,17 +171,34 @@ describe('addResultView — an external work record', () => {
       }),
     })
 
-    expect(view.quickAdd).toBeUndefined()
-    expect(view.refineReason).toBe('WORK')
+    expect(view.quickAdd).toEqual({
+      identities: ['external:OPEN_LIBRARY:OL1W'],
+      target: { kind: 'EXTERNAL_WORK', source: 'OPEN_LIBRARY', externalId: 'OL1W' },
+    })
+    expect(view.refineReason).toBeUndefined()
+    expect(view.editionUnknown).toBe(true)
+    expect(view.coverUrl).toBe('https://covers.example/w.jpg')
     expect([...view.refine]).toEqual([
       ['title', 'Назва'],
       ['firstPubYear', '1937'],
+      ['coverUrl', 'https://covers.example/w.jpg'],
       ['author', 'Один'],
       ['author', 'Два'],
       // Not data for the form: which record it was opened from, so two records are two intents.
       ['record', 'OPEN_LIBRARY:OL1W'],
     ])
     expect(view.facts).toEqual([{ label: 'Уперше видано', value: '1937' }])
+  })
+
+  it('a work record the server cannot be pointed at stays refine-only', () => {
+    const view = addResultView({
+      kind: 'EXTERNAL',
+      result: external({ id: 'GOOGLE_BOOKS:abc', kind: 'WORK', sources: ['GOOGLE_BOOKS'] }),
+    })
+
+    expect(view.quickAdd).toBeUndefined()
+    expect(view.refineReason).toBe('WORK')
+    expect(view.editionUnknown).toBe(false)
   })
 })
 

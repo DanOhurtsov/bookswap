@@ -8,7 +8,8 @@ import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { useKeyedRequest } from '@/app/lib/use-keyed-request'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { manualInitialFrom } from '../model/manual-form'
-import { backToSearchHref } from '../model/search-address-urls'
+import { refineTargetOf } from '../model/refine-target'
+import { backToSearchHref, RECORD_PARAM } from '../model/search-address-urls'
 import type { QuickAddApi } from '../model/use-quick-add'
 import { ManualAddForm } from './ManualAddForm'
 import { ledeClass, pageClass, pendingStatusClass } from './screen-styles'
@@ -42,6 +43,7 @@ export function AddBookManualScreen({
       }),
   )
   const identities = [intent]
+  const initial = manualInitialFrom(parameters)
   const presetTitle = presetWork.status === 'ready' ? presetWork.value.work.title : undefined
   const waitingForWork = presetWorkId !== null && presetWork.status !== 'ready'
 
@@ -68,13 +70,19 @@ export function AddBookManualScreen({
         <ManualAddForm
           // Another form is another draft: nothing typed for one intent is shown under another.
           key={intent}
-          initial={manualInitialFrom(parameters)}
+          initial={initial}
           {...(presetWorkId !== null && presetTitle !== undefined
             ? { presetWork: { id: presetWorkId, title: presetTitle } }
             : {})}
           slot={quick.slotFor(identities)}
           onSubmit={(target) => {
-            quick.add({ identities, entryMethod: 'MANUAL', target, screen: intent })
+            quick.add({
+              identities,
+              entryMethod: 'MANUAL',
+              // Opened from an external record: the record's identity travels while its values are unchanged.
+              target: refineTargetOf(target, initial, parameters.get(RECORD_PARAM)),
+              screen: intent,
+            })
           }}
           onRetry={() => {
             quick.retry(identities)

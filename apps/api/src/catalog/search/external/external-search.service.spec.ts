@@ -105,7 +105,7 @@ function localOf(total: number, isbns: string[] = []): LocalMatches {
         authors: [],
         byIsbn: false,
       }),
-    isbnsOf: () => Promise.resolve(new Set(isbns)),
+    knownEditionsOf: () => Promise.resolve({ isbns: new Set(isbns), ids: new Set<string>() }),
   } as unknown as LocalMatches
 }
 

@@ -56,6 +56,12 @@ describe('externalSearchResultSchema', () => {
     },
   )
 
+  it('дозволяє localEditionId на записі про твір: це наше видання, створене прямим додаванням (BS-114)', () => {
+    expect(externalSearchResultSchema.safeParse({ ...WORK, localEditionId: 'e-1' }).success).toBe(
+      true,
+    )
+  })
+
   it('дозволяє рік першої публікації на EDITION — це наслідок злиття з записом про твір', () => {
     const mergedPrinting = { ...EDITION, firstPublishedYear: 1944 }
 

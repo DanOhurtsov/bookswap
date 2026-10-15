@@ -46,6 +46,11 @@ export interface AddResultView {
   quickAdd: { identities: string[]; target: QuickAddTarget } | undefined
   /** `WORK` — a work, not an edition; `NO_IDENTITY` — an edition the server cannot be pointed at. */
   refineReason: 'WORK' | 'NO_IDENTITY' | undefined
+  /**
+   * An external WORK record added as is (BS-114): one press adds the book, and the edition's publisher, year
+   * and ISBN stay unknown until the person refines them.
+   */
+  editionUnknown: boolean
   /** The server's count of the person's own copies — only our catalog's editions have one. */
   ownership: AddSearchOwnership | undefined
   /** The form's own parameters for «Уточнити дані»; the search context is added by `manualFormHref`. */
@@ -100,6 +105,7 @@ function editionView(item: AddSearchEditionItem): AddResultView {
       target: { kind: 'EXISTING_EDITION', editionId: edition.id },
     },
     refineReason: undefined,
+    editionUnknown: false,
     ownership,
     // The very edition and its work: refining it must never create a second one.
     refine: new URLSearchParams({ editionId: edition.id, workId: edition.workId }),
@@ -116,6 +122,7 @@ function workView(item: AddSearchWorkItem): AddResultView {
     source: { kind: 'CATALOG' },
     quickAdd: undefined,
     refineReason: 'WORK',
+    editionUnknown: false,
     ownership: undefined,
     refine: new URLSearchParams({ workId: item.work.id }),
   }
@@ -124,9 +131,10 @@ function workView(item: AddSearchWorkItem): AddResultView {
 function externalView(result: ExternalSearchResult): AddResultView {
   const target = externalTarget(result)
   const isWork = result.kind === 'WORK'
-  // An aggregated work record carries no edition data: no ISBN, publisher or cover of some printing.
+  // A work record carries no edition data — no ISBN, publisher or year of some printing. Its cover is the one
+  // the card showed, and refining keeps it (BS-114).
   const edition = isWork
-    ? {}
+    ? { coverUrl: result.coverUrl }
     : {
         isbn: result.isbn13,
         lang: result.language,
@@ -155,6 +163,7 @@ function externalView(result: ExternalSearchResult): AddResultView {
     source: { kind: 'EXTERNAL', sources: result.sources },
     quickAdd: target === undefined ? undefined : { identities: externalIdentities(result), target },
     refineReason: target !== undefined ? undefined : isWork ? 'WORK' : 'NO_IDENTITY',
+    editionUnknown: isWork && target !== undefined,
     ownership: undefined,
     refine: withRecord(
       manualPrefillParams({
@@ -185,6 +194,7 @@ function lookupView(isbn: string, lookup: BookLookupResult): AddResultView {
       target: { kind: 'EXTERNAL_EDITION', isbn13: isbn },
     },
     refineReason: undefined,
+    editionUnknown: false,
     ownership: undefined,
     refine: manualPrefillParams({
       title: lookup.title,

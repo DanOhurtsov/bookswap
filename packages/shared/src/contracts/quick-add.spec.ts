@@ -46,6 +46,57 @@ describe('quickAddRequestSchema', () => {
   })
 })
 
+describe('quickAddRequestSchema: зовнішній твір і уточнення (BS-114)', () => {
+  const work = { kind: 'EXTERNAL_WORK', source: 'OPEN_LIBRARY', externalId: 'OL45804W' }
+
+  it('приймає запис твору без жодних метаданих: їх сервер бере в джерела сам', () => {
+    expect(
+      quickAddRequestSchema.safeParse({ operationId: OPERATION_ID, target: work }).success,
+    ).toBe(true)
+  })
+
+  it('приймає уточнення: додані поля видання й переклад, тип тексту необов’язковий', () => {
+    const parsed = quickAddRequestSchema.parse({
+      operationId: OPERATION_ID,
+      target: {
+        ...work,
+        edition: { isbn13: '9780000000002', publisher: 'Видавець' },
+        translation: { translator: 'Перекладач', lang: 'uk', sourceLang: 'en' },
+      },
+    })
+
+    expect(parsed.target).toMatchObject({ edition: { publisher: 'Видавець' } })
+  })
+
+  it('приймає уточнення зовнішнього видання поруч з його ідентичністю', () => {
+    expect(
+      quickAddRequestSchema.safeParse({
+        operationId: OPERATION_ID,
+        target: {
+          kind: 'EXTERNAL_EDITION',
+          source: 'GOOGLE_BOOKS',
+          externalId: 'vol-1',
+          edition: { textKind: 'TRANSLATION', lang: 'uk' },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it.each([
+    ['ID видання Open Library замість твору', { ...work, externalId: 'OL123M' }],
+    ['довільний рядок замість OL…W', { ...work, externalId: '/works/OL1W' }],
+    ['джерело, яке не описує творів', { ...work, source: 'GOOGLE_BOOKS' }],
+    ['назва від клієнта', { ...work, title: 'Назва' }],
+    ['обкладинка від клієнта поза уточненням', { ...work, coverUrl: 'https://example.com/c.jpg' }],
+    ['невідоме поле уточнення', { ...work, edition: { workId: 'w-1' } }],
+    ['невалідний ISBN в уточненні', { ...work, edition: { isbn13: '9780000000000' } }],
+  ])('відхиляє: %s', (_name, target) => {
+    expect(quickAddRequestSchema.safeParse({ operationId: OPERATION_ID, target }).success).toBe(
+      false,
+    )
+  })
+})
+
 describe('quickAddResponseSchema', () => {
   it('вимагає ознаку replay, примірник і каталожний контекст', () => {
     expect(quickAddResponseSchema.safeParse({ operationId: OPERATION_ID }).success).toBe(false)

@@ -15,16 +15,17 @@ import {
 import { searchTerms } from './search-terms'
 import { spellingTexts } from './spelling-texts'
 
-const SEARCH_API_ROOT = 'https://openlibrary.org/search.json'
+export const OPEN_LIBRARY_SEARCH_API_ROOT = 'https://openlibrary.org/search.json'
 
 /**
  * Exactly the fields we actually read.
  *
  * `fields` is narrowed deliberately: the documentation asks not to pull `*`
  * without need, because a full answer is expensive for the provider. `isbn` is
- * NOT among them — see `toResult`.
+ * NOT among them — see `openLibraryWorkRecord`.
  */
-const FIELDS = 'key,title,author_name,first_publish_year,language,cover_i'
+export const OPEN_LIBRARY_SEARCH_FIELDS =
+  'key,title,author_name,first_publish_year,language,cover_i'
 
 /** Open Library sometimes stores numeric HTML references in title and author names. */
 function decodeNumericEntities(value: string): string {
@@ -124,6 +125,44 @@ function streamEnded(
 }
 
 /**
+ * One `search.json` document → a `WORK` record. A document with no title, or no recognizable `/works/OL…W`,
+ * is skipped. Shared with `OpenLibraryWorkProvider`, so quick-add of a work stores exactly what its card
+ * showed (BS-114).
+ */
+export function openLibraryWorkRecord(value: unknown): ExternalSearchResult | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+
+  const document = value as Record<string, unknown>
+  const workExternalId = workIdFromKey(document.key)
+  const rawTitle = nonEmptyString(document.title)
+  const title = rawTitle === undefined ? undefined : decodeNumericEntities(rawTitle)
+
+  if (workExternalId === undefined || title === undefined) return undefined
+
+  const authors = stringArray(document.author_name)?.map(decodeNumericEntities)
+  const language = unambiguousLanguage(document.language)
+  const coverUrl = coverUrlFrom(document.cover_i)
+  const firstPublished = document.first_publish_year
+  const firstPublishedYear =
+    typeof firstPublished === 'number' && Number.isInteger(firstPublished)
+      ? firstPublished
+      : undefined
+
+  return {
+    id: `OPEN_LIBRARY:${workExternalId}`,
+    kind: 'WORK',
+    sources: ['OPEN_LIBRARY'],
+    title,
+    externalId: workExternalId,
+    workExternalId,
+    ...(authors === undefined ? {} : { authors }),
+    ...(language === undefined ? {} : { language }),
+    ...(firstPublishedYear === undefined ? {} : { firstPublishedYear }),
+    ...(coverUrl === undefined ? {} : { coverUrl }),
+  }
+}
+
+/**
  * Title search through the Open Library Search API.
  *
  * Every document is a `WORK`, not an edition, and everything else follows from
@@ -164,9 +203,9 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
 
     const offset = block.index * block.size
 
-    const url = new URL(SEARCH_API_ROOT)
+    const url = new URL(OPEN_LIBRARY_SEARCH_API_ROOT)
     url.searchParams.set('q', crossFieldQuery(terms))
-    url.searchParams.set('fields', FIELDS)
+    url.searchParams.set('fields', OPEN_LIBRARY_SEARCH_FIELDS)
     url.searchParams.set('limit', String(block.size))
     // `offset` is Open Library's own paging parameter, and the whole block
     // position is `index * size` — a pure function of the page number, which is
@@ -211,7 +250,7 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
     if (!Array.isArray(documents)) return { results: [], exhausted: true }
 
     const parsed = documents
-      .map((document) => this.toResult(document))
+      .map(openLibraryWorkRecord)
       .filter((result): result is ExternalSearchResult => result !== undefined)
     const results = parsed
       // The gate, even though the query was field-restricted: Solr matches
@@ -227,40 +266,6 @@ export class OpenLibrarySearchProvider implements ExternalSearchProvider {
       exhausted: streamEnded(payload, offset, block.size, documents.length),
       // Before the gate: the correct spelling of a misspelled query is what the gate rejects.
       spellingCandidates: spellingTexts(parsed),
-    }
-  }
-
-  /** A document with no title, or no recognizable `/works/OL…W`, is skipped. */
-  private toResult(value: unknown): ExternalSearchResult | undefined {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-
-    const document = value as Record<string, unknown>
-    const workExternalId = workIdFromKey(document.key)
-    const rawTitle = nonEmptyString(document.title)
-    const title = rawTitle === undefined ? undefined : decodeNumericEntities(rawTitle)
-
-    if (workExternalId === undefined || title === undefined) return undefined
-
-    const authors = stringArray(document.author_name)?.map(decodeNumericEntities)
-    const language = unambiguousLanguage(document.language)
-    const coverUrl = coverUrlFrom(document.cover_i)
-    const firstPublished = document.first_publish_year
-    const firstPublishedYear =
-      typeof firstPublished === 'number' && Number.isInteger(firstPublished)
-        ? firstPublished
-        : undefined
-
-    return {
-      id: `${this.source}:${workExternalId}`,
-      kind: 'WORK',
-      sources: [this.source],
-      title,
-      externalId: workExternalId,
-      workExternalId,
-      ...(authors === undefined ? {} : { authors }),
-      ...(language === undefined ? {} : { language }),
-      ...(firstPublishedYear === undefined ? {} : { firstPublishedYear }),
-      ...(coverUrl === undefined ? {} : { coverUrl }),
     }
   }
 }

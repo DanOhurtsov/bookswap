@@ -52,11 +52,14 @@ export type LocalMatcher = (
 
 /**
  * Marks matched records with `localEditionId` and collapses the ones that resolve to the same edition (the
- * first keeps its place). Deterministic for a given pool, so the pool stays prefix-stable across pages.
+ * first keeps its place). A record whose edition the local half of the list already shows (`shown` — matched
+ * by a reference rather than by ISBN: a work record, a volume without ISBN) is dropped, exactly as an ISBN
+ * duplicate is. Deterministic for a given pool, so the pool stays prefix-stable across pages.
  */
 async function markLocalEditions(
   pool: ExternalSearchResult[],
   matchLocal: LocalMatcher,
+  shown: ReadonlySet<string>,
 ): Promise<ExternalSearchResult[]> {
   if (pool.length === 0) return pool
 
@@ -72,7 +75,7 @@ async function markLocalEditions(
       continue
     }
 
-    if (seen.has(editionId)) continue
+    if (seen.has(editionId) || shown.has(editionId)) continue
 
     seen.add(editionId)
     result.push({ ...record, localEditionId: editionId })
@@ -197,7 +200,7 @@ export class ExternalSearchService {
       return { results: [], sources: [], page, pageSize, more: 'UNKNOWN', complete: true }
     }
 
-    const known = await this.local.isbnsOf(matches.works.map((row) => row.id))
+    const known = await this.local.knownEditionsOf(matches.works.map((row) => row.id))
     const blockSize = externalSearchBlockSize()
     const states: ProviderState[] = this.providers.map((provider) => ({
       provider,
@@ -238,11 +241,12 @@ export class ExternalSearchService {
       pool = mergeResults(
         query,
         states.flatMap((state) => state.entries),
-      ).filter((result) => result.isbn13 === undefined || !known.has(result.isbn13))
+      ).filter((result) => result.isbn13 === undefined || !known.isbns.has(result.isbn13))
 
       // Fast-add: records that are ALREADY our editions (by ISBN or a confirmed reference) are marked and
       // collapsed HERE, before the page is cut — never on the client, never after pagination.
-      if (options.matchLocal !== undefined) pool = await markLocalEditions(pool, options.matchLocal)
+      if (options.matchLocal !== undefined)
+        pool = await markLocalEditions(pool, options.matchLocal, known.ids)
 
       if (pool.length >= needed) break
     }
@@ -322,7 +326,7 @@ export class ExternalSearchService {
     if (remaining <= 0) return empty('YES')
 
     const matches = await this.local.rank(query, { authors: false })
-    const known = await this.local.isbnsOf(matches.works.map((row) => row.id))
+    const known = await this.local.knownEditionsOf(matches.works.map((row) => row.id))
     const states: ProviderState[] = this.providers.map((provider) => ({
       provider,
       status: 'OK',
@@ -342,9 +346,10 @@ export class ExternalSearchService {
     let pool = mergeResults(
       query,
       states.flatMap((state) => state.entries),
-    ).filter((result) => result.isbn13 === undefined || !known.has(result.isbn13))
+    ).filter((result) => result.isbn13 === undefined || !known.isbns.has(result.isbn13))
 
-    if (options.matchLocal !== undefined) pool = await markLocalEditions(pool, options.matchLocal)
+    if (options.matchLocal !== undefined)
+      pool = await markLocalEditions(pool, options.matchLocal, known.ids)
 
     return {
       results: pool.slice(0, remaining),

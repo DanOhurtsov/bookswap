@@ -7,6 +7,7 @@ import { EXTERNAL_SEARCH_PROVIDERS } from './external-search-provider'
 import { ExternalSearchService } from './external-search.service'
 import { GoogleBooksSearchProvider } from './google-books-search-provider'
 import { OpenLibrarySearchProvider } from './open-library-search-provider'
+import { EXTERNAL_WORK_PROVIDER, OpenLibraryWorkProvider } from './open-library-work-provider'
 import { ProviderRateLimiter } from './provider-rate-limiter'
 
 /**
@@ -44,8 +45,11 @@ import { ProviderRateLimiter } from './provider-rate-limiter'
         googleBooks: GoogleBooksSearchProvider,
       ) => [openLibrary, googleBooks],
     },
+    OpenLibraryWorkProvider,
+    { provide: EXTERNAL_WORK_PROVIDER, useExisting: OpenLibraryWorkProvider },
   ],
-  // Сторінка додавання (`LibraryModule`) ділить спільний список за власною довжиною локальної частини.
-  exports: [ExternalSearchService],
+  // Сторінка додавання (`LibraryModule`) ділить спільний список за власною довжиною локальної частини;
+  // швидке додавання твору (BS-114) бере підтверджені метадані одного запису.
+  exports: [ExternalSearchService, EXTERNAL_WORK_PROVIDER],
 })
 export class ExternalSearchModule {}

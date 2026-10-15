@@ -390,10 +390,16 @@ export {
   type QuickAddManualTarget,
 } from './contracts/quick-add'
 export {
+  OPEN_LIBRARY_WORK_ID_PATTERN,
   QUICK_ADD_EXTERNAL_SOURCES,
+  QUICK_ADD_EXTERNAL_WORK_SOURCES,
+  quickAddEditionDetailsSchema,
   quickAddExternalEditionTargetSchema,
   quickAddExternalSourceSchema,
+  quickAddExternalWorkTargetSchema,
+  type QuickAddEditionDetails,
   type QuickAddExternalEditionTarget,
+  type QuickAddExternalWorkTarget,
 } from './contracts/quick-add'
 export {
   QUICK_ADD_TARGET_KIND,

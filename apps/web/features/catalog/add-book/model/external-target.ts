@@ -1,4 +1,17 @@
-import type { ExternalSearchResult, QuickAddTarget } from '@bookswap/shared'
+import {
+  OPEN_LIBRARY_WORK_ID_PATTERN,
+  type ExternalSearchResult,
+  type QuickAddTarget,
+} from '@bookswap/shared'
+
+/** `<SOURCE>:<externalId>` of a result's `id` (or of the form's `record`): the record the person chose. */
+export function recordKeyOf(recordId: string): { source: string; externalId: string } | undefined {
+  const separator = recordId.indexOf(':')
+
+  return separator < 1
+    ? undefined
+    : { source: recordId.slice(0, separator), externalId: recordId.slice(separator + 1) }
+}
 
 /**
  * Що саме просити в сервера, коли користувач додає зовнішній запис (docs/plan/fast-book-add.md, §5.3).
@@ -6,15 +19,19 @@ import type { ExternalSearchResult, QuickAddTarget } from '@bookswap/shared'
  * Клієнт називає лише ІДЕНТИЧНІСТЬ — пару `(source, externalId)` і/або ISBN. Метадані сервер бере в
  * джерела сам; жодних назв, авторів чи URL із браузера він не приймає.
  *
- * `undefined` — додати нічого: запис про твір (`WORK`) чи видання без жодного ідентифікатора, придатного
- * для точного звернення. Такий запис не видається за конкретне видання.
+ * Запис про твір (`WORK`, BS-114) — це `EXTERNAL_WORK`: сервер створює твір і видання «без уточнення», де
+ * видавничі дані невідомі, тож запис не видається за конкретне видання.
+ *
+ * `undefined` — додати нічого: запис без жодного ідентифікатора, придатного для точного звернення.
  */
 export function externalTarget(result: ExternalSearchResult): QuickAddTarget | undefined {
-  if (result.kind !== 'EDITION') return undefined
+  const { source, externalId } = recordKeyOf(result.id) ?? { source: undefined, externalId: '' }
 
-  const separator = result.id.indexOf(':')
-  const source = separator < 1 ? undefined : result.id.slice(0, separator)
-  const externalId = separator < 1 ? '' : result.id.slice(separator + 1)
+  if (result.kind === 'WORK') {
+    return source === 'OPEN_LIBRARY' && OPEN_LIBRARY_WORK_ID_PATTERN.test(externalId)
+      ? { kind: 'EXTERNAL_WORK', source: 'OPEN_LIBRARY', externalId }
+      : undefined
+  }
 
   if (source === 'GOOGLE_BOOKS' && externalId !== '') {
     return {
@@ -35,13 +52,12 @@ export function externalTarget(result: ExternalSearchResult): QuickAddTarget | u
  * (`edition:<id>`, `isbn:<isbn>`), тож дві картки одного видання не запускають двох операцій.
  */
 export function externalIdentities(result: ExternalSearchResult): string[] {
-  const separator = result.id.indexOf(':')
-  const source = separator < 1 ? undefined : result.id.slice(0, separator)
-  const externalId = separator < 1 ? '' : result.id.slice(separator + 1)
+  const { source, externalId } = recordKeyOf(result.id) ?? { source: undefined, externalId: '' }
 
   return [
     ...(source === 'GOOGLE_BOOKS' && externalId !== '' ? [`gb:${externalId}`] : []),
-    ...(result.isbn13 === undefined ? [] : [`isbn:${result.isbn13}`]),
+    // A work record's ISBN would be some printing's: it must not share that printing's slot.
+    ...(result.isbn13 === undefined || result.kind === 'WORK' ? [] : [`isbn:${result.isbn13}`]),
     `external:${result.id}`,
   ]
 }
