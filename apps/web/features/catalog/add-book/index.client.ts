@@ -1,6 +1,8 @@
 'use client'
 
 export { AddBookScreen } from './components/AddBookScreen'
+/** BS-79: the work page's «Це моє видання» starts from the same preference with the same fallback. */
+export { initialCopyVisibility } from './model/copy-visibility'
 
 /**
  * Search-result components shared with the catalog discovery page. Discovery

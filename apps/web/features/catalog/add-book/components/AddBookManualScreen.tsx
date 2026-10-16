@@ -1,6 +1,6 @@
 'use client'
 
-import { workDetailResponseSchema } from '@bookswap/shared'
+import { workDetailResponseSchema, type Visibility } from '@bookswap/shared'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { apiRequest } from '@/app/lib/api'
@@ -23,6 +23,8 @@ type AddBookManualScreenProps = {
    * confirmed add opens the library only while this very form is on screen.
    */
   intent: string
+  /** The session's library visibility, read by each new form when it mounts (BS-79). */
+  libraryVisibility: Visibility
   onAddAnother: () => void
 }
 
@@ -31,6 +33,7 @@ export function AddBookManualScreen({
   quick,
   presetWorkId,
   intent,
+  libraryVisibility,
   onAddAnother,
 }: AddBookManualScreenProps) {
   const parameters = useSearchParams()
@@ -74,11 +77,13 @@ export function AddBookManualScreen({
           {...(presetWorkId !== null && presetTitle !== undefined
             ? { presetWork: { id: presetWorkId, title: presetTitle } }
             : {})}
+          libraryVisibility={libraryVisibility}
           slot={quick.slotFor(identities)}
-          onSubmit={(target) => {
+          onSubmit={(target, copy) => {
             quick.add({
               identities,
               entryMethod: 'MANUAL',
+              copy,
               // Opened from an external record: the record's identity travels while its values are unchanged.
               target: refineTargetOf(target, initial, parameters.get(RECORD_PARAM)),
               screen: intent,
@@ -87,10 +92,11 @@ export function AddBookManualScreen({
           onRetry={() => {
             quick.retry(identities)
           }}
-          onUseExistingEdition={(editionId) => {
+          onUseExistingEdition={(editionId, copy) => {
             quick.add({
               identities,
               entryMethod: 'MANUAL',
+              copy,
               target: { kind: 'EXISTING_EDITION', editionId },
               screen: intent,
             })

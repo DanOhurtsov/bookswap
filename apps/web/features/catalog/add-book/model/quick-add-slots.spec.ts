@@ -118,6 +118,24 @@ describe('quickAddSlotsReducer', () => {
     })
   })
 
+  it('відмова з польоту лишає operationId і заморожений запит як контекст для форми (BS-79)', () => {
+    const rejected = quickAddSlotsReducer(started(), {
+      type: 'rejected',
+      key: 'edition:e-1',
+      message: 'ні',
+      code: 'VALIDATION_ERROR',
+    })
+
+    expect(slotOf(rejected, ['edition:e-1'])).toEqual({
+      status: 'rejected',
+      added: 0,
+      message: 'ні',
+      operationId: OPERATION,
+      request,
+      code: 'VALIDATION_ERROR',
+    })
+  })
+
   it('слот без жодної ідентичності неможливий', () => {
     expect(() => slotKeyOf(EMPTY_SLOTS, [])).toThrow()
   })

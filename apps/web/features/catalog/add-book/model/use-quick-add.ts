@@ -1,6 +1,11 @@
 'use client'
 
-import { type CopyEntryMethod, type QuickAddResponse, type QuickAddTarget } from '@bookswap/shared'
+import {
+  type CopyEntryMethod,
+  type QuickAddCopy,
+  type QuickAddResponse,
+  type QuickAddTarget,
+} from '@bookswap/shared'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { ApiRequestError } from '@/app/lib/api'
@@ -23,6 +28,12 @@ export interface QuickAddAttempt {
   identities: readonly string[]
   target: QuickAddTarget
   entryMethod: CopyEntryMethod
+  /**
+   * The new copy's personal values. Full forms always send an explicit visibility (BS-79); the search
+   * dialog sends none, and the server decides from the profile (`strictest(libraryVisibility, FRIENDS)`).
+   * Frozen into the request with the operation: a retry or a restored operation sends the same values.
+   */
+  copy?: QuickAddCopy
   /** Свідомо ще один фізичний примірник: нова операція навіть після `done`. */
   additional?: boolean
   /**
@@ -160,7 +171,12 @@ export function useQuickAdd(options: {
       void run(key, {
         identities: [...attempt.identities],
         operationId,
-        request: { operationId, entryMethod: attempt.entryMethod, target: attempt.target },
+        request: {
+          operationId,
+          entryMethod: attempt.entryMethod,
+          ...(attempt.copy === undefined ? {} : { copy: attempt.copy }),
+          target: attempt.target,
+        },
         ...(attempt.screen === undefined ? {} : { screen: attempt.screen }),
       })
     },

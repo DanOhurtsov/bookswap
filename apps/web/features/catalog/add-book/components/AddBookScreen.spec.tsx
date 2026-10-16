@@ -1257,10 +1257,19 @@ describe('ручна форма: поля текстом, редактор на 
     items = []
   })
 
+  /**
+   * BS-76 covers the book's data. «Ваш примірник» (BS-79) is the new copy's own setting, a plain selector
+   * outside that rule — and exactly one control there.
+   */
   function expectNoControls(): void {
+    const copySection = screen.getByRole('region', { name: 'Ваш примірник' })
+
     for (const role of ['textbox', 'combobox', 'radio', 'spinbutton', 'checkbox'] as const) {
-      expect(screen.queryAllByRole(role)).toHaveLength(0)
+      expect(
+        screen.queryAllByRole(role).filter((element) => !copySection.contains(element)),
+      ).toHaveLength(0)
     }
+    expect(within(copySection).getAllByRole('combobox')).toHaveLength(1)
   }
 
   /** The manual form alone never reads anything; only «Додати до бібліотеки» writes. */
@@ -3950,6 +3959,8 @@ describe('зовнішній запис твору без видання (BS-114
       {
         operationId: expect.any(String),
         entryMethod: 'MANUAL',
+        // BS-79: a full form always sends the new copy's visibility explicitly.
+        copy: { visibility: 'FRIENDS' },
         target: {
           kind: 'EXTERNAL_WORK',
           source: 'OPEN_LIBRARY',

@@ -34,6 +34,7 @@ import {
   type CatalogCorrection,
   type WorkCorrectionEntity,
 } from '@/features/catalog/correction/index.client'
+import { initialCopyVisibility } from '@/features/catalog/add-book/index.client'
 import { ApiRequestError, apiRequest, describeError } from '../../../lib/api'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '../../../lib/labels'
 import { HoldersPanel } from '@/features/network/index.client'
@@ -213,8 +214,10 @@ export default function WorkPage() {
           <ul className="books">
             {editions.map((edition) => (
               <EditionCard
-                key={edition.id}
+                // Keyed by viewer too: another account never sees this one's add-copy draft.
+                key={`${session.user.id}:${edition.id}`}
                 edition={edition}
+                libraryVisibility={session.user.libraryVisibility}
                 translations={translations}
                 canEdit={viewerCapabilities?.editableEditionIds.includes(edition.id) === true}
                 onAdded={reload}
@@ -410,15 +413,22 @@ const VISIBILITY_OPTIONS = labelledOptions(VISIBILITY, VISIBILITY_LABELS)
  * Owns its own `useCatalogCorrection` instance for the SAME reason as
  * `TranslationCard` — separate from the "Це моє видання" add-copy flow below,
  * which is unrelated catalog-vs-library state.
+ *
+ * BS-79: every opening of "Це моє видання" is a new add intent, so it reads the
+ * library visibility the session holds at that moment; while the form is open a
+ * profile update does not reset the choice. The choice is sent explicitly and
+ * never touches the profile.
  */
 function EditionCard({
   edition: freshEdition,
+  libraryVisibility,
   translations,
   canEdit,
   onAdded,
   reload,
 }: {
   edition: Edition
+  libraryVisibility: Visibility
   translations: Translation[]
   canEdit: boolean
   onAdded: () => void
@@ -435,7 +445,7 @@ function EditionCard({
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [condition, setCondition] = useState<Condition>('GOOD')
-  const [visibility, setVisibility] = useState<Visibility>('FRIENDS')
+  const [visibility, setVisibility] = useState(() => initialCopyVisibility(libraryVisibility))
   const [note, setNote] = useState('')
   const [acquiredAt, setAcquiredAt] = useState('')
   const [pending, setPending] = useState(false)
@@ -501,6 +511,7 @@ function EditionCard({
             label="Кому показувати"
             value={visibility}
             options={VISIBILITY_OPTIONS}
+            disabled={pending}
             onValueChange={setVisibility}
           />
 
@@ -547,6 +558,7 @@ function EditionCard({
           <button
             type="button"
             onClick={() => {
+              setVisibility(initialCopyVisibility(libraryVisibility))
               setOpen(true)
               setAdded(undefined)
             }}
