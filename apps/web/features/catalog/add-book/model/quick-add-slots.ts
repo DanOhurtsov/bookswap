@@ -13,7 +13,8 @@ import { ApiRequestError } from '@/app/lib/api'
  * - `unknown` — результат невідомий (мережа, timeout, 5xx, 429). Дозволений лише повтор ТІЄЇ САМОЇ
  *   операції з незмінним вмістом: сервер поверне вже створений примірник або створить його, але
  *   зайвого не додасть. Нова операція заборонена, доки результат не з'ясовано.
- * - `rejected` — однозначна відмова (4xx). Виправлена дія може почати НОВУ операцію.
+ * - `rejected` — однозначна відмова (4xx). Виправлена дія може почати НОВУ операцію. Відхилена операція
+ *   лишає свій `operationId` і заморожений запит — лише як контекст для форми (BS-79), ніколи для повтору.
  * - `done` — збережено; `added` — скільки примірників цього видання додано в цьому сеансі.
  */
 export type QuickAddSlot =
@@ -37,6 +38,13 @@ export type QuickAddSlot =
       status: 'rejected'
       added: number
       message: string
+      /**
+       * The rejected operation and the request it froze, kept when it was rejected from `pending`. A form reads
+       * the visibility it was sent with back from here (BS-79) — also for one restored after a reload, whose
+       * form never saw that choice. Never resent: a corrected attempt is a new operation.
+       */
+      operationId?: string
+      request?: QuickAddRequest
       /** Машиночитний код відмови й його `details` — щоб форма могла показати конкретну дію (наявне видання за ISBN). */
       code?: string
       details?: unknown
@@ -148,6 +156,9 @@ export function quickAddSlotsReducer(
             status: 'rejected',
             added,
             message: action.message,
+            ...(current?.status === 'pending'
+              ? { operationId: current.operationId, request: current.request }
+              : {}),
             ...(action.code === undefined ? {} : { code: action.code }),
             ...(action.details === undefined ? {} : { details: action.details }),
           },

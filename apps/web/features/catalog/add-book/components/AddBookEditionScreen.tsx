@@ -3,6 +3,7 @@
 import type {
   Edition,
   EditionPatchRequest,
+  Visibility,
   WorkDetailResponse,
   WorkPatchRequest,
 } from '@bookswap/shared'
@@ -24,8 +25,10 @@ import { editionRefineFacts } from '../model/edition-refine-view'
 import { isOwned } from '../model/quick-add-card'
 import { identitiesOf } from '../model/quick-add-identities'
 import { backToSearchHref } from '../model/search-address-urls'
+import { useCopyVisibilityDraft } from '../model/use-copy-visibility-draft'
 import type { QuickAddApi } from '../model/use-quick-add'
 import { FactList } from './AddResultDialog'
+import { CopyVisibilitySection } from './CopyVisibilitySection'
 import { QuickAddActions } from './QuickAddActions'
 import { ghostButtonClass, ledeClass, pageClass, pendingStatusClass } from './screen-styles'
 
@@ -35,6 +38,8 @@ type AddBookEditionScreenProps = {
   workId: string
   /** This screen's key: its confirmed add opens the library while it is still on screen. */
   screen: string | undefined
+  /** The session's library visibility: the new copy's initial «Кому показувати» (BS-79). */
+  libraryVisibility: Visibility
 }
 
 /**
@@ -47,6 +52,7 @@ export function AddBookEditionScreen({
   editionId,
   workId,
   screen,
+  libraryVisibility,
 }: AddBookEditionScreenProps) {
   const parameters = useSearchParams()
   const { state, reload } = useWork(workId)
@@ -74,11 +80,14 @@ export function AddBookEditionScreen({
       )}
       {state.status === 'ready' && edition !== undefined && (
         <EditionRefineForm
+          // Another edition is another add intent: its own draft, read from the current preference.
+          key={edition.id}
           detail={state.detail}
           edition={edition}
           reload={reload}
           quick={quick}
           screen={screen}
+          libraryVisibility={libraryVisibility}
         />
       )}
     </main>
@@ -91,6 +100,7 @@ type EditionRefineFormProps = {
   reload: () => Promise<WorkReloadOutcome>
   quick: QuickAddApi
   screen: string | undefined
+  libraryVisibility: Visibility
 }
 
 /**
@@ -103,6 +113,7 @@ function EditionRefineForm({
   reload,
   quick,
   screen,
+  libraryVisibility,
 }: EditionRefineFormProps) {
   const workCorrection = useCatalogCorrection<WorkPatchRequest, WorkCorrectionEntity>({
     mutationKey: ['work-patch', detail.work.id],
@@ -125,6 +136,7 @@ function EditionRefineForm({
   // The same slot as the edition's card on the search: one state, one operation, wherever it is pressed.
   const identities = identitiesOf({ edition: freshEdition })
   const slot = quick.slotFor(identities)
+  const visibility = useCopyVisibilityDraft(libraryVisibility, slot)
   const facts = editionRefineFacts(work, authors, edition)
   const canEditWork = detail.viewerCapabilities?.canEditWork === true
   const canEditEdition = detail.viewerCapabilities?.editableEditionIds.includes(edition.id) === true
@@ -206,6 +218,8 @@ function EditionRefineForm({
         )}
       </section>
 
+      <CopyVisibilitySection visibility={visibility} className="mb-8" />
+
       {adding && (canEditWork || canEditEdition) && (
         <p id={addingHintId} className="form__aside">
           Виправлення недоступні, поки не завершиться додавання.
@@ -222,6 +236,7 @@ function EditionRefineForm({
           quick.add({
             identities,
             entryMethod: 'MANUAL',
+            copy: visibility.copy,
             target: { kind: 'EXISTING_EDITION', editionId: freshEdition.id },
             additional,
             ...(screen === undefined ? {} : { screen }),

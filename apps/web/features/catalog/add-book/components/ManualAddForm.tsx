@@ -1,11 +1,13 @@
 'use client'
 
-import type { QuickAddManualTarget } from '@bookswap/shared'
+import type { QuickAddCopy, QuickAddManualTarget, Visibility } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { manualFieldDisplay } from '../model/manual-field-view'
 import type { ManualFormValues } from '../model/manual-form'
 import type { QuickAddSlot } from '../model/quick-add-slots'
+import { useCopyVisibilityDraft } from '../model/use-copy-visibility-draft'
 import { useManualDraft } from '../model/use-manual-draft'
+import { CopyVisibilitySection } from './CopyVisibilitySection'
 import { ManualAuthorsField } from './ManualAuthorsField'
 import { ManualEditionFields } from './ManualEditionFields'
 import { ManualExtraSection } from './ManualExtraSection'
@@ -15,11 +17,13 @@ type ManualAddFormProps = {
   initial: ManualFormValues
   /** Наявний твір («Уточнити видання», сторінка твору): назва не редагується, нового твору не буде. */
   presetWork?: { id: string; title: string }
+  /** The session's library visibility when this form mounts: the new copy's initial «Кому показувати». */
+  libraryVisibility: Visibility
   slot: QuickAddSlot | undefined
-  onSubmit: (target: QuickAddManualTarget) => void
+  onSubmit: (target: QuickAddManualTarget, copy: QuickAddCopy) => void
   /** Повтор ТІЄЇ САМОЇ операції після невизначеного результату. */
   onRetry: () => void
-  onUseExistingEdition: (editionId: string) => void
+  onUseExistingEdition: (editionId: string, copy: QuickAddCopy) => void
   onAddAnother: () => void
 }
 
@@ -45,10 +49,14 @@ function existingEditionIdOf(slot: QuickAddSlot | undefined): string | undefined
  * open editors included — and the copy as one operation. After an unknown outcome the fields are locked: the
  * same operation is retried with unchanged content, and no new one can start until the outcome is known. An
  * unambiguous rejection returns the form to editing with the same input.
+ *
+ * «Кому показувати» (BS-79) is part of that input: every add from this form — «Додати наявне видання»
+ * included — sends it explicitly, and it is locked with the rest while an operation is unresolved.
  */
 export function ManualAddForm({
   initial,
   presetWork,
+  libraryVisibility,
   slot,
   onSubmit,
   onRetry,
@@ -56,6 +64,7 @@ export function ManualAddForm({
   onAddAnother,
 }: ManualAddFormProps) {
   const draft = useManualDraft(initial, presetWork?.id)
+  const visibility = useCopyVisibilityDraft(libraryVisibility, slot)
   const display = manualFieldDisplay(draft.values)
   const pending = slot?.status === 'pending'
   const unknown = slot?.status === 'unknown'
@@ -84,7 +93,7 @@ export function ManualAddForm({
 
         const target = draft.submit()
 
-        if (target !== undefined) onSubmit(target)
+        if (target !== undefined) onSubmit(target, visibility.copy)
       }}
     >
       {draft.errors.form !== undefined && <FormStatus error={new Error(draft.errors.form)} />}
@@ -128,7 +137,7 @@ export function ManualAddForm({
             <button
               type="button"
               onClick={() => {
-                onUseExistingEdition(existingEditionId)
+                onUseExistingEdition(existingEditionId, visibility.copy)
               }}
             >
               Додати наявне видання
@@ -141,6 +150,8 @@ export function ManualAddForm({
           display={display}
           hasPresetWork={presetWork !== undefined}
         />
+
+        <CopyVisibilitySection visibility={visibility} />
       </fieldset>
 
       {unknown ? (

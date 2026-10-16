@@ -1,6 +1,6 @@
 'use client'
 
-import { DEFAULT_SEARCH_PAGE_SIZE } from '@bookswap/shared'
+import { DEFAULT_SEARCH_PAGE_SIZE, type Visibility } from '@bookswap/shared'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { readSearchAddress, searchHref } from '@/app/lib/search-page'
@@ -41,7 +41,14 @@ export function AddBookScreen() {
     return <SessionNotice text="Потрібен вхід. Переадресовую…" />
   }
 
-  return <AddBookModes userId={session.user.id} />
+  return (
+    <AddBookModes
+      // Another account is another person's page: no slot, draft or form state carries over.
+      key={session.user.id}
+      userId={session.user.id}
+      libraryVisibility={session.user.libraryVisibility}
+    />
+  )
 }
 
 type SessionNoticeProps = { text: string }
@@ -55,14 +62,18 @@ function SessionNotice({ text }: SessionNoticeProps) {
   )
 }
 
-type AddBookModesProps = { userId: string }
+type AddBookModesProps = {
+  userId: string
+  /** Current, not frozen: each new form reads it once, when it mounts (BS-79). */
+  libraryVisibility: Visibility
+}
 
 /**
  * Picks the screen for the address. What must survive a switch between them lives here: the add
  * slots (`quick`), the manual form's intent counter (part of its intent, `manualIntentOf`), and whether the
  * query in the address came from the scanner.
  */
-function AddBookModes({ userId }: AddBookModesProps) {
+function AddBookModes({ userId, libraryVisibility }: AddBookModesProps) {
   const router = useRouter()
   const parameters = useSearchParams()
   const address = readSearchAddress(parameters)
@@ -107,6 +118,7 @@ function AddBookModes({ userId }: AddBookModesProps) {
         editionId={mode.editionId}
         workId={mode.workId}
         screen={screen}
+        libraryVisibility={libraryVisibility}
       />
     )
   }
@@ -117,6 +129,7 @@ function AddBookModes({ userId }: AddBookModesProps) {
         quick={quick}
         presetWorkId={mode.presetWorkId}
         intent={manualIntentOf(mode.form, manualKey)}
+        libraryVisibility={libraryVisibility}
         onAddAnother={() => {
           setManualKey((key) => key + 1)
         }}

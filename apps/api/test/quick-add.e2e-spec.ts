@@ -410,6 +410,61 @@ describe('POST /me/library/quick-add — наявне видання (e2e)', () 
       expect((response.body as { copy: { visibility: string } }).copy.visibility).toBe('PRIVATE')
     })
 
+    /**
+     * BS-79: full add forms send the visibility explicitly, initialized from the profile. The explicit
+     * value is saved as is — PUBLIC stays PUBLIC — and the copy's write never touches the profile.
+     */
+    describe.each<['quick-add' | 'POST /me/library']>([['quick-add'], ['POST /me/library']])(
+      'явна видимість із повних форм (BS-79): %s',
+      (endpoint) => {
+        async function addWith(
+          owner: { cookie: string },
+          editionId: string,
+          visibility: Visibility,
+        ): Promise<string> {
+          if (endpoint === 'quick-add') {
+            return (await added(app, owner, body(editionId, { copy: { visibility } }))).copy
+              .visibility
+          }
+
+          const response = await request(app.getHttpServer())
+            .post(url('/me/library'))
+            .set('Cookie', owner.cookie)
+            .send({ editionId, visibility })
+            .expect(201)
+
+          return (response.body as { copy: { visibility: string } }).copy.visibility
+        }
+
+        it.each<[Visibility, Visibility]>([
+          ['PUBLIC', 'PUBLIC'],
+          ['PUBLIC', 'FRIENDS'],
+          ['PUBLIC', 'PRIVATE'],
+          ['PRIVATE', 'PUBLIC'],
+        ])(
+          'профіль %s, явний вибір %s → примірник із вибором, профіль без змін',
+          async (library, chosen) => {
+            const owner = await registerAccount(app, `qa-bs79-${library.toLowerCase()}`)
+            const editionId = await createEdition(owner)
+
+            await prisma.user.update({
+              where: { id: owner.id },
+              data: { libraryVisibility: library },
+            })
+
+            expect(await addWith(owner, editionId, chosen)).toBe(chosen)
+
+            const profile = await prisma.user.findUniqueOrThrow({
+              where: { id: owner.id },
+              select: { libraryVisibility: true },
+            })
+
+            expect(profile.libraryVisibility).toBe(library)
+          },
+        )
+      },
+    )
+
     it('власник береться лише з сесії: чужий ownerId у запиті відхиляється', async () => {
       const owner = await registerAccount(app, 'qa-owner')
       const victim = await registerAccount(app, 'qa-victim')
