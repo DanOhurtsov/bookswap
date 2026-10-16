@@ -30,7 +30,7 @@ import type { QuickAddApi } from '../model/use-quick-add'
 import { FactList } from './AddResultDialog'
 import { CopyVisibilitySection } from './CopyVisibilitySection'
 import { QuickAddActions } from './QuickAddActions'
-import { ghostButtonClass, ledeClass, pageClass, pendingStatusClass } from './screen-styles'
+import { ghostButtonClass, ledeClass, pendingStatusClass } from './screen-styles'
 
 type AddBookEditionScreenProps = {
   quick: QuickAddApi
@@ -62,7 +62,7 @@ export function AddBookEditionScreen({
       : undefined
 
   return (
-    <main className={pageClass}>
+    <main className="page page--medium">
       <h1>Уточнити дані</h1>
       <p className={ledeClass}>Перевірте дані книжки перед додаванням до бібліотеки.</p>
       <p className="mb-8">

@@ -9,7 +9,7 @@ interface ShellProps {
 
 function Shell({ title, description, children, cta }: ShellProps) {
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
+    <main className="page-container py-10 sm:py-14">
       <header className="mb-8">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-3xl font-bold tracking-tight">{title}</h1>

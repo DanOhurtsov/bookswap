@@ -16,7 +16,7 @@ import { useQuickAdd } from '../model/use-quick-add'
 import { AddBookEditionScreen } from './AddBookEditionScreen'
 import { AddBookManualScreen } from './AddBookManualScreen'
 import { AddBookSearchScreen } from './AddBookSearchScreen'
-import { pageClass, pendingStatusClass } from './screen-styles'
+import { pendingStatusClass } from './screen-styles'
 
 /**
  * Єдиний вхід у додавання книжки (docs/plan/fast-book-add.md, §2): пошук за назвою, автором або ISBN;
@@ -55,7 +55,7 @@ type SessionNoticeProps = { text: string }
 
 function SessionNotice({ text }: SessionNoticeProps) {
   return (
-    <main className={pageClass}>
+    <main className="page">
       <h1>Додати книжку</h1>
       <p className={pendingStatusClass}>{text}</p>
     </main>

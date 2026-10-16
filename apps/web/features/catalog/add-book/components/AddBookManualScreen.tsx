@@ -12,7 +12,7 @@ import { refineTargetOf } from '../model/refine-target'
 import { backToSearchHref, RECORD_PARAM } from '../model/search-address-urls'
 import type { QuickAddApi } from '../model/use-quick-add'
 import { ManualAddForm } from './ManualAddForm'
-import { ledeClass, pageClass, pendingStatusClass } from './screen-styles'
+import { ledeClass, pendingStatusClass } from './screen-styles'
 
 type AddBookManualScreenProps = {
   quick: QuickAddApi
@@ -51,7 +51,7 @@ export function AddBookManualScreen({
   const waitingForWork = presetWorkId !== null && presetWork.status !== 'ready'
 
   return (
-    <main className={pageClass}>
+    <main className="page page--medium">
       <h1>Додати книжку вручну</h1>
       <p className={ledeClass}>
         Обов’язкова лише назва. Решту можна не знати — її можна уточнити пізніше.

@@ -38,7 +38,7 @@ import { useExternalSearch } from '../model/use-external-search'
 import { useLastReady } from '../model/use-last-ready'
 import type { QuickAddApi } from '../model/use-quick-add'
 import { useSearchAddressSync } from '../model/use-search-address-sync'
-import { ledeClass, pageClass } from './screen-styles'
+import { ledeClass } from './screen-styles'
 import { SearchBar } from './SearchBar'
 import { SearchResults } from './SearchResults'
 
@@ -183,7 +183,7 @@ export function AddBookSearchScreen({
   }
 
   return (
-    <main className={pageClass}>
+    <main className="page">
       <h1>Додати книжку</h1>
       <p className={ledeClass}>
         Знайдіть конкретне видання й додайте його до бібліотеки одним натисканням.
