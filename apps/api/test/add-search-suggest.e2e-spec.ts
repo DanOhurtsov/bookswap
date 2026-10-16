@@ -12,6 +12,7 @@ import {
 import { ExternalSearchCache } from '../src/catalog/search/external/external-search.cache'
 import { EXTERNAL_SEARCH_PROVIDERS } from '../src/catalog/search/external/external-search-provider'
 import { ProviderRateLimiter } from '../src/catalog/search/external/provider-rate-limiter'
+import { LocalMatches } from '../src/catalog/search/local-matches.service'
 import { createTestApp } from './auth.helpers'
 import { uniqueIsbn13 } from './helpers/unique-isbn'
 import { registerAccount, url } from './loan.helpers'
@@ -217,10 +218,45 @@ describe('GET /me/library/add-search/suggest (e2e)', () => {
 
     it('«1984» шукається як назва', async () => {
       const account = await registerAccount(app, 'sg-1984')
+      // The e2e database is shared: other files' fixture titles can contain "1984" (a PID in their
+      // tokens) and fill the local limit, and then the server rightly asks no source at all. This
+      // test is about how the query is read, so only the local matches are emptied; the endpoint,
+      // validation and the external orchestration stay real.
+      const rank = jest
+        .spyOn(app.get(LocalMatches), 'rank')
+        .mockResolvedValue({ works: [], authors: [], byIsbn: false })
 
-      await external(account, '1984')
+      try {
+        await external(account, '1984')
 
-      expect(googleBooks.blocks).toHaveLength(1)
+        expect(rank).toHaveBeenCalledWith('1984', { authors: false })
+        expect(googleBooks.blocks).toHaveLength(1)
+        expect(googleBooks.blocks[0]).toMatchObject({ query: '1984', index: 0, maxQueries: 1 })
+        expect(openLibrary.queries).toEqual(['1984'])
+      } finally {
+        rank.mockRestore()
+      }
+    })
+
+    it('наш каталог уже заповнив список: назовні не питається нічого', async () => {
+      const account = await registerAccount(app, 'sg-full')
+      const word = token()
+      const workId = await createWork(account, `${word} Повний список`)
+
+      for (let index = 0; index < AUTO_SEARCH_RESULT_LIMIT; index += 1) {
+        await createEdition(account, workId, {
+          publisher: `Видавець ${String(index)}`,
+          year: 2000 + index,
+        })
+      }
+
+      const result = await external(account, word)
+
+      expect(googleBooks.blocks).toHaveLength(0)
+      expect(openLibrary.blocks).toHaveLength(0)
+      expect(result.items).toEqual([])
+      expect(result.sources).toEqual([])
+      expect(result.more).toBe('YES')
     })
 
     it('збій джерела — 200 із статусом, без кешування й без повторів', async () => {
