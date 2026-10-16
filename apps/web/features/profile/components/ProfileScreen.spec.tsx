@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import type { Me, UpdateProfileRequest } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { SessionProvider, useSession } from '@/app/lib/use-session'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { ProfileScreen } from './ProfileScreen'
 
 jest.mock('@/app/lib/api', () => {
@@ -179,7 +180,9 @@ describe('ProfileScreen: редагування', () => {
       'https://img.example/marta.png',
     )
     expect(screen.getByLabelText('Про себе')).toHaveValue('Читаю фантастику')
-    expect(screen.getByLabelText('Видимість бібліотеки за замовчуванням')).toHaveValue('FRIENDS')
+    expect(screen.getByLabelText('Видимість бібліотеки за замовчуванням')).toHaveTextContent(
+      'Для друзів',
+    )
     expect(screen.getByLabelText('Друзі бачитимуть, хто читає мої книжки')).toBeChecked()
     expect(screen.getByRole('button', { name: 'Зберегти' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Скасувати' })).toBeEnabled()
@@ -196,10 +199,7 @@ describe('ProfileScreen: редагування', () => {
     await user.type(screen.getByLabelText('Імʼя'), 'Марта Коваль')
     await user.clear(screen.getByLabelText('Посилання на аватар'))
     await user.clear(screen.getByLabelText('Про себе'))
-    await user.selectOptions(
-      screen.getByLabelText('Видимість бібліотеки за замовчуванням'),
-      'PRIVATE',
-    )
+    await chooseOption(user, 'Видимість бібліотеки за замовчуванням', 'Приватна — тільки я')
     await user.click(screen.getByLabelText('Друзі бачитимуть, хто читає мої книжки'))
 
     // The draft is local: nothing outside the form has changed yet.

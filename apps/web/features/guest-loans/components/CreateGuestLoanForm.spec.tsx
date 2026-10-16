@@ -4,6 +4,7 @@ import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiRequestError } from '@/app/lib/api'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { CreateGuestLoanForm } from './CreateGuestLoanForm'
 
 jest.mock('@/app/lib/api', () => {
@@ -111,7 +112,7 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
 
     const { onCreated } = setup()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'contact-1')
+    await chooseOption(userEvent, 'Кому віддали', 'Синтетичний Гість')
     await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     await userEvent.type(screen.getByLabelText('Повернути до'), '2026-10-01')
     await userEvent.click(screen.getByRole('button', { name: 'Записати гостьову позику' }))
@@ -149,7 +150,7 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
 
     const { onCreated } = setup()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'contact-1')
+    await chooseOption(userEvent, 'Кому віддали', 'Синтетичний Гість')
     await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     await userEvent.click(screen.getByRole('button', { name: 'Записати гостьову позику' }))
 
@@ -171,7 +172,7 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
     mockContacts([CONTACT])
     setup()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'contact-1')
+    await chooseOption(userEvent, 'Кому віддали', 'Синтетичний Гість')
     await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     await userEvent.click(screen.getByRole('button', { name: 'Записати гостьову позику' }))
 
@@ -185,7 +186,7 @@ describe('CreateGuestLoanForm (Stage 10, 10f.3)', () => {
 
   describe('10i.3: другий шлях — запит підтвердження гостя', () => {
     const fill = async () => {
-      await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'contact-1')
+      await chooseOption(userEvent, 'Кому віддали', 'Синтетичний Гість')
       await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     }
 

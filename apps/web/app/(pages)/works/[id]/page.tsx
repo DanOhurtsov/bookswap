@@ -20,7 +20,7 @@ import {
 } from '@bookswap/shared'
 import { AuthorLine, Chip, EditionLine } from '@/components/BookParts'
 import { HistoryEntryLine } from '@/components/HistoryEntryLine'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { WishlistButton } from '@/components/WishList/WishListButton'
 import {
@@ -403,6 +403,9 @@ function TranslationCard({
   )
 }
 
+const CONDITION_OPTIONS = labelledOptions(CONDITION, CONDITION_LABELS)
+const VISIBILITY_OPTIONS = labelledOptions(VISIBILITY, VISIBILITY_LABELS)
+
 /**
  * Owns its own `useCatalogCorrection` instance for the SAME reason as
  * `TranslationCard` — separate from the "Це моє видання" add-copy flow below,
@@ -489,31 +492,17 @@ function EditionCard({
             id={`condition-${edition.id}`}
             label="Стан примірника"
             value={condition}
-            onChange={(event) => {
-              setCondition(event.target.value as Condition)
-            }}
-          >
-            {CONDITION.map((value) => (
-              <option key={value} value={value}>
-                {CONDITION_LABELS[value]}
-              </option>
-            ))}
-          </SelectField>
+            options={CONDITION_OPTIONS}
+            onValueChange={setCondition}
+          />
 
           <SelectField
             id={`visibility-${edition.id}`}
             label="Кому показувати"
             value={visibility}
-            onChange={(event) => {
-              setVisibility(event.target.value as Visibility)
-            }}
-          >
-            {VISIBILITY.map((value) => (
-              <option key={value} value={value}>
-                {VISIBILITY_LABELS[value]}
-              </option>
-            ))}
-          </SelectField>
+            options={VISIBILITY_OPTIONS}
+            onValueChange={setVisibility}
+          />
 
           <TextField
             id={`note-${edition.id}`}

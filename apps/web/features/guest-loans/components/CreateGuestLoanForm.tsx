@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { createGuestLoanRequestSchema } from '@bookswap/shared'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { ComboboxField } from '@/components/Form/ComboboxField'
+import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { validate, type FieldErrors } from '@/app/lib/validation'
@@ -142,22 +143,16 @@ export function CreateGuestLoanForm({ copyId, onCreated, onCancel }: CreateGuest
         видно анонімно.
       </p>
 
-      <SelectField
+      {/* By id: two contacts may share an alias. */}
+      <ComboboxField
         id={`guest-contact-${copyId}`}
         label="Кому віддали"
         value={externalBorrowerId}
         error={errors.externalBorrowerId}
-        onChange={(event) => {
-          setExternalBorrowerId(event.target.value)
-        }}
-      >
-        <option value="">— оберіть контакт —</option>
-        {state.contacts.map((contact) => (
-          <option key={contact.id} value={contact.id}>
-            {contact.alias}
-          </option>
-        ))}
-      </SelectField>
+        placeholder="— оберіть контакт —"
+        options={state.contacts.map((contact) => ({ value: contact.id, label: contact.alias }))}
+        onValueChange={setExternalBorrowerId}
+      />
 
       <TextField
         id={`guest-handed-${copyId}`}

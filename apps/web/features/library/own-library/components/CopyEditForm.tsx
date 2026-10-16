@@ -1,10 +1,13 @@
 'use client'
 
-import { CONDITION, VISIBILITY, type Condition, type Visibility } from '@bookswap/shared'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { CONDITION, VISIBILITY } from '@bookswap/shared'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import { Button } from '@/components/ui/button'
 import { CONDITION_LABELS, VISIBILITY_LABELS } from '@/app/lib/labels'
 import type { CopyDraft } from '../model/use-copy-draft'
+
+const CONDITION_OPTIONS = labelledOptions(CONDITION, CONDITION_LABELS)
+const VISIBILITY_OPTIONS = labelledOptions(VISIBILITY, VISIBILITY_LABELS)
 
 type CopyEditFormProps = {
   copyId: string
@@ -21,31 +24,17 @@ export function CopyEditForm({ copyId, draft, pending, onSave, onCancel }: CopyE
         id={`edit-condition-${copyId}`}
         label="Стан"
         value={draft.condition}
-        onChange={(event) => {
-          draft.setCondition(event.target.value as Condition)
-        }}
-      >
-        {CONDITION.map((value) => (
-          <option key={value} value={value}>
-            {CONDITION_LABELS[value]}
-          </option>
-        ))}
-      </SelectField>
+        options={CONDITION_OPTIONS}
+        onValueChange={draft.setCondition}
+      />
 
       <SelectField
         id={`edit-visibility-${copyId}`}
         label="Кому показувати"
         value={draft.visibility}
-        onChange={(event) => {
-          draft.setVisibility(event.target.value as Visibility)
-        }}
-      >
-        {VISIBILITY.map((value) => (
-          <option key={value} value={value}>
-            {VISIBILITY_LABELS[value]}
-          </option>
-        ))}
-      </SelectField>
+        options={VISIBILITY_OPTIONS}
+        onValueChange={draft.setVisibility}
+      />
 
       <TextField
         id={`edit-note-${copyId}`}

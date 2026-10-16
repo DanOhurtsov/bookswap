@@ -6,6 +6,7 @@ import '@testing-library/jest-dom'
 import type { BorrowedLibraryResponse, LibraryResponse, OwnCopy } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { LibraryScreen } from './LibraryScreen'
 import { setAddress, watchHistory } from '../own-library.test-helpers'
 
@@ -792,7 +793,7 @@ describe('рядок примірника: дії', () => {
 
     expect(screen.getByRole('dialog', { name: 'Редагувати примірник' })).toBeInTheDocument()
 
-    await userEvent.selectOptions(screen.getByLabelText('Стан'), 'WORN')
+    await chooseOption(userEvent, 'Стан', 'Потерта')
     await userEvent.type(screen.getByLabelText('Нотатка'), 'нова нотатка')
     await userEvent.click(button('Зберегти'))
 
@@ -817,6 +818,29 @@ describe('рядок примірника: дії', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
+  })
+
+  it('«Редагувати»: Escape у відкритому списку стану закриває лише список, не вікно (BS-92)', async () => {
+    serve({ 'GET /me/library': () => shelfOf(ownCopy('copy-1')) })
+
+    renderShelf()
+    await choose('Редагувати')
+    await userEvent.click(screen.getByRole('combobox', { name: 'Стан' }))
+    await screen.findByRole('listbox')
+    await userEvent.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('dialog', { name: 'Редагувати примірник' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Стан' })).toHaveFocus()
+
+    await userEvent.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+    expect(mockApiRequest).not.toHaveBeenCalledWith('/me/library/copy-1', expect.anything())
   })
 
   it('порожня нотатка зберігається як null', async () => {

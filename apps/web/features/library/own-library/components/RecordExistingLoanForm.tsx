@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { createRecordedLoanRequestSchema, loanResponseSchema } from '@bookswap/shared'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { ComboboxField } from '@/components/Form/ComboboxField'
+import { TextField } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import { useFriends } from '@/app/lib/use-friends'
@@ -101,22 +102,19 @@ export function RecordExistingLoanForm({
         дати чи відкликати запис.
       </p>
 
-      <SelectField
+      {/* By id: two friends may share a display name. */}
+      <ComboboxField
         id={`record-friend-${copyId}`}
         label="Кому віддали"
         value={borrowerId}
         error={errors.borrowerId}
-        onChange={(event) => {
-          setBorrowerId(event.target.value)
-        }}
-      >
-        <option value="">— оберіть друга —</option>
-        {state.friends.map((friend) => (
-          <option key={friend.user.id} value={friend.user.id}>
-            {friend.user.displayName}
-          </option>
-        ))}
-      </SelectField>
+        placeholder="— оберіть друга —"
+        options={state.friends.map((friend) => ({
+          value: friend.user.id,
+          label: friend.user.displayName,
+        }))}
+        onValueChange={setBorrowerId}
+      />
 
       <TextField
         id={`record-handed-${copyId}`}

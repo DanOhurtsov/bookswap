@@ -116,9 +116,12 @@ h1 {
   font-size: 0.95rem;
 }
 
+/* Select and combobox triggers (`components/ui`) are form controls too, also outside a `.field`
+   (the inline filters): one box for every control, so a select beside an input is the same height. */
 .field input,
 .field textarea,
-.field select {
+[data-slot='select-trigger'],
+[data-slot='combobox-trigger'] {
   width: 100%;
   padding: 0.6rem 0.7rem;
   font: inherit;
@@ -134,7 +137,8 @@ h1 {
 
 .field input:focus-visible,
 .field textarea:focus-visible,
-.field select:focus-visible,
+[data-slot='select-trigger']:focus-visible,
+[data-slot='combobox-trigger']:focus-visible,
 button:not([data-ui='button']):focus-visible,
 a:focus-visible {
   outline: 2px solid var(--bookswap-accent);
@@ -144,7 +148,8 @@ a:focus-visible {
 /* Помилка позначається не лише кольором: під полем є текст, і він звʼязаний із інпутом через aria-describedby. */
 .field input[aria-invalid='true'],
 .field textarea[aria-invalid='true'],
-.field select[aria-invalid='true'] {
+[data-slot='select-trigger'][aria-invalid='true'],
+[data-slot='combobox-trigger'][aria-invalid='true'] {
   border-color: var(--error);
 }
 
@@ -449,13 +454,16 @@ a:focus-visible > .link-underline {
 
 .search-pagination__size {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   color: var(--bookswap-muted);
 }
 
-.search-pagination__size select {
+.search-pagination__size [data-slot='select-trigger'],
+.search-pagination__size [data-slot='combobox-trigger'] {
   width: auto;
+  color: var(--fg);
 }
 
 /* --- Підтвердження -------------------------------------------------------- */

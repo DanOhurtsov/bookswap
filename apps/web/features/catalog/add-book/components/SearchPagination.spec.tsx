@@ -37,7 +37,9 @@ describe('SearchPagination', () => {
     renderPagination()
 
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Результатів на сторінці')).toHaveValue('10')
+    expect(screen.getByRole('combobox', { name: 'Результатів на сторінці' })).toHaveTextContent(
+      '10',
+    )
   })
 
   it('посилання — справжні посилання (role=link), а не кнопки', () => {
@@ -116,13 +118,15 @@ describe('SearchPagination', () => {
     const { onPageSizeChange } = renderPagination()
     const user = userEvent.setup()
 
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    await user.click(screen.getByRole('combobox', { name: 'Результатів на сторінці' }))
+
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([
       '10',
       '20',
       '50',
     ])
 
-    await user.selectOptions(screen.getByLabelText('Результатів на сторінці'), '20')
+    await user.click(screen.getByRole('option', { name: '20' }))
 
     expect(onPageSizeChange).toHaveBeenCalledWith(20)
   })

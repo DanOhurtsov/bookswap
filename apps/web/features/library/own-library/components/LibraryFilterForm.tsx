@@ -2,7 +2,8 @@
 
 import { type FormEvent } from 'react'
 import { COPY_STATUS } from '@bookswap/shared'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
+import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { Button } from '@/components/ui/button'
 import { COPY_STATUS_LABELS } from '@/app/lib/labels'
 import type { LibraryFilters } from '../model/use-library-filters'
@@ -16,6 +17,12 @@ type LibraryFilterFormProps = {
  * markup stay, so showing them again is flipping this constant.
  */
 const SHOW_STATUS_AND_LANG_FILTERS = false
+
+/** `''` — any availability. */
+const STATUS_OPTIONS = [
+  { value: '', label: 'будь-яка' },
+  ...labelledOptions(COPY_STATUS, COPY_STATUS_LABELS),
+]
 
 export function LibraryFilterForm({ filters }: LibraryFilterFormProps) {
   const { draft, errors } = filters
@@ -33,28 +40,17 @@ export function LibraryFilterForm({ filters }: LibraryFilterFormProps) {
             id="filter-status"
             label="Доступність"
             value={draft.status}
-            onChange={(event) => {
-              filters.setStatus(event.target.value)
-            }}
-          >
-            <option value="">будь-яка</option>
-            {COPY_STATUS.map((value) => (
-              <option key={value} value={value}>
-                {COPY_STATUS_LABELS[value]}
-              </option>
-            ))}
-          </SelectField>
+            options={STATUS_OPTIONS}
+            onValueChange={filters.setStatus}
+          />
 
-          <TextField
+          <LanguageSelect
             id="filter-lang"
             label="Мова"
-            autoComplete="off"
-            placeholder="uk"
+            emptyLabel="будь-яка"
             value={draft.lang}
-            error={errors.lang}
-            onChange={(event) => {
-              filters.setLang(event.target.value)
-            }}
+            {...(errors.lang === undefined ? {} : { error: errors.lang })}
+            onChange={filters.setLang}
           />
         </>
       )}

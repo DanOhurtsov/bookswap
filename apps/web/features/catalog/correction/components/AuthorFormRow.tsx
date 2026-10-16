@@ -1,20 +1,16 @@
 'use client'
 
-import {
-  AUTHOR_ROLE,
-  authorRoleSchema,
-  catalogSearchResponseSchema,
-  type AuthorMatch,
-  type AuthorRole,
-} from '@bookswap/shared'
+import { AUTHOR_ROLE, catalogSearchResponseSchema, type AuthorMatch } from '@bookswap/shared'
 import { useState } from 'react'
 import { useController, type Control } from 'react-hook-form'
 import { apiRequest, describeError } from '@/app/lib/api'
 import { AUTHOR_ROLE_LABELS } from '@/app/lib/labels'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import type { AuthorFormValue } from '../model/author-list'
 import type { AuthorName } from '../model/field-display'
 import type { WorkCorrectionFormValues } from '../model/work-form'
+
+const ROLE_OPTIONS = labelledOptions(AUTHOR_ROLE, AUTHOR_ROLE_LABELS)
 
 type AuthorRowError = {
   message?: string
@@ -180,16 +176,11 @@ export function AuthorFormRow({
         id={`correction-author-role-${field.name}`}
         label="Роль"
         value={author.role ?? 'AUTHOR'}
-        onChange={(event) => {
-          field.onChange({ ...author, role: authorRoleSchema.parse(event.target.value) })
+        options={ROLE_OPTIONS}
+        onValueChange={(role) => {
+          field.onChange({ ...author, role })
         }}
-      >
-        {AUTHOR_ROLE.map((role: AuthorRole) => (
-          <option key={role} value={role}>
-            {AUTHOR_ROLE_LABELS[role]}
-          </option>
-        ))}
-      </SelectField>
+      />
 
       <div className="person__actions">
         <button

@@ -4,6 +4,7 @@ import '@testing-library/jest-dom'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiRequestError } from '@/app/lib/api'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { RecordExistingLoanForm } from './RecordExistingLoanForm'
 
 jest.mock('@/app/lib/api', () => {
@@ -92,12 +93,29 @@ describe('RecordExistingLoanForm (Stage 10, 10e)', () => {
     expect(screen.getAllByRole('alert').length).toBeGreaterThan(0)
   })
 
+  it('без друга помилка повʼязана з вибором, а порожнього варіанта в списку немає (BS-92)', async () => {
+    mockFriends([FRIEND])
+    setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Записати передачу' }))
+
+    const picker = screen.getByRole('combobox', { name: 'Кому віддали' })
+
+    expect(picker).toHaveAttribute('aria-invalid', 'true')
+    expect(picker).toHaveTextContent('— оберіть друга —')
+
+    await userEvent.click(picker)
+
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([
+      'Олесь',
+    ])
+  })
+
   it('success: POST /loans/recorded з обраним другом і датами, потім onRecorded', async () => {
     mockFriends([FRIEND])
 
     const { onRecorded } = setup()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'friend-1')
+    await chooseOption(userEvent, 'Кому віддали', 'Олесь')
     await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     await userEvent.type(screen.getByLabelText('Повернути до'), '2026-10-01')
     await userEvent.click(screen.getByRole('button', { name: 'Записати передачу' }))
@@ -136,7 +154,7 @@ describe('RecordExistingLoanForm (Stage 10, 10e)', () => {
 
     const { onRecorded } = setup()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Кому віддали'), 'friend-1')
+    await chooseOption(userEvent, 'Кому віддали', 'Олесь')
     await userEvent.type(screen.getByLabelText('Коли віддали'), '2026-09-01')
     await userEvent.click(screen.getByRole('button', { name: 'Записати передачу' }))
 

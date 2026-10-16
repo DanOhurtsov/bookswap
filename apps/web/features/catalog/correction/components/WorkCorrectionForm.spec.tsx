@@ -7,6 +7,7 @@ import type { ReactElement } from 'react'
 import type { CatalogSearchResponse, Work, WorkAuthor, WorkPatchRequest } from '@bookswap/shared'
 import type { WorkCorrectionEntity } from '../api/correction-requests'
 import type { CatalogCorrection } from '../model/use-catalog-correction'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { WorkCorrectionForm } from './WorkCorrectionForm'
 
 /**
@@ -161,7 +162,7 @@ it('«Редагувати» й «Додати» відкривають потр
 
   await user.click(editButton('Мова оригіналу'))
   expect(screen.getByLabelText('Мова оригіналу')).toHaveFocus()
-  expect(screen.getByLabelText('Мова оригіналу')).toHaveValue('uk')
+  expect(screen.getByLabelText('Мова оригіналу')).toHaveTextContent('українська')
 
   await user.click(screen.getByRole('button', { name: 'Додати: Рік першого видання' }))
   expect(screen.getByLabelText('Рік першого видання')).toHaveFocus()
@@ -458,7 +459,7 @@ describe('автори', () => {
 
     await user.click(editButton('Автори'))
     await user.click(nth(screen.getAllByRole('button', { name: 'Прибрати' }), 0))
-    await user.selectOptions(screen.getByLabelText('Роль'), 'EDITOR')
+    await chooseOption(user, 'Роль', 'редактор')
     await user.click(screen.getByRole('button', { name: 'Скасувати: Автори' }))
 
     expect(authorsView()).toEqual(['Новий Автор — автор', 'Тарас Шевченко — автор'])
@@ -513,7 +514,7 @@ describe('автори', () => {
     [
       'лише роль',
       async (user: User) => {
-        await user.selectOptions(screen.getByLabelText('Роль'), 'EDITOR')
+        await chooseOption(user, 'Роль', 'редактор')
       },
     ],
     [
@@ -546,7 +547,7 @@ describe('автори', () => {
 
       await user.click(editButton('Автори'))
       expect(screen.getByLabelText('Імʼя')).toHaveValue('Тарас Шевченко')
-      expect(screen.getByLabelText('Роль')).toHaveValue('AUTHOR')
+      expect(screen.getByLabelText('Роль')).toHaveTextContent(/^автор$/)
       await user.click(screen.getByRole('button', { name: 'Скасувати: Автори' }))
 
       await saveAll(user)

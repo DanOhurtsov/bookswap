@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { CatalogDiscoveryResponse, CatalogDiscoveryResult } from '@bookswap/shared'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import CatalogPage from './page'
 
 jest.mock('@/app/lib/api', () => {
@@ -107,7 +108,9 @@ it('searches available copies in my circle by default and never calls external c
     'href',
     '/users/friend-1/library',
   )
-  expect(screen.getByLabelText('Показувати книжки')).toHaveValue('CIRCLE')
+  expect(screen.getByRole('combobox', { name: 'Показувати книжки' })).toHaveTextContent(
+    'Мої та друзів',
+  )
   expect(apiRequest).toHaveBeenCalledWith(
     '/catalog/discover?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8&page=1&pageSize=10&scope=CIRCLE&availability=AVAILABLE&translation=ANY',
     expect.any(Object),
@@ -117,7 +120,7 @@ it('searches available copies in my circle by default and never calls external c
 
 it('switches to all users, resetting the page and keeping its size', async () => {
   renderAt('q=Тигролови&page=3&pageSize=20')
-  await userEvent.selectOptions(screen.getByLabelText('Показувати книжки'), 'ALL')
+  await chooseOption(userEvent, 'Показувати книжки', 'Усіх користувачів')
 
   expect(push).toHaveBeenCalledWith(
     '/catalog?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8&pageSize=20&scope=ALL',
@@ -167,7 +170,7 @@ it('keeps the page size selector and links on the owned-copy results', async () 
   renderAt('q=Тигролови&page=2&pageSize=20')
 
   expect(await screen.findByRole('link', { name: 'Тигролови' })).toBeInTheDocument()
-  expect(screen.getByLabelText('Результатів на сторінці')).toHaveValue('20')
+  expect(screen.getByRole('combobox', { name: 'Результатів на сторінці' })).toHaveTextContent('20')
   expect(screen.getByRole('link', { name: 'Наступна сторінка' })).toHaveAttribute(
     'href',
     expect.stringContaining('page=3'),
@@ -204,9 +207,9 @@ it('browses the circle without any text and shows filters', async () => {
     '/catalog/discover?page=1&pageSize=10&scope=CIRCLE&availability=AVAILABLE&translation=ANY',
     expect.any(Object),
   )
-  expect(screen.getByLabelText('Доступність')).toHaveValue('AVAILABLE')
-  expect(screen.getByLabelText('Мова')).toHaveValue('')
-  expect(screen.getByLabelText('Переклад')).toHaveValue('ANY')
+  expect(screen.getByRole('combobox', { name: 'Доступність' })).toHaveTextContent('Лише доступні')
+  expect(screen.getByRole('combobox', { name: 'Мова' })).toHaveTextContent('Будь-яка')
+  expect(screen.getByRole('combobox', { name: 'Переклад' })).toHaveTextContent('Будь-який')
 })
 
 it('reads filters from the address, sends them, and resets the page when one changes', async () => {
@@ -218,9 +221,57 @@ it('reads filters from the address, sends them, and resets the page when one cha
     expect.any(Object),
   )
 
-  await userEvent.selectOptions(screen.getByLabelText('Мова'), 'pl')
+  await chooseOption(userEvent, 'Мова', 'польська')
 
   expect(push).toHaveBeenCalledWith('/catalog?availability=ANY&language=pl&translation=TRANSLATED')
+})
+
+it('offers by name only the languages the API accepts; «Будь-яка» drops the filter (BS-92)', async () => {
+  const user = userEvent.setup()
+
+  renderAt('language=pl&page=2')
+  await screen.findByRole('link', { name: 'Тигролови' })
+  const requests = apiRequest.mock.calls.length
+
+  expect(screen.getByRole('combobox', { name: 'Мова' })).toHaveTextContent('польська')
+
+  await user.click(screen.getByRole('combobox', { name: 'Мова' }))
+  await screen.findByRole('combobox', { name: 'Пошук: Мова' })
+
+  expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    'Будь-яка',
+    'українська',
+    'англійська',
+    'польська',
+    'німецька',
+    'французька',
+    'іспанська',
+    'італійська',
+    'чеська',
+  ])
+
+  await user.keyboard('япон')
+  expect(screen.getByText('Нічого не знайдено')).toBeVisible()
+  // Searching inside the list changes neither the address nor what is requested.
+  expect(push).not.toHaveBeenCalled()
+  expect(apiRequest.mock.calls).toHaveLength(requests)
+
+  await user.clear(screen.getByRole('combobox', { name: 'Пошук: Мова' }))
+  await user.click(screen.getByRole('option', { name: 'Будь-яка' }))
+
+  expect(push).toHaveBeenCalledTimes(1)
+  expect(push).toHaveBeenCalledWith('/catalog')
+})
+
+it('a new page size returns to page 1 and keeps the query and filters (BS-92)', async () => {
+  renderAt('q=Тигролови&language=uk&page=3')
+  await screen.findByRole('link', { name: 'Тигролови' })
+
+  await chooseOption(userEvent, 'Результатів на сторінці', '50')
+
+  expect(push).toHaveBeenCalledWith(
+    '/catalog?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE%D0%BB%D0%BE%D0%B2%D0%B8&pageSize=50&language=uk',
+  )
 })
 
 it('the legacy ALL scope hides the filters and never sends them', async () => {
