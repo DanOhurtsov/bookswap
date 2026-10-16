@@ -52,10 +52,13 @@ function withField<K extends ManualFieldName>(
 }
 
 function firstControl(container: HTMLElement | undefined): HTMLElement | undefined {
-  // A radio group is entered at its current answer, as Tab would enter it.
+  // A radio group is entered at its current answer, as Tab would enter it. A select's or combobox's
+  // trigger (`role=combobox`) is its control; the hidden form input beside it (`aria-hidden`) is not.
   return (
     container?.querySelector<HTMLElement>('input:checked') ??
-    container?.querySelector<HTMLElement>('input, select, textarea') ??
+    container?.querySelector<HTMLElement>(
+      'input:not([aria-hidden="true"]), select, textarea, [role="combobox"]',
+    ) ??
     undefined
   )
 }

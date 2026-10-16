@@ -13,6 +13,7 @@ import type {
 } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
+import { chooseOption, searchAndChooseOption } from '@/components/Form/test-choose-option'
 import { AddBookScreen } from './AddBookScreen'
 
 /**
@@ -1047,7 +1048,7 @@ describe('ручне додавання: одна форма (QA9)', () => {
     await user.type(screen.getByLabelText('Автор 2'), 'Співавтор')
     await user.click(screen.getByRole('button', { name: 'Зберегти: Автори' }))
     await openManualEditor(user, 'Мова видання')
-    await user.selectOptions(screen.getByLabelText('Мова видання'), 'uk')
+    await searchAndChooseOption(user, 'Мова видання', 'укр', 'українська')
     await openManualEditor(user, 'Це переклад?')
     await user.click(screen.getByLabelText('Ні — це оригінал'))
     await openManualEditor(user, 'ISBN-13')
@@ -1081,9 +1082,9 @@ describe('ручне додавання: одна форма (QA9)', () => {
     await openManualEditor(user, 'Перекладач')
     await user.type(screen.getByLabelText('Перекладач'), 'Олена Оніщук')
     await openManualEditor(user, 'Мова перекладу')
-    await user.selectOptions(screen.getByLabelText('Мова перекладу'), 'uk')
+    await chooseOption(user, 'Мова перекладу', 'українська')
     await openManualEditor(user, 'З якої мови перекладено')
-    await user.selectOptions(screen.getByLabelText('З якої мови перекладено'), 'en')
+    await searchAndChooseOption(user, 'З якої мови перекладено', 'Англ', 'англійська')
     await user.click(screen.getByRole('button', { name: 'Додати до бібліотеки' }))
     await screen.findByText('Книжку додано до вашої бібліотеки.')
 
@@ -1395,6 +1396,54 @@ describe('ручна форма: поля текстом, редактор на 
     expectNoRequests()
   })
 
+  it('селектор мови: відкритий редактор фокусує його; Enter у пошуку вибирає мову, не підтверджуючи поле й не додаючи книжку (BS-92)', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await openManualEditor(user, 'Мова видання')
+
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+    await screen.findByRole('combobox', { name: 'Пошук: Мова видання' })
+    await user.keyboard('  ЧЕС {Enter}')
+
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('чеська')
+    expect(screen.getByRole('button', { name: 'Зберегти: Мова видання' })).toBeInTheDocument()
+
+    await user.keyboard('{Enter}')
+    await screen.findByRole('combobox', { name: 'Пошук: Мова видання' })
+    await user.keyboard('клінгонська{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Зберегти: Мова видання' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('чеська')
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Мова видання' }))
+
+    expect(within(await manualField('Мова видання')).getByText('чеська')).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(0)
+    expectNoRequests()
+  })
+
+  it('палітурка: «Скасувати» повертає «Не вказано», а «Зберегти» поля лише змінює чернетку (BS-92)', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await user.click(screen.getByText('Додатково'))
+    await openManualEditor(user, 'Палітурка')
+    await chooseOption(user, 'Палітурка', 'тверда')
+    await user.click(screen.getByRole('button', { name: 'Скасувати: Палітурка' }))
+
+    expect(screen.getByRole('button', { name: 'Додати палітурку' })).toHaveFocus()
+
+    await openManualEditor(user, 'Палітурка')
+    await chooseOption(user, 'Палітурка', 'мʼяка')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Палітурка' }))
+
+    expect(within(await manualField('Палітурка')).getByText('мʼяка')).toBeInTheDocument()
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
   it('«Скасувати» повертає значення до відкриття редактора, не чіпаючи інших змін; фокус — на олівець', async () => {
     searchParams = new URLSearchParams(PREFILLED)
 
@@ -1402,7 +1451,7 @@ describe('ручна форма: поля текстом, редактор на 
 
     renderScreen()
     await openManualEditor(user, 'Мова видання')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Мова видання' }), 'uk')
+    await chooseOption(user, 'Мова видання', 'українська')
     await user.click(screen.getByRole('button', { name: 'Зберегти: Мова видання' }))
 
     await openManualEditor(user, 'Назва')
@@ -1636,10 +1685,7 @@ describe('ручна форма: поля текстом, редактор на 
 
     await user.click(summary)
     await openManualEditor(user, 'З якої мови перекладено')
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: 'З якої мови перекладено' }),
-      'en',
-    )
+    await chooseOption(user, 'З якої мови перекладено', 'англійська')
     // The source language alone is fine for ITS editor; the missing translator is not its error.
     await user.click(screen.getByRole('button', { name: 'Зберегти: З якої мови перекладено' }))
 

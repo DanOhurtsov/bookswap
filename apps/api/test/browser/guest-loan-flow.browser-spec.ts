@@ -153,8 +153,19 @@ async function ownerCreatesRequest(page: Page, owner: Owner): Promise<string> {
   await page.getByRole('menuitem', { name: 'Позичити гостю', exact: true }).click()
 
   const dialog = page.getByRole('dialog', { name: 'Позичити гостю', exact: true })
+  const contact = dialog.getByRole('combobox', { name: 'Кому віддали', exact: true })
 
-  await dialog.locator(`#guest-contact-${owner.copyId}`).selectOption({ label: owner.alias })
+  // The contact list is a searchable combobox whose popup is portalled out of the dialog's DOM,
+  // so its search box and options are looked up on the page.
+  await contact.click()
+
+  const search = page.getByRole('combobox', { name: 'Пошук: Кому віддали', exact: true })
+
+  await search.fill(owner.alias)
+  await page.getByRole('option', { name: owner.alias, exact: true }).click()
+  await search.waitFor({ state: 'detached' })
+  expect(await contact.innerText()).toBe(owner.alias)
+
   await dialog.locator(`#guest-handed-${owner.copyId}`).fill('2026-01-01')
   await dialog.getByRole('button', { name: 'Записати й попросити підтвердження гостя' }).click()
   await dialog.getByRole('link', { name: 'Видати посилання гостю' }).click()

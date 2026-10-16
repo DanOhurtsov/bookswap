@@ -116,9 +116,12 @@ function InlineFieldEditor<TName extends string>({
   children,
 }: InlineFieldEditorProps<TName>) {
   // Enter in a single-line input would otherwise submit the whole form — a
-  // PATCH the person never asked for. Here it confirms just this field.
+  // PATCH the person never asked for. Here it confirms just this field. A
+  // combobox's search box is portalled out of this element, but React still
+  // bubbles its keys here: there Enter picks an option and must not confirm.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)) return
+    if (!event.currentTarget.contains(event.target)) return
 
     event.preventDefault()
     void editors.confirm(name)

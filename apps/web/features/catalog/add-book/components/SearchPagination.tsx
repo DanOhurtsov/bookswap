@@ -1,4 +1,6 @@
+import { useId } from 'react'
 import { SEARCH_PAGE_SIZES, type SearchPageSize } from '@bookswap/shared'
+import { SelectField } from '@/components/Form/FormFields'
 import {
   Pagination,
   PaginationContent,
@@ -9,6 +11,11 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination'
 import { knownPageLinks, type NextPage } from '@/app/lib/search-page'
+
+const PAGE_SIZE_OPTIONS = SEARCH_PAGE_SIZES.map((size) => ({
+  value: String(size),
+  label: String(size),
+}))
 
 type SearchPaginationProps = {
   page: number
@@ -50,6 +57,7 @@ export function SearchPagination({
   hrefFor,
   onPageSizeChange,
 }: SearchPaginationProps) {
+  const pageSizeId = useId()
   const links = knownPageLinks({ page, currentHasRows, next })
   const showNavigation = page > 1 || next !== 'NONE'
 
@@ -101,21 +109,18 @@ export function SearchPagination({
         </Pagination>
       )}
 
-      <label className="search-pagination__size">
-        Результатів на сторінці
-        <select
-          value={pageSize}
-          onChange={(event) => {
-            onPageSizeChange(Number(event.target.value) as SearchPageSize)
-          }}
-        >
-          {SEARCH_PAGE_SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        id={pageSizeId}
+        label="Результатів на сторінці"
+        inline
+        value={String(pageSize)}
+        options={PAGE_SIZE_OPTIONS}
+        onValueChange={(value) => {
+          const size = SEARCH_PAGE_SIZES.find((candidate) => String(candidate) === value)
+
+          if (size !== undefined) onPageSizeChange(size)
+        }}
+      />
     </div>
   )
 }

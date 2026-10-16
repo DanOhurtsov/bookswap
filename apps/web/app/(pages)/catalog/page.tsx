@@ -24,7 +24,8 @@ import { useCatalogDiscovery } from '@/app/lib/use-catalog'
 import { useSession } from '@/app/lib/use-session'
 import { FieldErrors, validate } from '@/app/lib/validation'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { TextField } from '@/components/Form/FormFields'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
+import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { LocalResultCard, SearchPagination } from '@/features/catalog/add-book/index.client'
 import { NetworkOwnerCopies } from '@/features/network/index.client'
 
@@ -57,35 +58,13 @@ const MATCH_LABELS = {
   ISBN: 'точний збіг за ISBN',
 } as const
 
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: string
-  options: readonly { value: string; label: string }[]
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="search-pagination__size">
-      {label}
-      <select
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value)
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
+const SCOPE_OPTIONS = [
+  { value: 'CIRCLE', label: 'Мої та друзів' },
+  { value: 'ALL', label: 'Усіх користувачів' },
+] as const
+
+const AVAILABILITY_OPTIONS = labelledOptions(CATALOG_DISCOVERY_AVAILABILITY, AVAILABILITY_LABELS)
+const TRANSLATION_OPTIONS = labelledOptions(CATALOG_DISCOVERY_TRANSLATION, TRANSLATION_LABELS)
 
 function CatalogDiscovery() {
   const router = useRouter()
@@ -194,67 +173,54 @@ function CatalogDiscovery() {
         <button type="submit">Знайти</button>
       </form>
 
-      <label className="search-pagination__size">
-        Показувати книжки
-        <select
-          value={scope}
-          onChange={(event) => {
-            const nextScope = event.target.value === 'ALL' ? 'ALL' : 'CIRCLE'
-            router.push(hrefFor({ q: submitted, page: 1, pageSize }, nextScope))
-          }}
-        >
-          <option value="CIRCLE">Мої та друзів</option>
-          <option value="ALL">Усіх користувачів</option>
-        </select>
-      </label>
+      <SelectField
+        id="catalog-scope"
+        label="Показувати книжки"
+        inline
+        value={scope}
+        options={SCOPE_OPTIONS}
+        onValueChange={(nextScope) => {
+          router.push(hrefFor({ q: submitted, page: 1, pageSize }, nextScope))
+        }}
+      />
 
       {scope === 'CIRCLE' && (
         <div className="search-filters">
-          <FilterSelect
+          <SelectField
+            id="catalog-availability"
             label="Доступність"
+            inline
             value={filters.availability}
-            options={CATALOG_DISCOVERY_AVAILABILITY.map((value) => ({
-              value,
-              label: AVAILABILITY_LABELS[value],
-            }))}
-            onChange={(value) => {
+            options={AVAILABILITY_OPTIONS}
+            onValueChange={(availability) => {
               router.push(
-                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
-                  ...filters,
-                  availability: value === 'ANY' ? 'ANY' : 'AVAILABLE',
-                }),
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, { ...filters, availability }),
               )
             }}
           />
-          <FilterSelect
+          {/* Only the languages the discovery API accepts (`DISCOVERY_LANGUAGES`), by name. */}
+          <LanguageSelect
+            id="catalog-language"
             label="Мова"
+            inline
+            emptyLabel="Будь-яка"
+            codes={DISCOVERY_LANGUAGES}
             value={filters.language}
-            options={[
-              { value: '', label: 'Будь-яка' },
-              ...DISCOVERY_LANGUAGES.map((code) => ({ value: code, label: code })),
-            ]}
-            onChange={(value) => {
+            onChange={(language) => {
               router.push(
-                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
-                  ...filters,
-                  language: value,
-                }),
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, { ...filters, language }),
               )
             }}
           />
-          <FilterSelect
+          <SelectField
+            id="catalog-translation"
             label="Переклад"
+            inline
             value={filters.translation}
-            options={CATALOG_DISCOVERY_TRANSLATION.map((value) => ({
-              value,
-              label: TRANSLATION_LABELS[value],
-            }))}
-            onChange={(value) => {
+            options={TRANSLATION_OPTIONS}
+            onValueChange={(translation) => {
               router.push(
-                hrefFor({ q: submitted, page: 1, pageSize }, scope, {
-                  ...filters,
-                  translation: value === 'ORIGINAL' || value === 'TRANSLATED' ? value : 'ANY',
-                }),
+                hrefFor({ q: submitted, page: 1, pageSize }, scope, { ...filters, translation }),
               )
             }}
           />

@@ -54,9 +54,15 @@ type FormAccess<TValues extends FieldValues> = Pick<
   'getValues' | 'setValue' | 'trigger' | 'clearErrors'
 >
 
+/**
+ * A select's or combobox's trigger (`role=combobox`) is its control; the hidden form input beside it
+ * (`aria-hidden`) is not one to focus.
+ */
+const CONTROL_SELECTOR = 'input:not([aria-hidden="true"]), select, textarea, [role="combobox"]'
+
 function firstControl(container: HTMLElement | undefined): HTMLElement | undefined {
   return (
-    container?.querySelector<HTMLElement>('input, select, textarea') ??
+    container?.querySelector<HTMLElement>(CONTROL_SELECTOR) ??
     container?.querySelector<HTMLElement>('button') ??
     undefined
   )

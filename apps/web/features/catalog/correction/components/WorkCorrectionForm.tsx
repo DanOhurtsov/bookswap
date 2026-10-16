@@ -292,6 +292,8 @@ export function WorkCorrectionForm({
               // An unknown language may stay unset; clearing a known one is not offered by this form.
               {...(work.origLang === null ? { emptyLabel: 'Не вказано' } : {})}
               onChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
             />
           )}
         />

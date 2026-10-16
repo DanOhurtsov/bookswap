@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Edition, EditionPatchRequest } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
+import { chooseOption, searchAndChooseOption } from '@/components/Form/test-choose-option'
 import type { CatalogCorrection } from '../model/use-catalog-correction'
 import { EditionCorrectionForm } from './EditionCorrectionForm'
 
@@ -79,9 +80,11 @@ it('невідомий формат: порожній вибір «Не вказ
   await openField(user, 'Що відомо про текст видання')
   await openField(user, 'Мова видання')
 
-  expect(screen.getByLabelText('Палітурка')).toHaveValue('')
-  expect(screen.getByLabelText('Що відомо про текст видання')).toHaveValue('UNKNOWN')
-  expect(screen.getByLabelText('Мова видання')).toHaveValue('')
+  expect(screen.getByRole('combobox', { name: 'Палітурка' })).toHaveTextContent('Не вказано')
+  expect(screen.getByRole('combobox', { name: 'Що відомо про текст видання' })).toHaveTextContent(
+    'Невідомо: оригінал чи переклад',
+  )
+  expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('Не вказано')
 
   await openField(user, 'Видавництво')
   await user.type(screen.getByLabelText('Видавництво'), 'КСД')
@@ -103,10 +106,10 @@ it('змінені тип тексту й мова видання потрапл
   renderForm(submit)
   await openField(user, 'Що відомо про текст видання')
   await openField(user, 'Мова видання')
-  await user.selectOptions(screen.getByLabelText('Що відомо про текст видання'), 'ORIGINAL')
-  await user.selectOptions(screen.getByLabelText('Мова видання'), 'uk')
+  await chooseOption(user, 'Що відомо про текст видання', 'Оригінал')
+  await searchAndChooseOption(user, 'Мова видання', 'укра', 'українська')
   // Asserted while the editor is open: the general save closes it.
-  expect(screen.getByRole('option', { name: 'українська' })).toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('українська')
   await user.click(screen.getByRole('button', { name: 'Зберегти' }))
 
   await waitFor(() => {
@@ -134,7 +137,7 @@ it('відкритий і скасований тип тексту лишаєт�
 
   renderForm(submit)
   await openField(user, 'Що відомо про текст видання')
-  await user.selectOptions(screen.getByLabelText('Що відомо про текст видання'), 'ORIGINAL')
+  await chooseOption(user, 'Що відомо про текст видання', 'Оригінал')
   await user.click(screen.getByRole('button', { name: 'Скасувати: Що відомо про текст видання' }))
 
   expect(screen.getByText('Невідомо: оригінал чи переклад')).toBeInTheDocument()
@@ -210,4 +213,163 @@ it('зайнятий ISBN від сервера видно й у текстов�
     'aria-describedby',
     error.id,
   )
+})
+
+describe('селектори в inline-редакторах (BS-92)', () => {
+  const translation = {
+    workId: 'w-1',
+    translator: 'Олена Оніщук',
+    lang: 'uk',
+    sourceLang: 'en',
+    year: null,
+    isAbridged: false,
+    hasNotes: false,
+    notes: null,
+    editionCount: 1,
+    revision: 1,
+  }
+  const languageSearch = () => screen.findByRole('combobox', { name: 'Пошук: Мова видання' })
+
+  it('відкритий редактор фокусує сам селектор, а не приховане поле форми', async () => {
+    const user = userEvent.setup()
+
+    renderForm(jest.fn())
+    await openField(user, 'Мова видання')
+
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveFocus()
+  })
+
+  it('Enter у пошуку вибирає мову, але не підтверджує поле й нічого не надсилає', async () => {
+    const user = userEvent.setup()
+    const submit = jest.fn()
+
+    renderForm(submit)
+    await openField(user, 'Мова видання')
+    await user.keyboard('{Enter}')
+    await languageSearch()
+    await user.keyboard('пол{Enter}')
+
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('польська')
+    expect(screen.getByRole('button', { name: 'Зберегти: Мова видання' })).toBeInTheDocument()
+
+    // No match to pick: Enter neither changes the value nor confirms the field.
+    await user.keyboard('{Enter}')
+    await languageSearch()
+    await user.keyboard('клінгонська{Enter}')
+
+    expect(screen.getByRole('button', { name: 'Зберегти: Мова видання' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('польська')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('Escape у списку закриває лише список: редактор лишається з попереднім значенням', async () => {
+    const user = userEvent.setup()
+
+    renderForm(jest.fn(), { lang: 'vi' })
+    await openField(user, 'Мова видання')
+    await user.keyboard('{Enter}')
+    await languageSearch()
+    await user.keyboard('пол{Escape}')
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveFocus()
+    })
+    expect(screen.getByRole('combobox', { name: 'Мова видання' })).toHaveTextContent('вʼєтнамська')
+    expect(screen.getByRole('button', { name: 'Скасувати: Мова видання' })).toBeInTheDocument()
+  })
+
+  it('підтвердження поля змінює чернетку, а в каталог вона йде лише загальною кнопкою', async () => {
+    const user = userEvent.setup()
+    const submit = jest.fn()
+
+    renderForm(submit)
+    await openField(user, 'Мова видання')
+    await searchAndChooseOption(user, 'Мова видання', 'Нім', 'німецька')
+    await user.click(screen.getByRole('button', { name: 'Зберегти: Мова видання' }))
+
+    expect(screen.getByText('німецька')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Редагувати: Мова видання' })).toHaveFocus()
+    expect(submit).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+    expect(bodyOf(submit)).toMatchObject({ lang: 'de' })
+  })
+
+  it('«Скасувати» повертає мову, яка була до відкриття редактора, і вона не надсилається', async () => {
+    const user = userEvent.setup()
+    const submit = jest.fn()
+
+    renderForm(submit, { lang: 'en' })
+    await openField(user, 'Мова видання')
+    await chooseOption(user, 'Мова видання', 'польська')
+    await user.click(screen.getByRole('button', { name: 'Скасувати: Мова видання' }))
+
+    expect(screen.getByText('англійська')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+    expect(bodyOf(submit)).not.toHaveProperty('lang')
+  })
+
+  it('переклад вибирається за ID, навіть коли два переклади названі однаково', async () => {
+    const user = userEvent.setup()
+    const submit = jest.fn()
+
+    render(
+      <EditionCorrectionForm
+        edition={edition}
+        translations={[
+          { ...translation, id: 't-1' },
+          { ...translation, id: 't-2' },
+        ]}
+        correction={correction(submit)}
+        reload={jest.fn()}
+        onClose={jest.fn()}
+      />,
+    )
+    await openField(user, 'Переклад')
+    await user.click(screen.getByRole('combobox', { name: 'Переклад' }))
+    await screen.findByRole('combobox', { name: 'Пошук: Переклад' })
+    await user.keyboard('оніщ')
+
+    const [, second] = screen.getAllByRole('option', { name: 'Олена Оніщук (українська)' })
+
+    await user.click(second as HTMLElement)
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+    expect(bodyOf(submit)).toMatchObject({ translationId: 't-2' })
+  })
+
+  it('«Без привʼязки до перекладу» надсилає null, а не порожній рядок', async () => {
+    const user = userEvent.setup()
+    const submit = jest.fn()
+
+    render(
+      <EditionCorrectionForm
+        edition={{ ...edition, translationId: 't-1', textKind: 'TRANSLATION' }}
+        translations={[{ ...translation, id: 't-1' }]}
+        correction={correction(submit)}
+        reload={jest.fn()}
+        onClose={jest.fn()}
+      />,
+    )
+    await openField(user, 'Переклад')
+    await chooseOption(user, 'Переклад', 'Без привʼязки до перекладу')
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }))
+
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalledTimes(1)
+    })
+    expect(bodyOf(submit)).toMatchObject({ translationId: null })
+  })
 })

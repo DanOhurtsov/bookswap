@@ -12,7 +12,8 @@ import { Controller, useForm, useWatch } from 'react-hook-form'
 import { ApiRequestError } from '@/app/lib/api'
 import type { WorkReloadOutcome } from '@/app/lib/use-catalog'
 import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { ComboboxField } from '@/components/Form/ComboboxField'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import { LanguageSelect } from '@/components/Form/LanguageSelect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { parseEditionConflict } from '../api/correction-requests'
@@ -41,6 +42,14 @@ type EditionCorrectionFormProps = {
   reload: () => Promise<WorkReloadOutcome>
   onClose: () => void
 }
+
+// «Невідомо» first, not the shared `EDITION_TEXT_KIND` order: it is the honest default.
+const TEXT_KIND_OPTIONS = labelledOptions(
+  ['UNKNOWN', 'ORIGINAL', 'TRANSLATION'] as const,
+  EDITION_TEXT_KIND_LABELS,
+)
+const FORMAT_OPTIONS = labelledOptions(EDITION_FORMAT, EDITION_FORMAT_LABELS)
+const FORMAT_OPTIONS_UNSET = [{ value: '' as const, label: 'Не вказано' }, ...FORMAT_OPTIONS]
 
 /** Display order — the first invalid one gets focus after a failed general submit. */
 const EDITION_FIELDS = [
@@ -204,21 +213,24 @@ export function EditionCorrectionForm({
           control={control}
           name="translationId"
           render={({ field }) => (
-            <SelectField
+            // By id: two translations may read the same (same translator, language and year).
+            <ComboboxField
               id="correction-edition-translation"
               label="Переклад"
               value={field.value ?? ''}
-              onChange={(event) => {
-                field.onChange(event.target.value === '' ? null : event.target.value)
+              options={[
+                { value: '', label: 'Без привʼязки до перекладу' },
+                ...translations.map((translation) => ({
+                  value: translation.id,
+                  label: translationLabel(translation),
+                })),
+              ]}
+              onValueChange={(value) => {
+                field.onChange(value === '' ? null : value)
               }}
-            >
-              <option value="">Без привʼязки до перекладу</option>
-              {translations.map((translation) => (
-                <option key={translation.id} value={translation.id}>
-                  {translationLabel(translation)}
-                </option>
-              ))}
-            </SelectField>
+              onBlur={field.onBlur}
+              inputRef={field.ref}
+            />
           )}
         />
       </InlineField>
@@ -237,14 +249,11 @@ export function EditionCorrectionForm({
               label="Що відомо про текст видання"
               hint="Відсутність перекладу не означає, що це оригінал."
               value={field.value}
-              onChange={(event) => {
-                field.onChange(event.target.value)
-              }}
-            >
-              <option value="UNKNOWN">{EDITION_TEXT_KIND_LABELS.UNKNOWN}</option>
-              <option value="ORIGINAL">{EDITION_TEXT_KIND_LABELS.ORIGINAL}</option>
-              <option value="TRANSLATION">{EDITION_TEXT_KIND_LABELS.TRANSLATION}</option>
-            </SelectField>
+              options={TEXT_KIND_OPTIONS}
+              onValueChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
+            />
           )}
         />
       </InlineField>
@@ -262,6 +271,8 @@ export function EditionCorrectionForm({
               onChange={(value) => {
                 field.onChange(value === '' ? null : value)
               }}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
             />
           )}
         />
@@ -330,14 +341,22 @@ export function EditionCorrectionForm({
         />
       </InlineField>
       <InlineField name="format" label="Палітурка" display={display.format} editors={editors}>
-        <SelectField id="correction-edition-format" label="Палітурка" {...register('format')}>
-          {edition.format === null && <option value="">Не вказано</option>}
-          {EDITION_FORMAT.map((value) => (
-            <option key={value} value={value}>
-              {EDITION_FORMAT_LABELS[value]}
-            </option>
-          ))}
-        </SelectField>
+        <Controller
+          control={control}
+          name="format"
+          render={({ field }) => (
+            <SelectField
+              id="correction-edition-format"
+              label="Палітурка"
+              value={field.value}
+              // «Не вказано» only while nothing is saved: a known binding is never cleared here.
+              options={edition.format === null ? FORMAT_OPTIONS_UNSET : FORMAT_OPTIONS}
+              onValueChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
+            />
+          )}
+        />
       </InlineField>
 
       <InlineSaveHint />

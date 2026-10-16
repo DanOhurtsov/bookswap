@@ -15,7 +15,7 @@ import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { RecordedLoanActions } from '@/components/RecordedLoanActions'
-import { SelectField, TextField } from '@/components/Form/FormFields'
+import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
@@ -88,6 +88,12 @@ const ROLE_LABELS: Readonly<Record<LoanRole, string>> = {
   owner: 'Мої книжки',
   borrower: 'Я позичаю',
 }
+
+/** `''` — no status filter. */
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: 'будь-який' },
+  ...labelledOptions(LOAN_STATUS, LOAN_STATUS_LABELS),
+]
 
 /**
  * Спільна механіка дій над лоаном.
@@ -218,17 +224,9 @@ function LoanListView({ user }: { user: Me }) {
               id="filter-loan-status"
               label="Статус"
               value={statusFilter}
-              onChange={(event) => {
-                setStatusFilter(event.target.value)
-              }}
-            >
-              <option value="">будь-який</option>
-              {LOAN_STATUS.map((value) => (
-                <option key={value} value={value}>
-                  {LOAN_STATUS_LABELS[value]}
-                </option>
-              ))}
-            </SelectField>
+              options={STATUS_FILTER_OPTIONS}
+              onValueChange={setStatusFilter}
+            />
           </form>
 
           <FormStatus error={actions.failure} />

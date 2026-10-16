@@ -128,17 +128,15 @@ type ManualFieldEditorProps = Pick<
  * The editor restyles the form's usual fields (`TextField`, `LanguageSelect`, …) to sit where the
  * value was: the label as in the view, the control at the value's size with no box, border, outline
  * or ring, hint and error under it. `!` because the global `.field` rules are unlayered and would
- * otherwise beat any utility.
+ * otherwise beat any utility. A select's or combobox's hidden form input (`aria-hidden`) keeps its
+ * own visually-hidden style. Its open list is portalled out of here and keeps the popup look.
  */
 const EDITOR_FIELDS =
   '[&_.field]:gap-0! [&_.field>p]:order-1 [&_[role=alert]]:order-2 ' +
   '[&_.field>label:not(.field--checkbox)]:text-[0.85rem]! [&_.field>label:not(.field--checkbox)]:font-normal! [&_.field>label:not(.field--checkbox)]:text-(--bookswap-muted) [&_legend]:text-[0.85rem] [&_legend]:text-(--bookswap-muted) [&_.field>label.field--checkbox]:font-normal! ' +
-  '[&_:is(input:not([type=radio]),select)]:h-11! [&_:is(input:not([type=radio]),select)]:rounded-none! [&_:is(input:not([type=radio]),select)]:border-0! [&_:is(input:not([type=radio]),select)]:bg-transparent! [&_:is(input:not([type=radio]),select)]:p-0! [&_:is(input:not([type=radio]),select)]:outline-none! ' +
-  // A select is as wide as its options, like a value with a dropdown, not a full-width box.
-  '[&_select]:w-auto! [&_select]:max-w-full [&_select]:justify-self-start ' +
-  // Chrome paints the open list with the select's own background: a transparent one leaves it white,
-  // and in the dark theme the light option text vanishes on it. The options carry the theme's colours.
-  '[&_:is(option,optgroup)]:bg-(--field-bg) [&_:is(option,optgroup)]:text-(--fg)'
+  '[&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:h-11! [&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:rounded-none! [&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:border-0! [&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:bg-transparent! [&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:p-0! [&_:is(input:not([type=radio]):not([aria-hidden=true]),[role=combobox])]:outline-none! ' +
+  // A select is as wide as its value, like a value with a dropdown, not a full-width box.
+  '[&_[role=combobox]]:w-auto! [&_[role=combobox]]:max-w-full [&_[role=combobox]]:justify-self-start'
 
 /**
  * The field's own grid (`div.field`) dissolves into the editor's: the label on a row of its own,
@@ -150,9 +148,12 @@ const EDITOR_GRID =
 
 function ManualFieldEditor({ name, label, editors, children, aside }: ManualFieldEditorProps) {
   // Enter in a single-line input would otherwise submit the whole form — a new book the person
-  // never asked for. Here it confirms just this field.
+  // never asked for. Here it confirms just this field. A combobox's search box is portalled out of
+  // this element, but React still bubbles its keys here: there Enter picks an option and must not
+  // confirm.
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
     if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)) return
+    if (!event.currentTarget.contains(event.target)) return
 
     event.preventDefault()
     editors.confirm(name)

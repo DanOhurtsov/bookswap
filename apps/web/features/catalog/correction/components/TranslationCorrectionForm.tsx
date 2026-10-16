@@ -194,6 +194,8 @@ export function TranslationCorrectionForm({
               value={field.value}
               error={errors.lang?.message}
               onChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
             />
           )}
         />
@@ -214,6 +216,8 @@ export function TranslationCorrectionForm({
               value={field.value}
               error={errors.sourceLang?.message}
               onChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
             />
           )}
         />

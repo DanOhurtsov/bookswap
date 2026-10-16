@@ -2,10 +2,16 @@
 
 import { EDITION_FORMAT } from '@bookswap/shared'
 import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
-import { SelectField } from '@/components/Form/FormFields'
+import { SelectField, labelledOptions } from '@/components/Form/FormFields'
 import type { ManualFieldDisplay } from '../model/manual-field-view'
 import type { ManualDraft } from '../model/use-manual-draft'
 import { ManualInlineField, ManualSectionDetails, ManualTextInlineField } from './ManualInlineField'
+
+/** `''` — the binding is not known. */
+const FORMAT_OPTIONS = [
+  { value: '' as const, label: 'Не вказано' },
+  ...labelledOptions(EDITION_FORMAT, EDITION_FORMAT_LABELS),
+]
 
 type ManualExtraSectionProps = {
   draft: ManualDraft
@@ -55,19 +61,11 @@ export function ManualExtraSection({ draft, display, hasPresetWork }: ManualExtr
           id="manual-format"
           label="Палітурка"
           value={draft.values.format}
-          onChange={(event) => {
-            const { value } = event.target
-
-            draft.change('format', EDITION_FORMAT.find((format) => format === value) ?? '')
+          options={FORMAT_OPTIONS}
+          onValueChange={(format) => {
+            draft.change('format', format)
           }}
-        >
-          <option value="">Не вказано</option>
-          {EDITION_FORMAT.map((value) => (
-            <option key={value} value={value}>
-              {EDITION_FORMAT_LABELS[value]}
-            </option>
-          ))}
-        </SelectField>
+        />
       </ManualInlineField>
       <ManualTextInlineField
         draft={draft}

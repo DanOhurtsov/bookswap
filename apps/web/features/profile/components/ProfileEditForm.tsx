@@ -2,13 +2,20 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState, type FormEvent } from 'react'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { PROFILE_LIMITS, VISIBILITY, type Me, type UpdateProfileRequest } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
-import { SelectField, TextAreaField, TextField } from '@/components/Form/FormFields'
+import {
+  SelectField,
+  TextAreaField,
+  TextField,
+  labelledOptions,
+} from '@/components/Form/FormFields'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { updateProfile } from '../api/profile-requests'
 import { VISIBILITY_LABELS, profileFormSchema, toProfileFormValues } from '../model/profile-form'
+
+const VISIBILITY_OPTIONS = labelledOptions(VISIBILITY, VISIBILITY_LABELS)
 
 type ProfileEditFormProps = {
   user: Me
@@ -24,6 +31,7 @@ type ProfileEditFormProps = {
  */
 export function ProfileEditForm({ user, onSaved, onCancel }: ProfileEditFormProps) {
   const {
+    control,
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
@@ -90,18 +98,24 @@ export function ProfileEditForm({ user, onSaved, onCancel }: ProfileEditFormProp
           {...register('bio')}
         />
 
-        <SelectField
-          id="libraryVisibility"
-          label="Видимість бібліотеки за замовчуванням"
-          error={errors.libraryVisibility?.message}
-          {...register('libraryVisibility')}
-        >
-          {VISIBILITY.map((value) => (
-            <option key={value} value={value}>
-              {VISIBILITY_LABELS[value]}
-            </option>
-          ))}
-        </SelectField>
+        {/* A Base UI select has no `register` API: `Controller` keeps the same value, dirty and
+            touched state, and `field.ref` lets a failed submit focus the trigger. */}
+        <Controller
+          control={control}
+          name="libraryVisibility"
+          render={({ field }) => (
+            <SelectField
+              id="libraryVisibility"
+              label="Видимість бібліотеки за замовчуванням"
+              error={errors.libraryVisibility?.message}
+              value={field.value}
+              options={VISIBILITY_OPTIONS}
+              onValueChange={field.onChange}
+              onBlur={field.onBlur}
+              inputRef={field.ref}
+            />
+          )}
+        />
 
         <div className="field field--checkbox">
           <input id="showHolderNames" type="checkbox" {...register('showHolderNames')} />
