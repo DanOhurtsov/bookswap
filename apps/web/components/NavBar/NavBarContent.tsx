@@ -19,7 +19,7 @@ const NavContent = ({ state }: { state: SessionState }) => {
   switch (state.status) {
     case 'loading':
       return (
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+        <div className="flex w-full items-center justify-between">
           <NavSkeleton />
           <ThemeToggleButton />
         </div>
@@ -44,7 +44,7 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
     currentLibrarySection(usePathname()) === undefined ? undefined : NAVBAR_LINK_LIBRARY.href
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
+    <div className="flex w-full items-center justify-between gap-4">
       <div className="flex items-center gap-2">
         <NavBarMenu links={links} currentHref={currentHref} className="lg:hidden" />
         <NavBarLogo />
@@ -73,7 +73,7 @@ const AuthNav = ({ user, features }: { user: Me; features?: SessionFeatures }) =
 // GuestNav
 const GuestNav = () => {
   return (
-    <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
+    <div className="flex w-full items-center justify-between">
       <NavBarLogo />
       <div className="flex items-center gap-2">
         <nav className="flex items-center gap-4">
@@ -90,8 +90,9 @@ const GuestNav = () => {
 }
 
 // NavSkeleton
+// `min-w-0`: the placeholders shrink with the row instead of widening a 320 px page.
 const NavSkeleton = () => (
-  <div className="flex items-center gap-4 animate-pulse" aria-hidden="true">
+  <div className="flex min-w-0 items-center gap-4 animate-pulse" aria-hidden="true">
     <div className="h-5 w-16 rounded bg-(--line)" />
     <div className="h-5 w-20 rounded bg-(--line)" />
     <div className="h-5 w-24 rounded bg-(--line)" />

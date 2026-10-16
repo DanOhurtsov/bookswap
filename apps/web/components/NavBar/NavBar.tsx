@@ -7,12 +7,16 @@ export const NavBar = () => {
   const { state } = useSession()
 
   return (
+    // The bar's background and border span the viewport; its content sits in the page geometry, so
+    // every session state lines up with the page below (BS-133).
     <div
-      className="sticky top-0 z-50 flex items-center justify-center gap-4 border-b border-(--line) bg-(--bg) px-6 py-3"
+      className="sticky top-0 z-50 border-b border-(--line) bg-(--bg) py-3"
       aria-label="Основні дії"
       aria-busy={state.status === 'loading'}
     >
-      <NavContent state={state} />
+      <div className="page-container">
+        <NavContent state={state} />
+      </div>
     </div>
   )
 }

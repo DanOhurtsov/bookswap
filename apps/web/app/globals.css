@@ -65,21 +65,56 @@ body {
   line-height: 1.55;
 }
 
-.page {
-  max-width: 42rem;
-  margin: 0 auto;
-  padding: 4rem 1.5rem;
+/*
+ * BS-133: the one page geometry. The header row (`.page-container`) and every page (`.page`) share
+ * it, so their content edges line up at every width. 1440px is the OUTER width, gutters included;
+ * past it the margins grow equally on both sides. The cap is in px, not rem: a larger root font
+ * scales the gutters and the text, never the cap. Full-width backgrounds and borders belong to an
+ * element around the container, never to the container itself.
+ */
+:root {
+  --page-max-width: 1440px;
+  --page-gutter: 1.5rem;
 }
 
-/* Форми читаються гірше на широкій колонці — рядок стає задовгим для ока. */
-.page--narrow {
-  max-width: 28rem;
+@media (max-width: 30rem) {
+  :root {
+    --page-gutter: 1rem;
+  }
+}
+
+.page-container,
+.page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding-inline: var(--page-gutter);
+}
+
+.page {
+  padding-block: 4rem;
 }
 
 @media (max-width: 30rem) {
   .page {
-    padding: 2rem 1rem;
+    padding-block: 2rem;
   }
+}
+
+/*
+ * Forms read worse on a wide column — the line gets too long for the eye. The measure is the OUTER
+ * width, gutters included, like the shared cap; the gutters stay the shared ones: no second padding,
+ * and below the measure the page is exactly the wide one. `min()` keeps a measure inside the shared
+ * cap even at a root font large enough for the rem value to pass it.
+ */
+.page--narrow {
+  max-width: min(28rem, var(--page-max-width));
+}
+
+/* The add-book forms (manual entry, «Уточнити дані»): wider than a sign-in form, still a form. */
+.page--medium {
+  max-width: min(42rem, var(--page-max-width));
 }
 
 h1 {

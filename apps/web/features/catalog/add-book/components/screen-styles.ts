@@ -1,5 +1,7 @@
-/** Tailwind-еквіваленти спільних класів сторінки додавання (`.page`, `.lede`, `.books`, `.status--pending`, `.empty`). */
-export const pageClass = 'mx-auto max-w-2xl px-6 py-16 max-[30rem]:px-4 max-[30rem]:py-8'
+/**
+ * Tailwind equivalents of the global classes the add-book screens use (`.lede`, `.books`,
+ * `.status--pending`, `.empty`). The page box is not copied here: the screens use `.page` itself (BS-133).
+ */
 
 export const ledeClass = 'mb-8 text-[color:var(--bookswap-muted)]'
 
