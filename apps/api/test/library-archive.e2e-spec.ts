@@ -212,7 +212,7 @@ describe('Архів і безпечне видалення примірникі
       expect(JSON.stringify(libraryResponseSchema.parse(out.body))).not.toContain(shelf.copyId)
 
       const discovered = await request(http())
-        .get(url(`/catalog/discover?pageSize=50&q=${encodeURIComponent(`Полиця`)}`))
+        .get(url(`/catalog/discover?pageSize=48&q=${encodeURIComponent(`Полиця`)}`))
         .set('Cookie', friend.cookie)
         .expect(200)
 

@@ -13,7 +13,6 @@ import { describeAddBookError } from '@/app/lib/catalog-errors'
 import { searchHref, type SearchAddress } from '@/app/lib/search-page'
 import type { KeyedState } from '@/app/lib/use-keyed-request'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { Button } from '@/components/ui/button'
 import { addResultView, type AddResultSubject } from '../model/add-result-view'
 import type { ExternalSearchState } from '../model/external-search-state'
 import type { QuickAddSlot } from '../model/quick-add-slots'
@@ -26,7 +25,8 @@ import { ExternalEditionCard } from './ExternalEditionCard'
 import { ExternalSearchStatus } from './ExternalSearchStatus'
 import { ExternalWorkCard } from './ExternalWorkCard'
 import { LookupAddCard } from './LookupAddCard'
-import { booksClass, emptyClass, pendingStatusClass, searchingStatusClass } from './screen-styles'
+import { ResultCardGrid } from './ResultCardShell'
+import { emptyClass, pendingStatusClass } from './screen-styles'
 import { SearchPagination } from './SearchPagination'
 import { WorkResultCard } from './WorkResultCard'
 
@@ -49,11 +49,9 @@ type SearchResultsProps = {
   parameters: URLSearchParams
   quick: QuickAddApi
   entryMethod: CopyEntryMethod
-  /** Suggestions → the explicit full search of the same text. */
-  onShowAll: () => void
 }
 
-/** Everything under the search bar: cards, statuses, the empty states and the page controls. */
+/** Everything under the search bar: the card grid, statuses, the empty states and the page controls below them. */
 export function SearchResults({
   view,
   request,
@@ -64,7 +62,6 @@ export function SearchResults({
   parameters,
   quick,
   entryMethod,
-  onShowAll,
 }: SearchResultsProps) {
   const router = useRouter()
   const { response, items, externalItems, redundantLookup, lookupCard } = view
@@ -132,21 +129,21 @@ export function SearchResults({
       {request.status === 'error' && <FormStatus error={describeAddBookError(request.error)} />}
 
       {lookupCard !== undefined && isbn !== undefined && (
-        <ul className={booksClass}>
+        <ResultCardGrid>
           <LookupAddCard
             lookup={lookupCard}
             slot={slotOf({ kind: 'LOOKUP', isbn, lookup: lookupCard })}
             onSelect={choose({ kind: 'LOOKUP', isbn, lookup: lookupCard })}
           />
-        </ul>
+        </ResultCardGrid>
       )}
 
       {(items.length > 0 || externalItems.length > 0) && (
-        <ul className={booksClass}>
+        <ResultCardGrid>
           {/* Two lists, two key spaces: the halves are paged apart and may know the same edition. */}
           {items.map(card)}
           {externalItems.map(card)}
-        </ul>
+        </ResultCardGrid>
       )}
 
       <ExternalSearchStatus state={external} localLoading={view.localLoading} />
@@ -155,21 +152,11 @@ export function SearchResults({
         <p className={pendingStatusClass}>{describeAddBookError(lookup.error)}</p>
       )}
 
-      {view.showUnavailableNotice && (
-        <p className={searchingStatusClass}>Зовнішній пошук тимчасово недоступний.</p>
-      )}
-
       {view.emptyState !== undefined && (
         <p className={emptyClass}>{EMPTY_STATE_TEXT[view.emptyState]}</p>
       )}
 
       {view.pageEmpty && <p className={emptyClass}>На цій сторінці результатів немає.</p>}
-
-      {view.showAllResults && (
-        <Button type="button" variant="outline" className="cursor-pointer" onClick={onShowAll}>
-          Показати всі результати
-        </Button>
-      )}
 
       <AddResultDialog
         view={chosen === undefined ? undefined : addResultView(chosen.subject)}

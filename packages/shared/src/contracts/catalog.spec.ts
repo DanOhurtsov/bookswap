@@ -2,6 +2,7 @@ import {
   CATALOG_LIMITS,
   DEFAULT_SEARCH_PAGE_SIZE,
   SEARCH_MAX_PAGE,
+  SEARCH_CANDIDATES_LIMIT,
   SEARCH_PAGE_SIZES,
   catalogSearchRequestSchema,
   catalogSearchResponseSchema,
@@ -151,8 +152,13 @@ describe('catalogSearchRequestSchema', () => {
 })
 
 describe('pageSize', () => {
-  it('без pageSize — типові 10', () => {
+  it('без pageSize — типові 12: повні ряди сітки 4/3/2/1', () => {
+    expect(DEFAULT_SEARCH_PAGE_SIZE).toBe(12)
     expect(catalogSearchRequestSchema.parse({ q: 'шан' }).pageSize).toBe(DEFAULT_SEARCH_PAGE_SIZE)
+  })
+
+  it('допустимі лише кратні 12: 12, 24, 36, 48', () => {
+    expect(SEARCH_PAGE_SIZES).toEqual([12, 24, 36, 48])
   })
 
   it.each(SEARCH_PAGE_SIZES)('приймає %s з рядка адреси', (size) => {
@@ -162,7 +168,8 @@ describe('pageSize', () => {
   })
 
   it('недопустимий розмір — помилка, а не найближче допустиме', () => {
-    for (const pageSize of ['0', '5', '15', '100', 'abc', '10.5']) {
+    // 10, 20 і 50 — колишні розміри: тепер такі самі недопустимі.
+    for (const pageSize of ['0', '5', '10', '15', '20', '50', '100', 'abc', '12.5']) {
       expect(catalogSearchRequestSchema.safeParse({ q: 'шан', pageSize }).success).toBe(false)
     }
   })
@@ -196,6 +203,18 @@ describe('splitSearchPage', () => {
     expect(split(2, 10, 10)).toMatchObject({ localCount: 0, externalFrom: 0, externalCount: 10 })
   })
 
+  it('типовий розмір 12: 12 локальних — одна сторінка, 13-й локальний — початок другої', () => {
+    expect(split(1, 12, 12)).toMatchObject({ localCount: 12, externalCount: 0 })
+    expect(split(2, 12, 12)).toMatchObject({ localCount: 0, externalFrom: 0, externalCount: 12 })
+    expect(split(2, 12, 13)).toEqual({
+      localFrom: 12,
+      localCount: 1,
+      externalFrom: 0,
+      externalCount: 11,
+    })
+    expect(split(3, 12, 13)).toMatchObject({ localCount: 0, externalFrom: 11, externalCount: 12 })
+  })
+
   it('сторінка, що перетинає межу, бере хвіст локальних і початок зовнішніх', () => {
     expect(split(2, 10, 14)).toEqual({
       localFrom: 10,
@@ -208,7 +227,7 @@ describe('splitSearchPage', () => {
 
   it('кожна сторінка — рівно pageSize рядків, без повторів і дірок між сторінками', () => {
     for (const pageSize of SEARCH_PAGE_SIZES) {
-      for (const localTotal of [0, 1, 9, 10, 11, 49, 50, 51, 200]) {
+      for (const localTotal of [0, 1, 9, 10, 11, 12, 13, 49, 50, 51, 200]) {
         let expectedLocal = 0
         let expectedExternal = 0
 
@@ -228,12 +247,20 @@ describe('splitSearchPage', () => {
 })
 
 describe('searchCandidatesRequestSchema', () => {
-  it('без page і pageSize — перший екран: саме так кличе його перевірка дублікатів', () => {
-    expect(searchCandidatesRequestSchema.parse({ q: 'шан' })).toEqual({
-      q: 'шан',
-      page: 1,
-      pageSize: DEFAULT_SEARCH_PAGE_SIZE,
-    })
+  it('без page і pageSize — перший екран: розмір лишається серверу (межа перевірки дублікатів)', () => {
+    expect(searchCandidatesRequestSchema.parse({ q: 'шан' })).toEqual({ q: 'шан', page: 1 })
+  })
+
+  it('межа перевірки дублікатів — не розмір сторінки списку й не йде за ним', () => {
+    expect(SEARCH_CANDIDATES_LIMIT).toBe(10)
+    expect(SEARCH_PAGE_SIZES).not.toContain(SEARCH_CANDIDATES_LIMIT)
+  })
+
+  it('явний pageSize — лише з розмірів списку', () => {
+    expect(searchCandidatesRequestSchema.parse({ q: 'шан', pageSize: '24' }).pageSize).toBe(24)
+    expect(searchCandidatesRequestSchema.safeParse({ q: 'шан', pageSize: '10' }).success).toBe(
+      false,
+    )
   })
 })
 

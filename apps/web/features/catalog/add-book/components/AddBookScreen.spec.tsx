@@ -226,12 +226,12 @@ let items: AddSearchItem[]
 /** Додаткові поля відповіді повного пошуку (наприклад, `spellingSuggestion`). */
 let fullExtra: Partial<AddSearchResponse>
 let externalItems: AddSearchExternalItem[]
-let externalHandler: () => Promise<unknown>
+/** Зовнішня половина повного пошуку; `q` і `page` — щоб тест міг відповідати на різні тексти й сторінки по-різному. */
+let externalHandler: (query: string, page: number) => Promise<unknown>
 let lookupHandler: () => Promise<{ result: BookLookupResult }>
 let quickAddHandler: (body: QuickAddBody) => Promise<QuickAddResponse>
-/** Автопошук: `?q=` у шляху — щоб тест міг відповідати на різні тексти по-різному. */
-let suggestHandler: (query: string) => Promise<unknown>
-let suggestExternalHandler: (query: string) => Promise<unknown>
+/** Локальна половина повного пошуку; `q` і `page` — як у зовнішньої. */
+let localHandler: (query: string, page: number) => Promise<unknown>
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -251,25 +251,13 @@ beforeEach(() => {
     })
   lookupHandler = () => Promise.reject(new Error('lookup не очікувався'))
   quickAddHandler = (body) => Promise.resolve(addedResponse(body))
-  suggestHandler = () => Promise.resolve(searchResponse(items, { pageSize: 8 }))
-  suggestExternalHandler = () =>
-    Promise.resolve({
-      items: externalItems,
-      sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
-      page: 1,
-      pageSize: 8,
-      more: 'NO',
-      complete: true,
-    })
+  localHandler = () => Promise.resolve(searchResponse(items, fullExtra))
   mockApiRequest.mockImplementation((path: string, options?: { body?: unknown }) => {
-    if (path.startsWith('/me/library/add-search/suggest/external?')) {
-      return suggestExternalHandler(queryOf(path))
+    // The suggestion endpoints (`…/add-search/suggest*`) are not handled: since BS-134 nothing asks them.
+    if (path.startsWith('/me/library/add-search?')) return localHandler(queryOf(path), pageOf(path))
+    if (path.startsWith('/me/library/add-search/external?')) {
+      return externalHandler(queryOf(path), pageOf(path))
     }
-    if (path.startsWith('/me/library/add-search/suggest?')) return suggestHandler(queryOf(path))
-    if (path.startsWith('/me/library/add-search?')) {
-      return Promise.resolve(searchResponse(items, fullExtra))
-    }
-    if (path.startsWith('/me/library/add-search/external?')) return externalHandler()
     if (path.startsWith('/catalog/lookup?')) return lookupHandler()
     if (path === '/me/library/quick-add') return quickAddHandler(options?.body as QuickAddBody)
 
@@ -279,6 +267,10 @@ beforeEach(() => {
 
 function queryOf(path: string): string {
   return decodeURIComponent(new URLSearchParams(path.split('?')[1] ?? '').get('q') ?? '')
+}
+
+function pageOf(path: string): number {
+  return Number(new URLSearchParams(path.split('?')[1] ?? '').get('page') ?? '1')
 }
 
 function renderScreen() {
@@ -311,7 +303,7 @@ describe('результати: одна картка — одне виданн�
 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
     expect(mockApiRequest).toHaveBeenCalledWith(
-      '/me/library/add-search?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=1&pageSize=10',
+      '/me/library/add-search?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=1&pageSize=12',
       expect.anything(),
     )
     expect(screen.getByText('Тарас Шевченко')).toBeInTheDocument()
@@ -1860,7 +1852,7 @@ describe('«← До пошуку» повертає до того самого 
   }
 
   it('текстовий запит: поле, сторінка й розмір відновлюються, редагування назви запиту не міняє', async () => {
-    searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=20')
+    searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=24')
 
     const user = userEvent.setup()
 
@@ -1888,7 +1880,7 @@ describe('«← До пошуку» повертає до того самого 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
     expect(screen.getByLabelText(INPUT)).toHaveValue('кобзар')
     expect(searchRequests()).toEqual([
-      '/me/library/add-search?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=20',
+      '/me/library/add-search?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=24',
     ])
   })
 
@@ -1910,7 +1902,7 @@ describe('«← До пошуку» повертає до того самого 
 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
     expect(screen.getByLabelText(INPUT)).toHaveValue(ISBN)
-    expect(searchRequests()).toEqual([`/me/library/add-search?q=${ISBN}&page=1&pageSize=10`])
+    expect(searchRequests()).toEqual([`/me/library/add-search?q=${ISBN}&page=1&pageSize=12`])
   })
 
   it('«Уточнити дані» теж несе пошук туди й назад', async () => {
@@ -1937,16 +1929,16 @@ describe('«← До пошуку» повертає до того самого 
   })
 
   it('після перезавантаження форми повернення бере пошук з адреси', async () => {
-    searchParams = new URLSearchParams('mode=manual&title=кобзар&q=кобзар&page=3&pageSize=20')
+    searchParams = new URLSearchParams('mode=manual&title=кобзар&q=кобзар&page=3&pageSize=24')
     renderScreen()
 
     expect(within(await manualField('Назва')).getByText('кобзар')).toBeInTheDocument()
     expect(hrefOf('← До пошуку')).toBe(
-      `/catalog/new?${new URLSearchParams({ q: 'кобзар', page: '3', pageSize: '20' }).toString()}`,
+      `/catalog/new?${new URLSearchParams({ q: 'кобзар', page: '3', pageSize: '24' }).toString()}`,
     )
   })
 
-  it('з автопідказок повертає до підказок того самого тексту', async () => {
+  it('стара форма з автопідказок (auto=1) повертає до повного пошуку того самого тексту', async () => {
     searchParams = new URLSearchParams('mode=manual&title=Кобз&q=Кобз&auto=1')
     renderScreen()
     await manualField('Назва')
@@ -1957,11 +1949,11 @@ describe('«← До пошуку» повертає до того самого 
 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
     expect(screen.getByLabelText(INPUT)).toHaveValue('Кобз')
-    expect(
-      mockApiRequest.mock.calls.some(([path]) =>
-        String(path).startsWith('/me/library/add-search/suggest?'),
-      ),
-    ).toBe(true)
+    // The old flag is dropped from the address (the form's already); what is shown is the full search.
+    expect(searchParams.has('auto')).toBe(false)
+    expect(searchRequests()).toEqual([
+      `/me/library/add-search?q=${encodeURIComponent('Кобз')}&page=1&pageSize=12`,
+    ])
   })
 
   it('пряме відкриття форми: повернення до порожнього пошуку без запитів', async () => {
@@ -1980,7 +1972,7 @@ describe('«← До пошуку» повертає до того самого 
   })
 })
 
-describe('автопошук під час введення', () => {
+describe('пошук під час введення: одразу повний пошук (BS-134)', () => {
   const INPUT = 'Назва, автор або ISBN'
 
   /** Шляхи всіх запитів за префіксом: рахуємо те, що справді пішло на сервер. */
@@ -1990,10 +1982,16 @@ describe('автопошук під час введення', () => {
       .filter((path) => path.startsWith(prefix))
   }
 
-  const localSuggest = () => requested('/me/library/add-search/suggest?')
-  const externalSuggest = () => requested('/me/library/add-search/suggest/external?')
   const fullLocal = () => requested('/me/library/add-search?')
   const fullExternal = () => requested('/me/library/add-search/external?')
+  const suggestions = () => requested('/me/library/add-search/suggest')
+  /** Requests carry the page size as is — 12 when the address names none (`DEFAULT_SEARCH_PAGE_SIZE`). */
+  const localUrl = (q: string, page = 1, pageSize = 12) =>
+    `/me/library/add-search?q=${encodeURIComponent(q)}&page=${String(page)}&pageSize=${String(pageSize)}`
+  const externalUrl = (q: string, page = 1, pageSize = 12) =>
+    `/me/library/add-search/external?q=${encodeURIComponent(q)}&page=${String(page)}&pageSize=${String(pageSize)}`
+  const searchUrl = (q: string, extra: Record<string, string> = {}) =>
+    `/catalog/new?${new URLSearchParams({ q, ...extra }).toString()}`
 
   const advance = async (ms: number) => {
     await act(async () => {
@@ -2005,6 +2003,16 @@ describe('автопошук під час введення', () => {
     return userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
   }
 
+  const externalAnswer = (extra: Record<string, unknown> = {}) => ({
+    items: externalItems,
+    sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
+    page: 1,
+    pageSize: 10,
+    more: 'NO',
+    complete: true,
+    ...extra,
+  })
+
   beforeEach(() => {
     jest.useFakeTimers()
     searchParams = new URLSearchParams()
@@ -2015,58 +2023,62 @@ describe('автопошук під час введення', () => {
     jest.useRealTimers()
   })
 
-  it('від 2 символів через 350 мс: підказки з нашого каталогу, адреса — replace без прокручування', async () => {
+  it('від 2 символів через 350 мс: повний пошук першої сторінки, адреса — replace без auto й без прокручування', async () => {
     const user = setup()
 
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Ко')
 
-    expect(localSuggest()).toHaveLength(0)
+    expect(fullLocal()).toHaveLength(0)
     await advance(349)
-    expect(localSuggest()).toHaveLength(0)
+    expect(fullLocal()).toHaveLength(0)
     await advance(1)
 
     expect(await screen.findByText('Кобзар')).toBeInTheDocument()
-    expect(localSuggest()).toEqual(['/me/library/add-search/suggest?q=%D0%9A%D0%BE'])
-    expect(replace).toHaveBeenCalledWith('/catalog/new?q=%D0%9A%D0%BE&auto=1', { scroll: false })
+    expect(fullLocal()).toEqual([localUrl('Ко')])
+    expect(replace).toHaveBeenCalledWith(searchUrl('Ко'), { scroll: false })
     expect(push).not.toHaveBeenCalled()
-    expect(fullLocal()).toHaveLength(0)
-    expect(screen.getByRole('button', { name: 'Показати всі результати' })).toBeInTheDocument()
+    expect(suggestions()).toHaveLength(0)
+    expect(
+      screen.queryByRole('button', { name: 'Показати всі результати' }),
+    ).not.toBeInTheDocument()
+    // The page size is there at once: it is a choice even when the results fit on one page.
+    expect(screen.getByRole('combobox', { name: 'Результатів на сторінці' })).toBeInTheDocument()
   })
 
-  it('1 символ нічого не шукає, а 2 символи не питають зовнішнє джерело', async () => {
+  it('1 символ нічого не шукає, а 2 символи не питають зовнішні джерела', async () => {
     const user = setup()
 
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'К')
     await advance(10_000)
-    expect(localSuggest()).toHaveLength(0)
+    expect(fullLocal()).toHaveLength(0)
     expect(replace).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText(INPUT), 'о')
     await advance(10_000)
-    expect(localSuggest()).toHaveLength(1)
-    expect(externalSuggest()).toHaveLength(0)
+    expect(fullLocal()).toHaveLength(1)
+    expect(fullExternal()).toHaveLength(0)
   })
 
-  it('від 3 символів через 900 мс після ОСТАННЬОЇ зміни: один зовнішній запит, лише підказковий endpoint', async () => {
+  it('від 3 символів зовнішня половина того самого пошуку — через 900 мс після ОСТАННЬОЇ зміни', async () => {
     externalItems = [externalEdition('vol-1', { isbn13: '9783161484100' })]
 
     const user = setup()
 
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Кобз')
-    await advance(899)
-    expect(externalSuggest()).toHaveLength(0)
-    await advance(1)
+    await advance(350)
+    expect(fullLocal()).toEqual([localUrl('Кобз')])
+    // The local half is shown; the external one is still "searching", not "nothing".
+    expect(screen.getByText('Шукаю…')).toBeInTheDocument()
+    await advance(548)
+    expect(fullExternal()).toHaveLength(0)
+    await advance(2)
 
     expect(await screen.findByText('Зовнішня vol-1')).toBeInTheDocument()
-    expect(externalSuggest()).toEqual([
-      '/me/library/add-search/suggest/external?q=%D0%9A%D0%BE%D0%B1%D0%B7',
-    ])
-    // Повний зовнішній пошук (з continuation) від набору не запускається ніколи.
-    expect(fullExternal()).toHaveLength(0)
-    expect(fullLocal()).toHaveLength(0)
+    expect(fullExternal()).toEqual([externalUrl('Кобз')])
+    expect(suggestions()).toHaveLength(0)
   })
 
   it('швидкий набір слова — один запит на кожну половину', async () => {
@@ -2076,32 +2088,38 @@ describe('автопошук під час введення', () => {
     await user.type(screen.getByLabelText(INPUT), 'Кобзар')
     await advance(5_000)
 
-    expect(localSuggest()).toHaveLength(1)
-    expect(externalSuggest()).toHaveLength(1)
+    expect(fullLocal()).toEqual([localUrl('Кобзар')])
+    expect(fullExternal()).toEqual([externalUrl('Кобзар')])
   })
 
-  it('автопошук не дочитує: навіть коли сервер каже «більше є», запит один і без повторів', async () => {
-    suggestExternalHandler = () =>
-      Promise.resolve({
-        items: [externalEdition('vol-1')],
-        sources: [{ source: 'GOOGLE_BOOKS', status: 'OK' }],
-        page: 1,
-        pageSize: 8,
-        more: 'YES',
-        complete: true,
-      })
+  it('неповна зовнішня сторінка (complete=false) довантажується тим самим запитом, і лише тоді вона кінцева', async () => {
+    items = []
+    externalItems = [externalEdition('vol-1')]
+
+    let asked = 0
+
+    externalHandler = () => {
+      asked += 1
+
+      return Promise.resolve(
+        asked === 1
+          ? externalAnswer({ items: [], more: 'UNKNOWN', complete: false })
+          : externalAnswer(),
+      )
+    }
 
     const user = setup()
 
     renderScreen()
     await user.type(screen.getByLabelText(INPUT), 'Кобзар')
-    await advance(60_000)
+    await advance(5_000)
 
-    expect(externalSuggest()).toHaveLength(1)
-    expect(fullExternal()).toHaveLength(0)
+    expect(await screen.findByText('Зовнішня vol-1')).toBeInTheDocument()
+    expect(fullExternal()).toEqual([externalUrl('Кобзар'), externalUrl('Кобзар')])
+    expect(screen.queryByText('Нічого схожого не знайшлося.')).not.toBeInTheDocument()
   })
 
-  it('Enter до завершення таймерів: рівно один повний пошук, підказки не запускаються', async () => {
+  it('Enter до завершення таймерів: рівно один повний пошук, обидві половини одразу', async () => {
     const user = setup()
 
     renderScreen()
@@ -2111,34 +2129,40 @@ describe('автопошук під час введення', () => {
     await advance(10_000)
 
     expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/catalog/new?q=%D0%9A%D0%BE%D0%B1%D0%B7%D0%B0%D1%80')
-    expect(localSuggest()).toHaveLength(0)
-    expect(externalSuggest()).toHaveLength(0)
+    expect(push).toHaveBeenCalledWith(searchUrl('Кобзар'))
+    expect(replace).not.toHaveBeenCalled()
     expect(fullLocal()).toHaveLength(1)
     expect(fullExternal()).toHaveLength(1)
   })
 
-  it('«Показати всі результати» переходить у повний пошук (push, без auto) із пагінацією', async () => {
+  it('Enter на явно двосимвольному запиті питає й зовнішні джерела', async () => {
     const user = setup()
 
     renderScreen()
-    await user.type(screen.getByLabelText(INPUT), 'Ко')
-    await advance(350)
-    await user.click(await screen.findByRole('button', { name: 'Показати всі результати' }))
-    await advance(100)
+    await user.type(screen.getByLabelText(INPUT), 'Ко{Enter}')
+    await advance(10_000)
 
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/catalog/new?q=%D0%9A%D0%BE')
-    expect(fullLocal()).toHaveLength(1)
-    expect(
-      screen.queryByRole('button', { name: 'Показати всі результати' }),
-    ).not.toBeInTheDocument()
+    expect(fullLocal()).toEqual([localUrl('Ко')])
+    expect(fullExternal()).toEqual([externalUrl('Ко')])
+  })
+
+  it('Enter на щойно знайденому тексті шукає знову: повторний пошук незміненого запиту', async () => {
+    const user = setup()
+
+    renderScreen()
+    await user.type(screen.getByLabelText(INPUT), 'Кобзар')
+    await advance(5_000)
+    await user.keyboard('{Enter}')
+    await advance(5_000)
+
+    expect(fullLocal()).toEqual([localUrl('Кобзар'), localUrl('Кобзар')])
+    expect(fullExternal()).toEqual([externalUrl('Кобзар'), externalUrl('Кобзар')])
   })
 
   it('старі відповіді не підміняють нові', async () => {
     const pending = new Map<string, (value: unknown) => void>()
 
-    suggestHandler = (query) =>
+    localHandler = (query) =>
       new Promise((resolve) => {
         pending.set(query, resolve)
       })
@@ -2154,7 +2178,7 @@ describe('автопошук під час введення', () => {
     expect([...pending.keys()]).toEqual(['Ко', 'Коб'])
 
     const named = (title: string) =>
-      searchResponse([editionItem('e-1', { work: { ...WORK, title } })], { pageSize: 8 })
+      searchResponse([editionItem('e-1', { work: { ...WORK, title } })])
 
     await act(async () => {
       pending.get('Коб')?.(named('Нова відповідь'))
@@ -2167,12 +2191,12 @@ describe('автопошук під час введення', () => {
     expect(screen.queryByText('Стара відповідь')).not.toBeInTheDocument()
   })
 
-  it('поки йде новий запит, попередній список лишається, а «нічого не знайдено» не з’являється', async () => {
+  it('поки йде новий набраний запит, попередній список лишається без пагінації, а «нічого не знайдено» не з’являється', async () => {
     const pending = new Map<string, (value: unknown) => void>()
 
-    suggestHandler = (query) =>
+    localHandler = (query) =>
       query === 'Ко'
-        ? Promise.resolve(searchResponse(items, { pageSize: 8 }))
+        ? Promise.resolve(searchResponse(items, { hasMore: true }))
         : new Promise((resolve) => {
             pending.set(query, resolve)
           })
@@ -2190,9 +2214,13 @@ describe('автопошук під час введення', () => {
     expect(screen.getByText('Кобзар')).toBeInTheDocument()
     expect(screen.queryByText(/Нічого схожого/)).not.toBeInTheDocument()
     expect(screen.getByText('Шукаю…')).toBeInTheDocument()
+    // The kept list belongs to «Ко»: its pages are not offered under «Коб».
+    expect(
+      screen.queryByRole('navigation', { name: 'Сторінки результатів' }),
+    ).not.toBeInTheDocument()
   })
 
-  it('очищення поля прибирає підказки й скасовує очікуване', async () => {
+  it('очищення поля прибирає набраний пошук і скасовує очікуване', async () => {
     const user = setup()
 
     renderScreen()
@@ -2205,7 +2233,21 @@ describe('автопошук під час введення', () => {
 
     expect(replace).toHaveBeenLastCalledWith('/catalog/new', { scroll: false })
     expect(screen.queryByText('Кобзар')).not.toBeInTheDocument()
-    expect(externalSuggest()).toHaveLength(0)
+    expect(fullExternal()).toHaveLength(0)
+  })
+
+  it('очищення поля після явного пошуку результатів не прибирає', async () => {
+    searchParams = new URLSearchParams({ q: 'кобзар' })
+
+    const user = setup()
+
+    renderScreen()
+    await screen.findByText('Кобзар')
+    await user.clear(screen.getByLabelText(INPUT))
+    await advance(10_000)
+
+    expect(replace).not.toHaveBeenCalled()
+    expect(screen.getByText('Кобзар')).toBeInTheDocument()
   })
 
   it('IME: під час композиції запитів немає, після compositionend — шукається завершений текст', async () => {
@@ -2217,33 +2259,37 @@ describe('автопошук під час введення', () => {
     fireEvent.change(input, { target: { value: 'ко' } })
     fireEvent.change(input, { target: { value: 'коб' } })
     await advance(10_000)
-    expect(localSuggest()).toHaveLength(0)
+    expect(fullLocal()).toHaveLength(0)
+    expect(fullExternal()).toHaveLength(0)
     expect(replace).not.toHaveBeenCalled()
 
     fireEvent.change(input, { target: { value: 'кобзар' } })
     fireEvent.compositionEnd(input)
     await advance(350)
 
-    expect(localSuggest()).toEqual([
-      '/me/library/add-search/suggest?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80',
-    ])
+    expect(fullLocal()).toEqual([localUrl('кобзар')])
+    expect(fullExternal()).toHaveLength(0)
+
+    await advance(550)
+    expect(fullExternal()).toEqual([externalUrl('кобзар')])
   })
 
-  it('зміна лише пробілів не запускає нового пошуку', async () => {
+  it('зміна лише пробілів не запускає нового пошуку; адреса несе нормалізований текст', async () => {
     const user = setup()
 
     renderScreen()
-    await user.type(screen.getByLabelText(INPUT), 'Кобзар')
+    await user.type(screen.getByLabelText(INPUT), '  Кобзар  ')
     await advance(5_000)
-    expect(localSuggest()).toHaveLength(1)
+    expect(fullLocal()).toEqual([localUrl('Кобзар')])
+    expect(replace).toHaveBeenCalledWith(searchUrl('Кобзар'), { scroll: false })
 
     await user.type(screen.getByLabelText(INPUT), '   ')
     await advance(5_000)
     await user.type(screen.getByLabelText(INPUT), '{Backspace}{Backspace}{Backspace}')
     await advance(5_000)
 
-    expect(localSuggest()).toHaveLength(1)
-    expect(externalSuggest()).toHaveLength(1)
+    expect(fullLocal()).toHaveLength(1)
+    expect(fullExternal()).toHaveLength(1)
   })
 
   it('валідний ISBN: точний сценарій без очікування, жодного текстового зовнішнього пошуку', async () => {
@@ -2261,9 +2307,8 @@ describe('автопошук під час введення', () => {
     expect(requested('/catalog/lookup?')).toHaveLength(1)
 
     await advance(10_000)
-    expect(localSuggest()).toHaveLength(0)
-    expect(externalSuggest()).toHaveLength(0)
     expect(fullExternal()).toHaveLength(0)
+    expect(suggestions()).toHaveLength(0)
   })
 
   it('«1984» шукається як назва, а не як ISBN', async () => {
@@ -2273,13 +2318,13 @@ describe('автопошук під час введення', () => {
     await user.type(screen.getByLabelText(INPUT), '1984')
     await advance(350)
 
-    expect(localSuggest()).toEqual(['/me/library/add-search/suggest?q=1984'])
+    expect(fullLocal()).toEqual([localUrl('1984')])
     expect(requested('/catalog/lookup?')).toHaveLength(0)
   })
 
   describe('недоступність зовнішнього джерела', () => {
-    it('429 від endpoint-а: один запит, жодного циклу повторів, місцеві результати й ручне додавання на місці', async () => {
-      suggestExternalHandler = () =>
+    it('429 від зовнішньої половини: один запит без циклу повторів, місцеві результати й ручне додавання на місці', async () => {
+      externalHandler = () =>
         Promise.reject(
           new ApiRequestError(429, { code: 'TOO_MANY_REQUESTS', message: 'Забагато запитів' }),
         )
@@ -2291,24 +2336,23 @@ describe('автопошук під час введення', () => {
       await advance(900)
 
       expect(await screen.findByText('Кобзар')).toBeInTheDocument()
-      expect(screen.getByText('Зовнішній пошук тимчасово недоступний.')).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Додати вручну' })).toBeInTheDocument()
+      expect(screen.queryByText('Шукаю…')).not.toBeInTheDocument()
 
       await advance(120_000)
-      expect(externalSuggest()).toHaveLength(1)
+      expect(fullExternal()).toHaveLength(1)
     })
 
-    it('джерело відповіло RATE_LIMITED/TIMEOUT: не «нічого не знайдено», а один нейтральний рядок', async () => {
+    it('джерело відповіло RATE_LIMITED/TIMEOUT: не «нічого не знайдено», а «не відповіли»', async () => {
       items = []
-      suggestExternalHandler = () =>
-        Promise.resolve({
-          items: [],
-          sources: [{ source: 'GOOGLE_BOOKS', status: 'RATE_LIMITED' }],
-          page: 1,
-          pageSize: 8,
-          more: 'UNKNOWN',
-          complete: true,
-        })
+      externalHandler = () =>
+        Promise.resolve(
+          externalAnswer({
+            items: [],
+            sources: [{ source: 'GOOGLE_BOOKS', status: 'RATE_LIMITED' }],
+            more: 'UNKNOWN',
+          }),
+        )
 
       const user = setup()
 
@@ -2318,7 +2362,10 @@ describe('автопошук під час введення', () => {
 
       expect(await screen.findByText(/чи є там ця книжка, невідомо/)).toBeInTheDocument()
       expect(screen.queryByText('Нічого схожого не знайшлося.')).not.toBeInTheDocument()
-      expect(externalSuggest()).toHaveLength(1)
+      // No source answered: the pages ahead are not asked of them (`UNKNOWN` still offers «Далі»).
+      await advance(10_000)
+      expect(fullExternal()).toHaveLength(1)
+      expect(screen.getByRole('link', { name: 'Наступна сторінка' })).toBeInTheDocument()
     })
 
     it('підтверджена порожня відповідь — «нічого не знайшлося», але лише коли обидві половини завершені', async () => {
@@ -2330,15 +2377,27 @@ describe('автопошук під час введення', () => {
       renderScreen()
       await user.type(screen.getByLabelText(INPUT), 'Кобзар')
       await advance(350)
-      // Локальна відповідь уже є, зовнішня ще ні: «немає» не кажемо.
+      // The local answer is in, the external one is not even asked yet: "none" is not said.
       expect(screen.queryByText('Нічого схожого не знайшлося.')).not.toBeInTheDocument()
 
       await advance(600)
       expect(await screen.findByText('Нічого схожого не знайшлося.')).toBeInTheDocument()
     })
+
+    it('набрані два символи без зовнішніх джерел: підказка натиснути «Шукати»', async () => {
+      items = []
+
+      const user = setup()
+
+      renderScreen()
+      await user.type(screen.getByLabelText(INPUT), 'Ко')
+      await advance(5_000)
+
+      expect(await screen.findByText(/Додайте символ або натисніть «Шукати»/)).toBeInTheDocument()
+    })
   })
 
-  it('додавання з підказок: «Додаю…» → «✓ У моїй бібліотеці»; запит, список і адреса не змінюються', async () => {
+  it('додавання з набраного пошуку: «Додаю…» → «✓ У моїй бібліотеці»; запит, список і адреса не змінюються', async () => {
     const user = setup()
 
     renderScreen()
@@ -2386,7 +2445,7 @@ describe('автопошук під час введення', () => {
     expect(second).toEqual(first)
   })
 
-  it('«ще один примірник» з підказок — нова операція', async () => {
+  it('«ще один примірник» з набраного пошуку — нова операція', async () => {
     items = [editionItem('e-1', { ownership: { activeCount: 1, archivedCount: 0 } })]
 
     const user = setup()
@@ -2412,7 +2471,7 @@ describe('автопошук під час введення', () => {
     expect(quickAddCalls()[0]?.operationId).not.toBe(quickAddCalls()[1]?.operationId)
   })
 
-  it('твір без видання з підказок веде в уточнення, а не додається', async () => {
+  it('твір без видання з набраного пошуку веде в уточнення, а не додається', async () => {
     items = [
       {
         kind: 'WORK',
@@ -2457,8 +2516,7 @@ describe('автопошук під час введення', () => {
       })
 
     it('помилка в написанні → рядок під полем із кнопкою-посиланням; запит у полі не змінюється', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+      fullExtra = hintFor(TYPO)
 
       const user = setup()
 
@@ -2484,7 +2542,7 @@ describe('автопошук під час введення', () => {
       expect(hintText()).not.toBeInTheDocument()
     })
 
-    it('підказка є і в повному пошуку (адреса з q)', async () => {
+    it('підказка є і в повному пошуку з адреси (q)', async () => {
       searchParams = new URLSearchParams({ q: TYPO })
       fullExtra = hintFor(TYPO)
       externalHandler = externalWithHint
@@ -2495,9 +2553,9 @@ describe('автопошук під час введення', () => {
     })
 
     it('зміна тексту прибирає стару підказку негайно, не чекаючи нової відповіді', async () => {
-      suggestHandler = (query) =>
+      localHandler = (query) =>
         query === TYPO
-          ? Promise.resolve(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+          ? Promise.resolve(searchResponse(items, hintFor(TYPO)))
           : new Promise(() => undefined)
 
       const user = setup()
@@ -2517,8 +2575,7 @@ describe('автопошук під час введення', () => {
     })
 
     it('очищення поля прибирає підказку', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+      fullExtra = hintFor(TYPO)
 
       const user = setup()
 
@@ -2535,12 +2592,12 @@ describe('автопошук під час введення', () => {
     it('запізніла відповідь на старий текст не показує виправлення для нового', async () => {
       let release: (value: unknown) => void = () => undefined
 
-      suggestHandler = (query) =>
+      localHandler = (query) =>
         query === TYPO
           ? new Promise((resolve) => {
               release = resolve
             })
-          : Promise.resolve(searchResponse(items, { pageSize: 8 }))
+          : Promise.resolve(searchResponse(items))
 
       const user = setup()
 
@@ -2548,15 +2605,14 @@ describe('автопошук під час введення', () => {
       await user.type(screen.getByLabelText(INPUT), TYPO)
       await advance(350)
       await user.type(screen.getByLabelText(INPUT), 'а')
-      release(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+      release(searchResponse(items, hintFor(TYPO)))
       await advance(10_000)
 
       expect(hintText()).not.toBeInTheDocument()
     })
 
-    it('натискання: поле отримує виправлене написання, одна навігація й один повний пошук, без автопідказок', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+    it('натискання: поле отримує виправлене написання, одна навігація й один повний пошук виправленого запиту', async () => {
+      fullExtra = hintFor(TYPO)
 
       const user = setup()
 
@@ -2568,22 +2624,16 @@ describe('автопошук під час введення', () => {
 
       expect(screen.getByLabelText(INPUT)).toHaveValue(FIXED)
       expect(push).toHaveBeenCalledTimes(1)
-      expect(push).toHaveBeenCalledWith(
-        `/catalog/new?${new URLSearchParams({ q: FIXED }).toString()}`,
-      )
-      expect(fullLocal()).toEqual([
-        `/me/library/add-search?q=${encodeURIComponent(FIXED)}&page=1&pageSize=10`,
-      ])
-      expect(fullExternal()).toHaveLength(1)
-      // Єдиний автозапит — той, що показав підказку (до 900 мс зовнішнього ще не було); після натискання нових немає.
-      expect(localSuggest()).toHaveLength(1)
-      expect(externalSuggest()).toHaveLength(0)
+      expect(push).toHaveBeenCalledWith(searchUrl(FIXED))
+      // The typed search that showed the hint, then exactly one search of the fix.
+      expect(fullLocal()).toEqual([localUrl(TYPO), localUrl(FIXED)])
+      // The typo's external half was never asked: the click came before its pause.
+      expect(fullExternal()).toEqual([externalUrl(FIXED)])
       expect(replace).toHaveBeenCalledTimes(1)
-      expect(hintText()).not.toBeInTheDocument()
     })
 
     it('натискання скидає сторінку результатів на першу', async () => {
-      searchParams = new URLSearchParams({ q: TYPO, page: '3', pageSize: '10' })
+      searchParams = new URLSearchParams({ q: TYPO, page: '3', pageSize: '24' })
       fullExtra = hintFor(TYPO)
       externalHandler = externalWithHint
 
@@ -2594,14 +2644,12 @@ describe('автопошук під час введення', () => {
       await advance(0)
 
       expect(push).toHaveBeenCalledTimes(1)
-      expect(push).toHaveBeenCalledWith(
-        `/catalog/new?${new URLSearchParams({ q: FIXED }).toString()}`,
-      )
+      // Page 1 again; an explicit non-default size is kept.
+      expect(push).toHaveBeenCalledWith(searchUrl(FIXED, { pageSize: '24' }))
     })
 
     it('кнопка доступна з клавіатури: Tab доходить до неї, Enter запускає один пошук', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse(items, { pageSize: 8, ...hintFor(TYPO) }))
+      fullExtra = hintFor(TYPO)
 
       const user = setup()
 
@@ -2622,7 +2670,7 @@ describe('автопошук під час введення', () => {
       await advance(10_000)
 
       expect(push).toHaveBeenCalledTimes(1)
-      expect(fullLocal()).toHaveLength(1)
+      expect(fullLocal()).toEqual([localUrl(TYPO), localUrl(FIXED)])
     })
   })
 
@@ -2630,11 +2678,11 @@ describe('автопошук під час введення', () => {
     const TYPO = 'Гарі Потер'
     const FIXED = 'Гаррі Поттер'
     const suggestion = { forQuery: TYPO, text: FIXED }
-    const externalAnswer = (extra: Record<string, unknown> = {}, sources = 1) => ({
+    const answer = (extra: Record<string, unknown> = {}, sources = 1) => ({
       items: [],
       sources: Array.from({ length: sources }, () => ({ source: 'GOOGLE_BOOKS', status: 'OK' })),
       page: 1,
-      pageSize: 8,
+      pageSize: 10,
       more: 'NO',
       complete: true,
       ...extra,
@@ -2644,12 +2692,10 @@ describe('автопошук під час введення', () => {
     beforeEach(() => {
       // Наш каталог порожній: підказка може прийти лише від джерел.
       items = []
-      suggestHandler = () => Promise.resolve(searchResponse([], { pageSize: 8 }))
     })
 
     it('наш каталог порожній, джерело знає правильну назву → підказка з’являється після зовнішньої відповіді', async () => {
-      suggestExternalHandler = () =>
-        Promise.resolve(externalAnswer({ spellingSuggestion: suggestion }))
+      externalHandler = () => Promise.resolve(answer({ spellingSuggestion: suggestion }))
 
       const user = setup()
 
@@ -2662,16 +2708,14 @@ describe('автопошук під час введення', () => {
 
       expect(await screen.findByRole('button', { name: FIXED })).toBeInTheDocument()
       expect(screen.getByLabelText(INPUT)).toHaveValue(TYPO)
-      // Жодного запиту понад звичайний автопошук: по одному на половину.
-      expect(localSuggest()).toHaveLength(1)
-      expect(externalSuggest()).toHaveLength(1)
-      expect(fullLocal()).toHaveLength(0)
-      expect(fullExternal()).toHaveLength(0)
+      // No request beyond the search itself: one per half.
+      expect(fullLocal()).toHaveLength(1)
+      expect(fullExternal()).toHaveLength(1)
     })
 
-    it('повний пошук: підказка зовнішньої половини теж під полем', async () => {
+    it('повний пошук з адреси: підказка зовнішньої половини теж під полем', async () => {
       searchParams = new URLSearchParams({ q: TYPO })
-      externalHandler = () => Promise.resolve(externalAnswer({ spellingSuggestion: suggestion }))
+      externalHandler = () => Promise.resolve(answer({ spellingSuggestion: suggestion }))
 
       renderScreen()
 
@@ -2679,9 +2723,8 @@ describe('автопошук під час введення', () => {
     })
 
     it('зовнішня відповідь мовчить (кандидати суперечать) — локальна підказка зникає', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse([], { pageSize: 8, spellingSuggestion: suggestion }))
-      suggestExternalHandler = () => Promise.resolve(externalAnswer())
+      fullExtra = { spellingSuggestion: suggestion }
+      externalHandler = () => Promise.resolve(answer())
 
       const user = setup()
 
@@ -2700,9 +2743,8 @@ describe('автопошук під час введення', () => {
     })
 
     it('джерела не питали (sources порожній): локальна підказка лишається', async () => {
-      suggestHandler = () =>
-        Promise.resolve(searchResponse([], { pageSize: 8, spellingSuggestion: suggestion }))
-      suggestExternalHandler = () => Promise.resolve(externalAnswer({}, 0))
+      fullExtra = { spellingSuggestion: suggestion }
+      externalHandler = () => Promise.resolve(answer({}, 0))
 
       const user = setup()
 
@@ -2714,9 +2756,9 @@ describe('автопошук під час введення', () => {
     })
 
     it('зміна тексту прибирає підказку з джерела негайно', async () => {
-      suggestExternalHandler = (query) =>
+      externalHandler = (query) =>
         query === TYPO
-          ? Promise.resolve(externalAnswer({ spellingSuggestion: suggestion }))
+          ? Promise.resolve(answer({ spellingSuggestion: suggestion }))
           : new Promise(() => undefined)
 
       const user = setup()
@@ -2734,12 +2776,12 @@ describe('автопошук під час введення', () => {
     it('запізніла відповідь джерела на старий текст не виправляє новий', async () => {
       let release: (value: unknown) => void = () => undefined
 
-      suggestExternalHandler = (query) =>
+      externalHandler = (query) =>
         query === TYPO
           ? new Promise((resolve) => {
               release = resolve
             })
-          : Promise.resolve(externalAnswer())
+          : Promise.resolve(answer())
 
       const user = setup()
 
@@ -2747,15 +2789,15 @@ describe('автопошук під час введення', () => {
       await user.type(screen.getByLabelText(INPUT), TYPO)
       await advance(900)
       await user.type(screen.getByLabelText(INPUT), 'а')
-      release(externalAnswer({ spellingSuggestion: suggestion }))
+      release(answer({ spellingSuggestion: suggestion }))
       await advance(10_000)
 
       expect(hintText()).not.toBeInTheDocument()
     })
 
     it('натискання на підказку з джерела: одна навігація, один повний пошук за виправленим запитом зі сторінки 1', async () => {
-      searchParams = new URLSearchParams({ q: TYPO, page: '2', pageSize: '10' })
-      externalHandler = () => Promise.resolve(externalAnswer({ spellingSuggestion: suggestion }))
+      searchParams = new URLSearchParams({ q: TYPO, page: '2', pageSize: '24' })
+      externalHandler = () => Promise.resolve(answer({ spellingSuggestion: suggestion }))
 
       const user = setup()
 
@@ -2765,65 +2807,66 @@ describe('автопошук під час введення', () => {
 
       expect(screen.getByLabelText(INPUT)).toHaveValue(FIXED)
       expect(push).toHaveBeenCalledTimes(1)
-      expect(push).toHaveBeenCalledWith(
-        `/catalog/new?${new URLSearchParams({ q: FIXED }).toString()}`,
-      )
-      expect(fullLocal().at(-1)).toBe(
-        `/me/library/add-search?q=${encodeURIComponent(FIXED)}&page=1&pageSize=10`,
-      )
-      expect(localSuggest()).toHaveLength(0)
-      expect(externalSuggest()).toHaveLength(0)
+      // Page 1 again; an explicit non-default size is kept.
+      expect(push).toHaveBeenCalledWith(searchUrl(FIXED, { pageSize: '24' }))
+      expect(fullLocal().at(-1)).toBe(localUrl(FIXED, 1, 24))
+      expect(suggestions()).toHaveLength(0)
     })
   })
 
   describe('адреса, Back і Forward', () => {
-    it('Back до запису підказок відновлює текст і зовнішнє питання без нових пауз', async () => {
+    it('Back до іншого пошуку відновлює текст і обидві половини без пауз', async () => {
       const user = setup()
 
       renderScreen()
       await user.type(screen.getByLabelText(INPUT), 'Кобзар')
       await advance(5_000)
-      expect(externalSuggest()).toHaveLength(1)
 
-      // Користувач пішов у повний пошук, а тоді «Назад» — до іншого запису підказок.
       act(() => {
-        navigate('/catalog/new?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE&auto=1')
+        navigate(searchUrl('Тигро'))
       })
       await advance(0)
 
       expect(screen.getByLabelText(INPUT)).toHaveValue('Тигро')
-      expect(localSuggest().at(-1)).toBe(
-        '/me/library/add-search/suggest?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE',
-      )
-      expect(externalSuggest().at(-1)).toBe(
-        '/me/library/add-search/suggest/external?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE',
-      )
+      expect(fullLocal().at(-1)).toBe(localUrl('Тигро'))
+      expect(fullExternal().at(-1)).toBe(externalUrl('Тигро'))
     })
 
-    it('перехід до адреси повного пошуку: поле слідує за нею, працюють повні запити, підказок немає', async () => {
+    it('Back/Forward до сторінки набраного пошуку: та сама сторінка, таймер набору адреси не скидає', async () => {
       const user = setup()
 
       renderScreen()
       await user.type(screen.getByLabelText(INPUT), 'Кобзар')
       await advance(5_000)
 
-      const before = localSuggest().length
-
       act(() => {
-        navigate('/catalog/new?q=%D0%A2%D0%B8%D0%B3%D1%80%D0%BE')
+        navigate('/catalog/new?q=%D0%9A%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2')
       })
       await advance(5_000)
 
+      expect(fullLocal().at(-1)).toBe(localUrl('Кобзар', 2))
+      expect(fullExternal().at(-1)).toBe(externalUrl('Кобзар', 2))
+      expect(searchParams.get('page')).toBe('2')
+      expect(replace).toHaveBeenCalledTimes(1)
+    })
+
+    it('стара адреса підказок (auto=1): повний пошук того самого q, адреса без auto, жодного обмеженого списку', async () => {
+      searchParams = new URLSearchParams({ q: 'Тигро', auto: '1' })
+
+      renderScreen()
+      await advance(0)
+
+      expect(replace).toHaveBeenCalledWith(searchUrl('Тигро'), undefined)
       expect(screen.getByLabelText(INPUT)).toHaveValue('Тигро')
-      expect(fullLocal()).toHaveLength(1)
-      expect(fullExternal()).toHaveLength(1)
-      expect(localSuggest()).toHaveLength(before)
+      expect(fullLocal()).toEqual([localUrl('Тигро')])
+      expect(fullExternal()).toEqual([externalUrl('Тигро')])
+      expect(suggestions()).toHaveLength(0)
       expect(
         screen.queryByRole('button', { name: 'Показати всі результати' }),
       ).not.toBeInTheDocument()
     })
 
-    it('адреса, яку пише сам автопошук, не затирає те, що людина друкує далі', async () => {
+    it('адреса, яку пише сам набір, не затирає те, що людина друкує далі', async () => {
       const user = setup()
 
       renderScreen()
@@ -2952,7 +2995,7 @@ describe('діалог результату (BS-114)', () => {
   it.each(['button', 'escape'] as const)(
     'закриття (%s) нічого не створює, не чіпає адреси й пошуку та повертає фокус до картки',
     async (how) => {
-      searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=20')
+      searchParams = new URLSearchParams('q=кобзар&page=2&pageSize=24')
 
       const user = userEvent.setup()
 
@@ -2970,7 +3013,7 @@ describe('діалог результату (BS-114)', () => {
       expect(push).not.toHaveBeenCalled()
       expect(replace).not.toHaveBeenCalled()
       expect(searchParams.toString()).toBe(
-        'q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=20',
+        'q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=2&pageSize=24',
       )
       // The same list, not a new search: nothing was asked again, the field keeps its text.
       expect(searchRequests()).toEqual(asked)

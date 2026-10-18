@@ -11,58 +11,59 @@ import {
 } from './auto-search'
 
 export interface AutoSearchInput {
-  /** Що зараз у полі, як набрано. Це ЧЕРНЕТКА — виконаний запит живе в адресі. */
+  /** What the field holds now, as typed. It is a DRAFT — the executed query lives in the address. */
   draft: string
-  /** Нормалізований `q` з адреси. */
+  /** `q` of the address, normalized. */
   urlQuery: string
-  /** Адреса в режимі автопідказок (`auto=1`), а не виконаного повного пошуку. */
-  autoMode: boolean
-  /** Показати підказки для цього тексту: `router.replace` з `auto=1`, без прокручування. */
-  onSuggest: (query: string) => void
-  /** Поле спорожніло: прибрати підказки з адреси. Виконаний повний пошук не чіпається. */
+  /** Run the full search of this text: `router.replace`, first page, no scrolling. */
+  onSearch: (query: string) => void
+  /** The field went below a search: drop the search typing wrote into the address. */
   onClear: () => void
-  /** Валідний ISBN-13: точний сценарій без очікування. */
+  /** A valid ISBN-13: the exact path, no waiting. */
   onExact: (isbn: string) => void
 }
 
 export interface AutoSearch {
-  /** Нормалізована чернетка. */
+  /** The draft, normalized. */
   normalized: string
-  /** Для якого тексту вже питали зовнішнє джерело; `undefined` — ще ні. */
-  externalAsked: string | undefined
-  /** Нормалізована чернетка ще не відбилась в адресі (чекаємо паузу або триває IME). */
+  /**
+   * The text whose external half may be asked (`externalGateOf`). The address the page opened with,
+   * an explicit search or an outside address releases its query at once; typing — after its own pause.
+   */
+  externalReleased: string | undefined
+  /** The normalized draft has not reached the address yet (waiting for the pause, or IME is composing). */
   localPending: boolean
-  /** Пропси для `<input>`: композиція IME. */
+  /** Props for the `<input>`: IME composition. */
   composition: {
     onCompositionStart: () => void
     onCompositionEnd: () => void
   }
-  /** Зняти відкладені запуски — перед явним повним пошуком. */
+  /** Drop pending launches — before an explicit search. */
   cancel: () => void
-  /** Адреса змінилась ззовні (Back/Forward, сканер): підказки відновлюються без паузи. */
-  restore: (query: string | undefined) => void
+  /** An explicit search or an outside address (Back/Forward, the scanner): its external half is asked now. */
+  release: (query: string) => void
 }
 
 /**
- * Автопошук під час введення: КОЛИ що запускається. Сам хук нічого не завантажує — він лише вирішує
- * й викликає колбеки; запити роблять `useKeyedRequest`-и екрана за ключем, який із цього виходить.
+ * Search while typing (BS-134): WHEN what runs. The hook loads nothing — it decides and calls back; the
+ * screen's queries follow the address and `externalReleased`.
  *
- * - до 2 символів — нічого; від 2 — через `AUTO_LOCAL_DELAY_MS` підказки з нашого каталогу;
- *   від 3 — через `AUTO_EXTERNAL_DELAY_MS` ще й обмежене зовнішнє питання. Таймери НЕЗАЛЕЖНІ й
- *   рахуються від ОСТАННЬОЇ зміни тексту: перший, що спрацював, другого не скидає.
- * - IME: поки триває композиція, таймерів немає; `compositionend` вмикає їх для завершеного тексту.
- * - валідний ISBN-13 — без очікування (`onExact`); «1984» ISBN не є.
- * - порівнюються нормалізовані рядки: зміна лише пробілів нічого не запускає.
+ * - below 2 characters — nothing; from 2 — after `AUTO_LOCAL_DELAY_MS` the FULL search of the text runs
+ *   (its first page, our catalog at once); from 3 — after `AUTO_EXTERNAL_DELAY_MS` its external half
+ *   is released too. The timers are INDEPENDENT and count from the LAST change of the text: the first
+ *   to fire does not reset the other.
+ * - IME: no timers while composing; `compositionend` starts them for the finished text.
+ * - a valid ISBN-13 — no waiting (`onExact`); «1984» is not one.
+ * - normalized strings are compared: a change of whitespace alone starts nothing.
  *
- * Таймери залежать лише від тексту й композиції, а не від адреси: інакше `replace`, який робить
- * сам локальний таймер, перезапускав би зовнішній і той спрацьовував би на `350 + 900` мс.
+ * The timers depend on the text and the composition only, not on the address: otherwise the
+ * `replace` the local timer makes would restart the external one, and it would fire at `350 + 900` ms.
  */
 export function useAutoSearch(input: AutoSearchInput): AutoSearch {
   const normalized = normalizeQuery(input.draft)
   const [composing, setComposing] = useState(false)
-  const [externalAsked, setExternalAsked] = useState<string | undefined>(
-    input.autoMode && input.urlQuery.length >= AUTO_EXTERNAL_MIN_CHARS ? input.urlQuery : undefined,
-  )
+  // The address the page opened with is a search someone asked for: no pause for it.
+  const [externalReleased, setExternalReleased] = useState<string | undefined>(input.urlQuery)
   const latest = useRef(input)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
 
@@ -76,10 +77,8 @@ export function useAutoSearch(input: AutoSearchInput): AutoSearch {
     timers.current = []
   }, [])
 
-  const restore = useCallback((query: string | undefined) => {
-    setExternalAsked(
-      query !== undefined && query.length >= AUTO_EXTERNAL_MIN_CHARS ? query : undefined,
-    )
+  const release = useCallback((query: string) => {
+    setExternalReleased(query)
   }, [])
 
   useEffect(() => {
@@ -88,33 +87,28 @@ export function useAutoSearch(input: AutoSearchInput): AutoSearch {
     const current = latest.current
 
     if (normalized.length < AUTO_LOCAL_MIN_CHARS) {
-      if (current.autoMode && current.urlQuery !== '') current.onClear()
+      if (current.urlQuery !== '') current.onClear()
 
       return
     }
 
     if (isValidIsbn13(normalized)) {
-      if (normalized !== current.urlQuery || current.autoMode) current.onExact(normalized)
+      if (normalized !== current.urlQuery) current.onExact(normalized)
 
       return
     }
 
-    // Решту вирішує момент спрацювання: адреса за ці 350–900 мс могла змінитись.
+    // The rest is decided when a timer fires: the address may change within these 350–900 ms.
     timers.current = [
       setTimeout(() => {
-        if (normalized !== latest.current.urlQuery) latest.current.onSuggest(normalized)
+        if (normalized !== latest.current.urlQuery) latest.current.onSearch(normalized)
       }, AUTO_LOCAL_DELAY_MS),
     ]
 
     if (normalized.length >= AUTO_EXTERNAL_MIN_CHARS) {
       timers.current.push(
         setTimeout(() => {
-          const now = latest.current
-
-          // Виконаний повний пошук цього ж тексту вже питав усі джерела: підказки зайві.
-          if (normalized === now.urlQuery && !now.autoMode) return
-
-          setExternalAsked(normalized)
+          setExternalReleased(normalized)
         }, AUTO_EXTERNAL_DELAY_MS),
       )
     }
@@ -127,7 +121,7 @@ export function useAutoSearch(input: AutoSearchInput): AutoSearch {
 
   return {
     normalized,
-    externalAsked,
+    externalReleased,
     localPending: composing || (eligible && normalized !== input.urlQuery),
     composition: {
       onCompositionStart: () => {
@@ -138,6 +132,6 @@ export function useAutoSearch(input: AutoSearchInput): AutoSearch {
       },
     },
     cancel,
-    restore,
+    release,
   }
 }

@@ -1,11 +1,10 @@
 /**
- * Tailwind equivalents of the global classes the add-book screens use (`.lede`, `.books`,
- * `.status--pending`, `.empty`). The page box is not copied here: the screens use `.page` itself (BS-133).
+ * Tailwind equivalents of the global classes the add-book screens use (`.lede`, `.status--pending`,
+ * `.empty`). The page box is not copied here: the screens use `.page` itself (BS-133); the result list is
+ * the shared `ResultCardGrid` (BS-134).
  */
 
 export const ledeClass = 'mb-8 text-[color:var(--bookswap-muted)]'
-
-export const booksClass = 'mb-6 grid list-none gap-3 p-0'
 
 export const pendingStatusClass =
   'm-0 rounded-md border border-current px-4 py-[0.85rem] text-[0.95rem] text-[color:var(--bookswap-muted)]'

@@ -51,29 +51,33 @@ export function pageSizeFromParam(raw: string | null): SearchPageSize | undefine
 }
 
 /**
- * Прочитаний пошук з адреси.
+ * The search the address names.
  *
- * `valid: false`, коли `page` чи `pageSize` написано нісенітницю: показується
- * перша сторінка типового розміру, а сторінка виправляє адресу (`replace`, не
- * `push`), щоб «назад» не вертало на помилкову.
+ * `valid: false` when `page` or `pageSize` is garbage (an old `pageSize=10/20/50` included): the
+ * pair is reset AS A WHOLE to the first page of the default size, the query kept, and the page
+ * fixes the address (`replace`, not `push`) so Back never returns to the broken one. A page number
+ * means nothing without its size — page 3 of 10 is not page 3 of 12 — and every request is made
+ * from what this returns, so the address being corrected is never asked for: not even the first
+ * request or the pages ahead of it run before the `replace`.
  */
 export function readSearchAddress(parameters: URLSearchParams): SearchAddress & { valid: boolean } {
+  const q = parameters.get('q') ?? ''
   const page = pageFromParam(parameters.get('page'))
   const pageSize = pageSizeFromParam(parameters.get('pageSize'))
 
-  return {
-    q: parameters.get('q') ?? '',
-    page: page ?? 1,
-    pageSize: pageSize ?? DEFAULT_SEARCH_PAGE_SIZE,
-    valid: page !== undefined && pageSize !== undefined,
+  if (page === undefined || pageSize === undefined) {
+    return { q, page: 1, pageSize: DEFAULT_SEARCH_PAGE_SIZE, valid: false }
   }
+
+  return { q, page, pageSize, valid: true }
 }
 
 /**
  * Адреса пошуку.
  *
- * Канонічна адреса мінімальна: перша сторінка не несе `page=1`, типовий розмір —
- * `pageSize=10`; дві адреси для однієї сторінки зробили б «назад» несподіваним.
+ * Канонічна адреса мінімальна: перша сторінка не несе `page=1`, типовий розмір
+ * (`DEFAULT_SEARCH_PAGE_SIZE`, 12) — `pageSize`; дві адреси для однієї сторінки
+ * зробили б «назад» несподіваним.
  *
  * Усі ІНШІ параметри поточної адреси (`mode`, `workId`, `external` сторінки додавання…)
  * переносяться як є, крім названих у `drop`: зміна сторінки не має губити те, що

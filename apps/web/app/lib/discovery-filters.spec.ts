@@ -5,22 +5,28 @@ import {
   readDiscoveryFilters,
 } from './discovery-filters'
 
-const address = { q: '', page: 1, pageSize: 10 as const }
+const address = { q: '', page: 1, pageSize: 12 as const }
 
 describe('discovery filters in the address', () => {
   it('round-trips non-default filters, q, page and pageSize', () => {
     const filters = { availability: 'ANY', language: 'uk', translation: 'TRANSLATED' } as const
-    const href = discoveryHref({ q: 'Кобзар', page: 2, pageSize: 20 }, 'CIRCLE', filters)
+    const href = discoveryHref({ q: 'Кобзар', page: 2, pageSize: 24 }, 'CIRCLE', filters)
     const parameters = new URL(href, 'http://x').searchParams
 
     expect(parameters.get('q')).toBe('Кобзар')
     expect(parameters.get('page')).toBe('2')
-    expect(parameters.get('pageSize')).toBe('20')
+    expect(parameters.get('pageSize')).toBe('24')
     expect(readDiscoveryFilters(parameters)).toEqual({ filters, valid: true })
   })
 
   it('omits defaults: browse without filters is plain /catalog', () => {
     expect(discoveryHref(address, 'CIRCLE', DEFAULT_DISCOVERY_FILTERS)).toBe('/catalog')
+  })
+
+  it('keeps an explicit non-default size', () => {
+    expect(discoveryHref({ ...address, pageSize: 36 }, 'CIRCLE', DEFAULT_DISCOVERY_FILTERS)).toBe(
+      '/catalog?pageSize=36',
+    )
   })
 
   it('a filter change starts from page 1 when the caller resets the page', () => {

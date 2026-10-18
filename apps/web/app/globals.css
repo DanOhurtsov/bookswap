@@ -541,6 +541,46 @@ a:focus-visible > .link-underline {
   gap: 0.75rem;
 }
 
+/*
+ * BS-134: search results (`/catalog`, `/catalog/new`) as a grid of cards — and only those; `.books`
+ * stays a single column for every other list. The wrapper is the container, so the column count
+ * follows the width of the list itself (the page content box), not the window. Thresholds keep a
+ * card at least ~294px wide at the default font: 4 columns in the 1440px container (content 1392px),
+ * then 3, 2, 1 (docs/plan/bs-134-search-grid-pagination.md). They are in rem: a larger root font
+ * widens the cards instead of squeezing the text. `minmax(0, 1fr)`: content never widens a column.
+ */
+.result-grid {
+  container-type: inline-size;
+  margin: 0 0 1.5rem;
+}
+
+.result-grid > ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@container (min-width: 37.5rem) {
+  .result-grid > ul {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 57.5rem) {
+  .result-grid > ul {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 77.5rem) {
+  .result-grid > ul {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .book {
   display: grid;
   gap: 0.25rem;

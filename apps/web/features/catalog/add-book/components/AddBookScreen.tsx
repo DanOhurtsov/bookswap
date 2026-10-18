@@ -1,13 +1,12 @@
 'use client'
 
-import { DEFAULT_SEARCH_PAGE_SIZE, type Visibility } from '@bookswap/shared'
+import type { Visibility } from '@bookswap/shared'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { readSearchAddress, searchHref } from '@/app/lib/search-page'
 import { useSession } from '@/app/lib/use-session'
 import {
-  ADD_BOOK_PATH,
   addBookModeOf,
+  correctedSearchHref,
   manualIntentOf,
   opensLibraryAfterAdd,
   screenKeyOf,
@@ -76,7 +75,6 @@ type AddBookModesProps = {
 function AddBookModes({ userId, libraryVisibility }: AddBookModesProps) {
   const router = useRouter()
   const parameters = useSearchParams()
-  const address = readSearchAddress(parameters)
   // Manual add and refining an edition are separate views of the same page.
   const mode = addBookModeOf(parameters)
   /** Every new form is a new intent (and a new add slot): after a success the next one can be added. */
@@ -96,20 +94,12 @@ function AddBookModes({ userId, libraryVisibility }: AddBookModesProps) {
     screenRef.current = screen
   })
 
-  // `page`/`pageSize` is garbage: show the first page and fix the address (`replace`), in either mode.
-  const addressValid = address.valid
+  // Garbage in `page`/`pageSize`, or the old suggestions flag: fix the address (`replace`), in any mode.
+  const corrected = correctedSearchHref(parameters)
 
   useEffect(() => {
-    if (!addressValid && address.q !== '') {
-      router.replace(
-        searchHref(ADD_BOOK_PATH, parameters, {
-          q: address.q,
-          page: 1,
-          pageSize: DEFAULT_SEARCH_PAGE_SIZE,
-        }),
-      )
-    }
-  }, [addressValid, address.q, parameters, router])
+    if (corrected !== undefined) router.replace(corrected)
+  }, [corrected, router])
 
   if (mode.kind === 'edition') {
     return (
@@ -139,6 +129,7 @@ function AddBookModes({ userId, libraryVisibility }: AddBookModesProps) {
 
   return (
     <AddBookSearchScreen
+      viewerId={userId}
       quick={quick}
       scannedQuery={scannedQuery}
       onScannedChange={setScannedQuery}

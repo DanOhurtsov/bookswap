@@ -28,6 +28,33 @@ describe('SearchCandidatesQueryDto ↔ searchCandidatesRequestSchema', () => {
     expect({ byZod, byDto }).toEqual({ byZod: valid, byDto: valid })
   })
 
+  it.each([
+    { name: 'pageSize 12', payload: { q: 'Шантарам', pageSize: '12' }, valid: true },
+    { name: 'pageSize 48', payload: { q: 'Шантарам', pageSize: '48' }, valid: true },
+    {
+      name: 'межа дублікатів (10) явно — не розмір',
+      payload: { q: 'Шантарам', pageSize: '10' },
+      valid: false,
+    },
+    { name: 'колишній pageSize 20', payload: { q: 'Шантарам', pageSize: '20' }, valid: false },
+  ])('$name', ({ payload, valid }) => {
+    const byZod = searchCandidatesRequestSchema.safeParse(payload).success
+    const byDto = acceptedByDto(payload)
+
+    expect({ byZod, byDto }).toEqual({ byZod: valid, byDto: valid })
+  })
+
+  it('без pageSize розмір не підставляється: межу перевірки дублікатів вирішує сервер, а не типовий розмір списку', () => {
+    expect(plainToInstance(SearchCandidatesQueryDto, { q: 'Шантарам' }).pageSize).toBeUndefined()
+    expect(searchCandidatesRequestSchema.parse({ q: 'Шантарам' }).pageSize).toBeUndefined()
+  })
+
+  it('явний pageSize — число, як у списку', () => {
+    expect(
+      plainToInstance(SearchCandidatesQueryDto, { q: 'Шантарам', pageSize: '24' }).pageSize,
+    ).toBe(24)
+  })
+
   it('обрізає зайві пробіли так само, як схема', () => {
     const instance = plainToInstance(SearchCandidatesQueryDto, { q: '  Шантарам  ' })
 

@@ -1,10 +1,10 @@
 'use client'
 
 import type { SearchPageSize } from '@bookswap/shared'
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { searchHref } from '@/app/lib/search-page'
-import { AUTO_PARAM } from './auto-search'
-import { ADD_BOOK_PATH, addressKey, autoHref, clearedHref } from './search-address-urls'
+import { LEGACY_AUTO_PARAM } from './auto-search'
+import { ADD_BOOK_PATH, clearedHref } from './search-address-urls'
 
 /** The slice of the Next router this hook drives; a plain object in tests. */
 export interface AddressRouter {
@@ -16,71 +16,81 @@ export interface SearchAddressSyncInput {
   router: AddressRouter
   parameters: URLSearchParams
   pageSize: SearchPageSize
-  /** The address as it is now: mode and query. Only the first render's value seeds the key. */
-  autoMode: boolean
+  /** `q` of the address as it is now. Only the first render's value seeds what is "ours". */
   q: string
 }
 
 export interface SearchAddressSync {
-  /** Show suggestions for `text`: `replace` with `auto=1`. Skipped when we already started a full search of it. */
-  suggest: (text: string) => void
-  /** The field was emptied: `replace` to the address without a query. */
+  /** The search in the address was written by typing (`search`), not by an explicit act or from outside. */
+  typed: boolean
+  /** Typing paused on `text`: `replace` with its full search, first page, no scrolling. */
+  search: (text: string) => void
+  /** The field went below a search: `replace` to the address without a query — only for a typed search. */
   clear: () => void
-  /** A valid ISBN-13 was typed: `replace` with the full search, no waiting. */
+  /** A valid ISBN-13 was typed: `replace` with its full search, no waiting. */
   exact: (isbn13: string) => void
   /** An explicit full search: `push`, so Back returns to what was shown before. */
   pushFull: (text: string) => void
   /** The scanner found an ISBN: `push` the full search, but do NOT claim the address — the field follows it. */
   showScanned: (isbn: string) => void
   /**
-   * For the effect that copies the address into the field. `true` when the address is not what we
-   * last wrote (Back/Forward, the scanner); it is then claimed, so the next call is `false`.
+   * For the effect that copies the address into the field. `true` when the address holds a query we
+   * did not write (Back/Forward, the scanner, a link); it is then claimed, so the next call is `false`.
    */
-  adoptExternal: (autoMode: boolean, q: string) => boolean
+  adoptExternal: (q: string) => boolean
 }
 
 /**
- * Owns "which address did WE write": every write that comes from the field marks its key and
- * navigates in one call, so a caller cannot do one without the other. An address change that is
- * not ours is Back/Forward or the scanner, and the field follows it (`adoptExternal`). The scanner
- * deliberately does not mark (`showScanned`), and neither do pagination links, which keep `q` and
- * the mode — and with them the key.
+ * Owns "which query did WE write": every write that comes from the field marks its query and
+ * navigates in one call, so a caller cannot do one without the other. An address whose query is not
+ * ours is Back/Forward or the scanner, and the field follows it (`adoptExternal`). The scanner
+ * deliberately does not mark (`showScanned`), and neither do pagination links, which keep `q`.
+ *
+ * Whether the search was typed decides two things the person sees: emptying the field drops a typed
+ * search (an explicit one stays), and a typed search keeps the previous list while the next loads.
  */
 export function useSearchAddressSync(input: SearchAddressSyncInput): SearchAddressSync {
-  const { router, parameters, pageSize, autoMode, q } = input
-  const own = useRef(addressKey(autoMode, q))
+  const { router, parameters, pageSize, q } = input
+  const own = useRef(q)
+  const [typed, setTyped] = useState(false)
 
   const fullHref = (text: string) =>
-    searchHref(ADD_BOOK_PATH, parameters, { q: text, page: 1, pageSize }, [AUTO_PARAM])
+    searchHref(ADD_BOOK_PATH, parameters, { q: text, page: 1, pageSize }, [LEGACY_AUTO_PARAM])
 
-  const adoptExternal = useCallback((nextAutoMode: boolean, nextQ: string) => {
-    const key = addressKey(nextAutoMode, nextQ)
+  const adoptExternal = useCallback((nextQ: string) => {
+    if (nextQ === own.current) return false
 
-    if (key === own.current) return false
-
-    own.current = key
+    own.current = nextQ
+    setTyped(false)
 
     return true
   }, [])
 
   return {
-    suggest: (text) => {
-      // A full search of this text is already started by us (a click on a suggestion), and the address has not changed yet.
-      if (own.current === addressKey(false, text)) return
+    typed,
+    search: (text) => {
+      // This text is already the search we wrote (an explicit one started before the pause ended).
+      if (own.current === text) return
 
-      own.current = addressKey(true, text)
-      router.replace(autoHref(parameters, text, pageSize), { scroll: false })
+      own.current = text
+      setTyped(true)
+      router.replace(fullHref(text), { scroll: false })
     },
     clear: () => {
-      own.current = addressKey(false, '')
+      if (!typed) return
+
+      own.current = ''
+      setTyped(false)
       router.replace(clearedHref(parameters), { scroll: false })
     },
     exact: (isbn13) => {
-      own.current = addressKey(false, isbn13)
+      own.current = isbn13
+      setTyped(false)
       router.replace(fullHref(isbn13), { scroll: false })
     },
     pushFull: (text) => {
-      own.current = addressKey(false, text)
+      own.current = text
+      setTyped(false)
       router.push(fullHref(text))
     },
     showScanned: (isbn) => {
