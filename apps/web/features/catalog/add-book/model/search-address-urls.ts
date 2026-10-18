@@ -1,12 +1,12 @@
-import type { SearchPageSize } from '@bookswap/shared'
+import { DEFAULT_SEARCH_PAGE_SIZE } from '@bookswap/shared'
 import { readSearchAddress, searchHref } from '@/app/lib/search-page'
-import { AUTO_PARAM } from './auto-search'
+import { LEGACY_AUTO_PARAM } from './auto-search'
 import { MANUAL_PREFILL_KEYS } from './manual-form'
 
 export const ADD_BOOK_PATH = '/catalog/new'
 
 /** What the search shows: carried to the manual form as is, so "← До пошуку" restores it. */
-const SEARCH_CONTEXT_KEYS = ['q', 'page', 'pageSize', AUTO_PARAM] as const
+const SEARCH_CONTEXT_KEYS = ['q', 'page', 'pageSize'] as const
 
 /**
  * The external record a manual form was opened from (`<SOURCE>:<id>`): only part of the form's identity —
@@ -97,28 +97,36 @@ export function opensLibraryAfterAdd(
   return startedOn !== undefined && startedOn === current
 }
 
-/** Key for "what the address is right now": mode and query. An address we just wrote ourselves does not reset the field. */
-export function addressKey(auto: boolean, query: string): string {
-  return `${auto ? 'auto' : 'full'}\u0000${query}`
-}
-
 /**
- * Address of auto-suggestions: `auto=1` and the first page. A separate address mode, not an executed
- * full search — hence `replace`, not `push`: suggestions do not clutter history.
+ * The address to replace a broken or outdated search address with, or `undefined` when it is fine.
+ *
+ * Garbage in `page`/`pageSize` — the first page of the default size (`readSearchAddress`). The old
+ * suggestions flag (`auto=1`, before BS-134) — the same search without it: the full search of `q` is
+ * what such a link shows now, on the page it names. Only an address with a query is corrected.
  */
-export function autoHref(
-  parameters: URLSearchParams,
-  query: string,
-  pageSize: SearchPageSize,
-): string {
-  return `${searchHref(ADD_BOOK_PATH, parameters, { q: query, page: 1, pageSize }, [AUTO_PARAM])}&${AUTO_PARAM}=1`
+export function correctedSearchHref(parameters: URLSearchParams): string | undefined {
+  const address = readSearchAddress(parameters)
+
+  if (address.q === '') return undefined
+  if (!address.valid) {
+    return searchHref(
+      ADD_BOOK_PATH,
+      parameters,
+      { q: address.q, page: 1, pageSize: DEFAULT_SEARCH_PAGE_SIZE },
+      [LEGACY_AUTO_PARAM],
+    )
+  }
+
+  return parameters.has(LEGACY_AUTO_PARAM)
+    ? searchHref(ADD_BOOK_PATH, parameters, address, [LEGACY_AUTO_PARAM])
+    : undefined
 }
 
 /** Address without a query: the field was emptied, suggestions disappear. */
 export function clearedHref(parameters: URLSearchParams): string {
   const next = new URLSearchParams(parameters)
 
-  for (const key of ['q', 'page', 'pageSize', AUTO_PARAM]) next.delete(key)
+  for (const key of ['q', 'page', 'pageSize', LEGACY_AUTO_PARAM]) next.delete(key)
 
   const rest = next.toString()
 
@@ -143,30 +151,26 @@ export function manualFormHref(prefill: URLSearchParams, current: URLSearchParam
 }
 
 /**
- * Link to the manual form, prefilled from what is being searched. An ISBN wins over a title;
- * suggestions carry the normalized text, a full search the executed one; with nothing searched the
- * form opens empty.
+ * Link to the manual form, prefilled from what is being searched: an ISBN wins over a title; with
+ * nothing searched the form opens empty.
  */
 export function manualHref(input: {
   parameters: URLSearchParams
   isbn: string | undefined
-  autoActive: boolean
-  enabled: boolean
-  urlQuery: string
-  query: string
+  /** The executed query when a search is shown, else `undefined`. */
+  query: string | undefined
 }): string {
   const prefill = new URLSearchParams()
 
   if (input.isbn !== undefined) prefill.set('isbn', input.isbn)
-  else if (input.autoActive) prefill.set('title', input.urlQuery)
-  else if (input.enabled) prefill.set('title', input.query)
+  else if (input.query !== undefined) prefill.set('title', input.query)
 
   return manualFormHref(prefill, input.parameters)
 }
 
 /**
- * "← До пошуку" from the manual form: the search the form was opened from — query, page, size and
- * the suggestions mode — without the form's own parameters. Opened directly, it is an empty search.
+ * "← До пошуку" from the manual form: the search the form was opened from — query, page and size —
+ * without the form's own parameters. Opened directly, it is an empty search.
  */
 export function backToSearchHref(parameters: URLSearchParams): string {
   const address = readSearchAddress(parameters)

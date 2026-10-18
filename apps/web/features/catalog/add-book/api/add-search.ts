@@ -5,7 +5,6 @@ import {
   bookLookupResponseSchema,
   quickAddResponseSchema,
   type AddSearchExternalItem,
-  type AddSearchExternalResponse,
   type AddSearchResponse,
   type BookLookupResult,
   type QuickAddRequest,
@@ -17,7 +16,7 @@ import type { ExternalHalfResponse } from '../model/external-search-state'
 /**
  * Локальна половина списку сторінки додавання: ОДНА картка — ОДНЕ конкретне видання.
  * `page` і `pageSize` надсилаються завжди явно: обидві половини списку мають питати ту саму
- * сторінку (як і в `searchExternalCatalogs`).
+ * сторінку.
  */
 export async function searchAddItems(
   query: string,
@@ -31,34 +30,6 @@ export async function searchAddItems(
     `/me/library/add-search?q=${encodeURIComponent(q)}&page=${String(page)}&pageSize=${String(pageSize)}`,
     { schema: addSearchResponseSchema, ...(signal === undefined ? {} : { signal }) },
   )
-}
-
-/**
- * Автопошук, локальна половина: фіксований режим (до `AUTO_RESULT_LIMIT` елементів), без `page` і
- * `pageSize` — сервер відхилив би їх. Запит уже нормалізований викликачем.
- */
-export async function suggestAddItems(
-  query: string,
-  signal?: AbortSignal,
-): Promise<AddSearchResponse> {
-  return apiRequest(`/me/library/add-search/suggest?q=${encodeURIComponent(query)}`, {
-    schema: addSearchResponseSchema,
-    ...(signal === undefined ? {} : { signal }),
-  })
-}
-
-/**
- * Автопошук, зовнішня половина: сервер робить щонайбільше ОДИН запит до одного джерела й нічого не
- * дочитує. Клієнт не повторює відповідь `RATE_LIMITED`/збій — наступне питання лише від нової зміни тексту.
- */
-export async function suggestAddExternal(
-  query: string,
-  signal?: AbortSignal,
-): Promise<AddSearchExternalResponse> {
-  return apiRequest(`/me/library/add-search/suggest/external?q=${encodeURIComponent(query)}`, {
-    schema: addSearchExternalResponseSchema,
-    ...(signal === undefined ? {} : { signal }),
-  })
 }
 
 /**

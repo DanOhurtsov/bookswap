@@ -873,10 +873,11 @@ describe('Каталог (e2e)', () => {
       expect(first.pageSize).toBe(DEFAULT_SEARCH_PAGE_SIZE)
     })
 
-    it.each([10, 20, 50])(
+    it.each([12, 24, 36, 48])(
       'pageSize=%s — стільки карток на сторінці, без повторів між сторінками',
       async (size) => {
-        const { token, ids } = await series(24)
+        // More than the largest page, so every size has a page after the first.
+        const { token, ids } = await series(49)
         const pages = await walk(`Томик ${token}`, size)
         const seen = pages.flatMap((page) => page.results.map((result) => result.work.id))
 
@@ -892,15 +893,16 @@ describe('Каталог (e2e)', () => {
 
     it('локальна частина повністю в межах сторінки: hasMore — за total, а не за здогадом', async () => {
       const { token } = await series(12)
-      const first = await search(`Томик ${token}`, 1, 10)
-      const all = await search(`Томик ${token}`, 1, 50)
+      const first = await search(`Томик ${token}`, 1, 12)
+      const all = await search(`Томик ${token}`, 1, 48)
 
-      expect(first.hasMore).toBe(first.total > 10)
-      expect(all.hasMore).toBe(all.total > 50)
+      expect(first.hasMore).toBe(first.total > 12)
+      expect(all.hasMore).toBe(all.total > 48)
     })
 
     it('недопустимий pageSize — 400, а не найближчий допустимий', async () => {
-      for (const pageSize of ['0', '5', '15', '100', 'abc']) {
+      // 10, 20 і 50 — колишні розміри.
+      for (const pageSize of ['0', '5', '10', '15', '20', '50', '100', 'abc']) {
         const response = await request(app.getHttpServer())
           .get(url(`/catalog/search?q=шантарам&pageSize=${pageSize}`))
           .set('Cookie', cookie)

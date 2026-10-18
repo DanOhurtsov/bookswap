@@ -5,6 +5,7 @@ import request from 'supertest'
 import type { App } from 'supertest/types'
 import {
   API_ERROR_CODES,
+  DEFAULT_SEARCH_PAGE_SIZE,
   addSearchResponseSchema,
   apiErrorSchema,
   addSearchExternalResponseSchema,
@@ -114,6 +115,10 @@ describe('GET /me/library/add-search (e2e)', () => {
       '/me/library/add-search?q=т',
       '/me/library/add-search?q=тигролови&page=0',
       '/me/library/add-search?q=тигролови&pageSize=7',
+      // Колишні розміри — тепер недопустимі.
+      '/me/library/add-search?q=тигролови&pageSize=10',
+      '/me/library/add-search?q=тигролови&pageSize=50',
+      '/me/library/add-search/external?q=тигролови&pageSize=20',
     ])('%s — 400', async (path) => {
       const account = await registerAccount(app, 'as-valid')
 
@@ -175,7 +180,7 @@ describe('GET /me/library/add-search (e2e)', () => {
       const workId = await createWork(account, word)
       const ids: string[] = []
 
-      for (let index = 0; index < 12; index += 1) {
+      for (let index = 0; index < 13; index += 1) {
         ids.push(
           await createEdition(account, workId, {
             publisher: `Видавець ${String(index)}`,
@@ -186,17 +191,33 @@ describe('GET /me/library/add-search (e2e)', () => {
 
       const first = await search(account, word)
       const second = await search(account, word, '&page=2')
-      const wide = await search(account, word, '&pageSize=20')
+      const wide = await search(account, word, '&pageSize=24')
 
-      expect([first.items.length, second.items.length]).toEqual([10, 2])
-      expect([first.total, second.total, wide.total]).toEqual([12, 12, 12])
+      expect(first.pageSize).toBe(DEFAULT_SEARCH_PAGE_SIZE)
+      expect([first.items.length, second.items.length]).toEqual([12, 1])
+      expect([first.total, second.total, wide.total]).toEqual([13, 13, 13])
       expect([first.hasMore, second.hasMore, wide.hasMore]).toEqual([true, false, false])
 
       const paged = [...first.items, ...second.items].map((item) => item.key)
 
-      expect(new Set(paged).size).toBe(12)
+      expect(new Set(paged).size).toBe(13)
       expect(paged).toEqual(wide.items.map((item) => item.key))
       expect([...paged].sort()).toEqual(ids.map((id) => `edition:${id}`).sort())
+    })
+
+    it('12 видань уміщуються на одній сторінці типового розміру: наступної немає', async () => {
+      const account = await registerAccount(app, 'as-twelve')
+      const word = token()
+      const workId = await createWork(account, word)
+
+      for (let index = 0; index < 12; index += 1) {
+        await createEdition(account, workId, { publisher: `Видавець ${String(index)}` })
+      }
+
+      const only = await search(account, word)
+
+      expect(only).toMatchObject({ page: 1, pageSize: 12, total: 12, hasMore: false })
+      expect(only.items).toHaveLength(12)
     })
 
     it('ISBN-запит: видання з точним ISBN — першим серед видань того самого твору', async () => {
@@ -332,7 +353,7 @@ describe('GET /me/library/add-search (e2e)', () => {
       const word = token()
       const workId = await createWork(account, word)
 
-      for (let index = 0; index < 12; index += 1) {
+      for (let index = 0; index < 13; index += 1) {
         await createEdition(account, workId, {
           publisher: `Видавець ${String(index)}`,
           year: 2000 + index,
@@ -341,13 +362,13 @@ describe('GET /me/library/add-search (e2e)', () => {
 
       googleBooks.returns([externalEdition('g1'), externalEdition('g2')])
 
-      // Сторінка 1 — 10 локальних видань, місця для зовнішніх немає й джерела не питаємо.
+      // Сторінка 1 — 12 локальних видань, місця для зовнішніх немає й джерела не питаємо.
       const first = await external(account, word)
 
       expect(first.items).toEqual([])
       expect(googleBooks.blocks).toEqual([])
 
-      // Сторінка 2: 2 останні локальні видання + 8 вільних місць для зовнішніх записів.
+      // Сторінка 2: останнє локальне видання + 11 вільних місць для зовнішніх записів.
       const second = await external(account, word, '&page=2')
 
       expect(
@@ -420,7 +441,7 @@ describe('GET /me/library/add-search (e2e)', () => {
         externalEdition('fresh-2'),
       ])
 
-      const result = await external(account, word, '&pageSize=10')
+      const result = await external(account, word)
       const keys = result.items.map((item) => item.key)
 
       expect(keys.filter((key) => key === `edition:${editionId}`)).toHaveLength(1)

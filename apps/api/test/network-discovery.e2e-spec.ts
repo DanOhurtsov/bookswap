@@ -168,25 +168,25 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
         data: { libraryVisibility: 'PUBLIC' },
       })
 
-      const response = await discover(`pageSize=50&q=${encodeURIComponent(tag)}`)
+      const response = await discover(`pageSize=48&q=${encodeURIComponent(tag)}`)
       const found = ids(response)
 
       expect(found).toContain(own.workId)
       expect(found).toContain(theirs.workId)
       expect(found).not.toContain(foreign.workId)
 
-      const browse = await discover('pageSize=50')
+      const browse = await discover('pageSize=48')
 
       expect(ids(browse)).toContain(theirs.workId)
       expect(ids(browse)).not.toContain(foreign.workId)
 
-      const again = await discover('pageSize=50')
+      const again = await discover('pageSize=48')
 
       expect(ids(again)).toEqual(ids(browse))
       expect(browse.scope).toBe('CIRCLE')
 
       // Порожній `?q=` — це теж перегляд, а не помилка.
-      expect(ids(await discover('pageSize=50&q='))).toEqual(ids(browse))
+      expect(ids(await discover('pageSize=48&q='))).toEqual(ids(browse))
     })
 
     it('видимість: PRIVATE примірник і PRIVATE бібліотека друга не показуються', async () => {
@@ -203,7 +203,7 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
       })
 
       try {
-        const found = ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=50`))
+        const found = ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=48`))
 
         expect(found).toContain(shown.workId)
         expect(found).not.toContain(hidden.workId)
@@ -223,17 +223,17 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
 
       const book = await shelve(blockedFriend, { title: `${tag} блоковані` })
 
-      expect(ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=50`))).toContain(book.workId)
+      expect(ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=48`))).toContain(book.workId)
 
       await request(http())
         .post(url(`/friends/${viewer.id}/block`))
         .set('Cookie', blockedFriend.cookie)
         .expect(204)
 
-      expect(ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=50`))).not.toContain(
+      expect(ids(await discover(`q=${encodeURIComponent(tag)}&pageSize=48`))).not.toContain(
         book.workId,
       )
-      expect(ids(await discover('pageSize=50'))).not.toContain(book.workId)
+      expect(ids(await discover('pageSize=48'))).not.toContain(book.workId)
 
       const info = await holders(book.workId)
 
@@ -252,7 +252,7 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
       await lend(friend, borrower, lent.copyId, '2026-12-31')
       await prisma.copy.update({ where: { id: off.copyId }, data: { status: 'UNAVAILABLE' } })
 
-      const query = `q=${encodeURIComponent(tag)}&pageSize=50`
+      const query = `q=${encodeURIComponent(tag)}&pageSize=48`
       const available = await discover(query)
 
       expect(ids(available)).toContain(free.workId)
@@ -304,7 +304,7 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
         title: `${tag} французька`,
         origLang: 'fr',
       })
-      const query = `q=${encodeURIComponent(tag)}&pageSize=50`
+      const query = `q=${encodeURIComponent(tag)}&pageSize=48`
 
       const uk = await discover(`${query}&language=uk`)
 
@@ -378,26 +378,39 @@ describe('Aggregated network discovery and "Who has this?" (e2e)', () => {
         .expect(409)
     })
 
-    it('пагінація перегляду: 12 творів → 10 + 2, hasMore правдивий', async () => {
+    it('пагінація перегляду: 13 творів → 12 + 1 за типового розміру, hasMore правдивий', async () => {
       const owner = await registerAccount(app, 'net-paging')
 
       await befriend(app, viewer, owner)
 
       const local = `qwpg${String(Date.now())} paging`
 
-      for (let index = 0; index < 12; index += 1) {
+      for (let index = 0; index < 13; index += 1) {
         await shelve(owner, { title: `${local} ${String(100 + index)}` })
       }
 
-      const first = await discover(`q=${encodeURIComponent(local)}&pageSize=10`)
-      const second = await discover(`q=${encodeURIComponent(local)}&pageSize=10&page=2`)
+      const first = await discover(`q=${encodeURIComponent(local)}`)
+      const second = await discover(`q=${encodeURIComponent(local)}&page=2`)
+      const wide = await discover(`q=${encodeURIComponent(local)}&pageSize=24`)
 
-      expect(first.results).toHaveLength(10)
+      expect(first.pageSize).toBe(12)
+      expect(first.results).toHaveLength(12)
       expect(first.hasMore).toBe(true)
-      expect(first.total).toBe(12)
-      expect(second.results).toHaveLength(2)
+      expect(first.total).toBe(13)
+      // The last page is short, never padded.
+      expect(second.results).toHaveLength(1)
       expect(second.hasMore).toBe(false)
-      expect(new Set([...ids(first), ...ids(second)]).size).toBe(12)
+      expect([...ids(first), ...ids(second)]).toEqual(ids(wide))
+      expect(new Set(ids(wide)).size).toBe(13)
+    })
+
+    it('колишні розміри 10/20/50 — 400', async () => {
+      for (const pageSize of ['10', '20', '50']) {
+        await request(app.getHttpServer())
+          .get(url(`/catalog/discover?pageSize=${pageSize}`))
+          .set('Cookie', viewer.cookie)
+          .expect(400)
+      }
     })
 
     it('успадкований режим ALL: без змін для тексту, але без фільтрів і без перегляду', async () => {

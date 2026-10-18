@@ -23,11 +23,17 @@ export const CATALOG_SEARCH_LIMIT = 20
  * Розкладає сторінку по джерелах {@link splitSearchPage}; рішення й наслідки —
  * `docs/plan/stage-9-search-pagination.md`.
  */
-export const SEARCH_PAGE_SIZES = [10, 20, 50] as const
+export const SEARCH_PAGE_SIZES = [12, 24, 36, 48] as const
 
 export type SearchPageSize = (typeof SEARCH_PAGE_SIZES)[number]
 
-export const DEFAULT_SEARCH_PAGE_SIZE: SearchPageSize = 10
+/**
+ * Кратні 12 — повні ряди сітки результатів за будь-якої кількості колонок
+ * (4/3/2/1, BS-134); типові 12 — це 4×3 у контейнері 1440 px. Колишні 10/20/50
+ * більше не розміри: стара адреса з ними — недопустима, і сторінка виправляє її
+ * на першу сторінку типового розміру.
+ */
+export const DEFAULT_SEARCH_PAGE_SIZE: SearchPageSize = 12
 
 /**
  * Найбільший номер сторінки, який приймає пошук (1-based).
@@ -405,8 +411,16 @@ export const SEARCH_CANDIDATES_LIMIT = 10
  * Той самий вхід, що й у `/catalog/search`. Без `page`/`pageSize` це рівно
  * перший екран — топ-{@link SEARCH_CANDIDATES_LIMIT}, і саме так його кличе
  * перевірка дублікатів: вона НЕ залежить від сторінки, яку зараз гортає майстер.
+ *
+ * Тому `pageSize` тут необов'язковий і без типового значення: відсутній означає
+ * власну межу перевірки дублікатів (її підставляє сервер), а не
+ * {@link DEFAULT_SEARCH_PAGE_SIZE}. Ця межа не є розміром сторінки списку й
+ * від нього не залежить; явний `pageSize` — лише з {@link SEARCH_PAGE_SIZES}.
  */
-export const searchCandidatesRequestSchema = catalogSearchRequestSchema
+export const searchCandidatesRequestSchema = catalogQuerySchema.extend({
+  page: searchPageSchema.default(1),
+  pageSize: searchPageSizeSchema.optional(),
+})
 
 export type SearchCandidatesRequest = z.infer<typeof searchCandidatesRequestSchema>
 

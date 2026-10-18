@@ -1,32 +1,31 @@
-import {
-  AUTO_SEARCH_EXTERNAL_MIN_CHARS,
-  AUTO_SEARCH_LOCAL_MIN_CHARS,
-  AUTO_SEARCH_RESULT_LIMIT,
-} from '@bookswap/shared'
+import { AUTO_SEARCH_EXTERNAL_MIN_CHARS, AUTO_SEARCH_LOCAL_MIN_CHARS } from '@bookswap/shared'
 
 /**
- * Автопошук під час введення (`/catalog/new`): пороги й затримки в одному місці.
+ * Search while typing (`/catalog/new`): thresholds and delays in one place.
  *
- * Пороги й ліміт спільні із сервером (`@bookswap/shared`) — сервер перевіряє їх сам, а не довіряє
- * браузеру. Затримки — лише справа клієнта; кожна зміна тексту перезапускає обидва таймери.
+ * The thresholds are shared with the server (`@bookswap/shared`). The delays are the client's alone;
+ * every change of the text restarts both timers. Since BS-134 typing runs the full paged search, not
+ * limited suggestions.
  */
 export const AUTO_LOCAL_MIN_CHARS = AUTO_SEARCH_LOCAL_MIN_CHARS
 export const AUTO_EXTERNAL_MIN_CHARS = AUTO_SEARCH_EXTERNAL_MIN_CHARS
-export const AUTO_RESULT_LIMIT = AUTO_SEARCH_RESULT_LIMIT
 
-/** Пауза після останньої зміни тексту перед пошуком у НАШОМУ каталозі. */
+/** Pause after the last change of the text before the search (its first page, our catalog). */
 export const AUTO_LOCAL_DELAY_MS = 350
-/** Пауза після останньої зміни тексту перед ОБМЕЖЕНИМ зовнішнім пошуком (Google Books, один запит). */
+/** Pause after the last change of the text before the search's external half is asked. */
 export const AUTO_EXTERNAL_DELAY_MS = 900
 
-/** Адреса автопошуку несе цей параметр; без нього `q` — виконаний повний пошук. */
-export const AUTO_PARAM = 'auto'
+/**
+ * Before BS-134 addresses of limited suggestions carried `auto=1`. Nothing writes it any more; an old
+ * link with it opens the full search of the same `q`, and the address is corrected without it.
+ */
+export const LEGACY_AUTO_PARAM = 'auto'
 
 /**
- * Нормалізований запит: NFC, зайві пробіли згорнуті, краї обрізані.
+ * The normalized query: NFC, runs of whitespace collapsed, edges trimmed.
  *
- * Порівнюються саме нормалізовані рядки: «кобзар », «кобзар» і «кобзар  » — один запит, а зміна лише
- * пробілів не запускає нового пошуку.
+ * Normalized strings are what is compared: «кобзар », «кобзар» and «кобзар  » are one query, and a
+ * change of whitespace alone starts no new search.
  */
 export function normalizeQuery(text: string): string {
   return text.normalize('NFC').replace(/\s+/gu, ' ').trim()

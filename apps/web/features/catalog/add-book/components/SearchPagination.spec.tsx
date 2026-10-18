@@ -20,7 +20,7 @@ function renderPagination(
   render(
     <SearchPagination
       page={1}
-      pageSize={10}
+      pageSize={12}
       next="NONE"
       currentHasRows
       hrefFor={({ page, pageSize }) => `/catalog?page=${String(page)}&pageSize=${String(pageSize)}`}
@@ -38,7 +38,7 @@ describe('SearchPagination', () => {
 
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Результатів на сторінці' })).toHaveTextContent(
-      '10',
+      '12',
     )
   })
 
@@ -65,11 +65,11 @@ describe('SearchPagination', () => {
 
     expect(screen.getByRole('link', { name: 'Попередня сторінка' })).toHaveAttribute(
       'href',
-      '/catalog?page=1&pageSize=10',
+      '/catalog?page=1&pageSize=12',
     )
     expect(screen.getByRole('link', { name: 'Наступна сторінка' })).toHaveAttribute(
       'href',
-      '/catalog?page=3&pageSize=10',
+      '/catalog?page=3&pageSize=12',
     )
   })
 
@@ -106,28 +106,29 @@ describe('SearchPagination', () => {
   })
 
   it('посилання несуть поточний розмір сторінки', () => {
-    renderPagination({ page: 1, pageSize: 50, next: 'PROVEN' })
+    renderPagination({ page: 1, pageSize: 48, next: 'PROVEN' })
 
     expect(screen.getByRole('link', { name: 'Наступна сторінка' })).toHaveAttribute(
       'href',
-      '/catalog?page=2&pageSize=50',
+      '/catalog?page=2&pageSize=48',
     )
   })
 
-  it('вибір 10 / 20 / 50 повідомляє обробник', async () => {
+  it('вибір 12 / 24 / 36 / 48 повідомляє обробник', async () => {
     const { onPageSizeChange } = renderPagination()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole('combobox', { name: 'Результатів на сторінці' }))
 
     expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([
-      '10',
-      '20',
-      '50',
+      '12',
+      '24',
+      '36',
+      '48',
     ])
 
-    await user.click(screen.getByRole('option', { name: '20' }))
+    await user.click(screen.getByRole('option', { name: '36' }))
 
-    expect(onPageSizeChange).toHaveBeenCalledWith(20)
+    expect(onPageSizeChange).toHaveBeenCalledWith(36)
   })
 })

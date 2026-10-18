@@ -87,15 +87,17 @@ const lookupIdle: KeyedState<string> = { status: 'idle' }
 /** A settled full search of "kobzar" on page 1 with nothing found anywhere. */
 const settledEmpty: SearchResultsViewInput<string> = {
   enabled: true,
-  autoActive: false,
+  typing: false,
   page: 1,
   isbn: undefined,
   fresh: local(),
   requestStatus: 'ready',
   stale: undefined,
   external: externalReady(),
+  externalHeld: false,
   lookup: lookupIdle,
   localPending: false,
+  ahead: { local: undefined, external: undefined, externalAsked: true },
 }
 
 const view = (overrides: Partial<SearchResultsViewInput<string>> = {}) =>
@@ -108,15 +110,15 @@ describe('searchResultsView — response', () => {
     expect(view({ fresh, stale: local() }).response).toBe(fresh)
   })
 
-  it('keeps the previous suggestions while the next ones load', () => {
+  it('keeps the previous list of a typed search while the next one loads', () => {
     const stale = local({ items: [workItem] })
-    const shown = view({ autoActive: true, fresh: undefined, stale })
+    const shown = view({ typing: true, fresh: undefined, stale })
 
     expect(shown.response).toBe(stale)
     expect(shown.items).toEqual([workItem])
   })
 
-  it('never shows a stale answer outside suggestion mode', () => {
+  it('never shows a stale answer for a search that was not typed', () => {
     expect(view({ fresh: undefined, stale: local({ items: [workItem] }) }).response).toBeUndefined()
   })
 })
@@ -175,26 +177,61 @@ describe('searchResultsView — rows and pagination', () => {
   })
 })
 
+describe('searchResultsView — next with the page loaded ahead', () => {
+  const unknown = { external: externalReady({ more: 'UNKNOWN' }) }
+  const endedAhead = {
+    local: { status: 'success' as const, data: local() },
+    external: {
+      status: 'success' as const,
+      data: { ...local(), results: [], sources: [], more: 'NO' as const, complete: true },
+    },
+    externalAsked: true,
+  }
+
+  it('the controls take the page ahead into account; the loading ahead does not', () => {
+    const shown = view({ ...unknown, ahead: endedAhead })
+
+    expect(shown.next).toBe('NONE')
+    expect(shown.pageNext).toBe('POSSIBLE')
+  })
+
+  it('a final, empty next page withdraws the page’s own PROVEN from the controls only', () => {
+    const shown = view({ external: externalReady({ more: 'YES' }), ahead: endedAhead })
+
+    expect(shown.next).toBe('NONE')
+    expect(shown.pageNext).toBe('PROVEN')
+  })
+
+  it('under a stale list the page ahead belongs to another query and is ignored', () => {
+    const shown = view({
+      ...unknown,
+      typing: true,
+      fresh: undefined,
+      stale: local(),
+      requestStatus: 'loading',
+      ahead: endedAhead,
+    })
+
+    expect(shown.next).toBe(shown.pageNext)
+  })
+})
+
 describe('searchResultsView — emptyState', () => {
   it('says plain "nothing" when both halves settled empty', () => {
     expect(view().emptyState).toBe('PLAIN')
   })
 
   it('is silent while the fresh answer is not in, even with a stale list on screen', () => {
-    expect(view({ autoActive: true, fresh: undefined, stale: local() }).emptyState).toBeUndefined()
+    expect(view({ typing: true, fresh: undefined, stale: local() }).emptyState).toBeUndefined()
   })
 
   it.each<[string, Partial<SearchResultsViewInput<string>>]>([
     ['the external half is loading', { external: { status: 'loading' } }],
     ['the external page is incomplete', { external: externalReady({ complete: false }) }],
     ['the ISBN lookup is loading', { isbn: ISBN, lookup: { status: 'loading' } }],
-    ['suggestions wait for the debounce', { autoActive: true, localPending: true }],
+    ['typed text waits for the debounce', { localPending: true }],
   ])('is silent while %s', (_name, overrides) => {
     expect(view(overrides).emptyState).toBeUndefined()
-  })
-
-  it('ignores the debounce outside suggestion mode', () => {
-    expect(view({ localPending: true }).emptyState).toBe('PLAIN')
   })
 
   it('is silent when anything was found', () => {
@@ -214,13 +251,19 @@ describe('searchResultsView — emptyState', () => {
     ).toBe('BLIND')
   })
 
-  it('explains that suggestions did not ask the external catalogs yet', () => {
-    expect(view({ autoActive: true, external: IDLE_EXTERNAL_SEARCH }).emptyState).toBe('AUTO_IDLE')
+  it('explains that typed text too short for the sources did not ask them', () => {
+    expect(view({ externalHeld: true, external: IDLE_EXTERNAL_SEARCH }).emptyState).toBe(
+      'AUTO_IDLE',
+    )
   })
 
-  it('prefers "blind" over "suggestions are idle"', () => {
+  it('an ISBN or a too short query without asking the sources is plain "nothing"', () => {
+    expect(view({ external: IDLE_EXTERNAL_SEARCH }).emptyState).toBe('PLAIN')
+  })
+
+  it('prefers "blind" over "the sources were held"', () => {
     expect(
-      view({ autoActive: true, external: { status: 'failed', message: 'x' } }).emptyState,
+      view({ externalHeld: true, external: { status: 'failed', message: 'x' } }).emptyState,
     ).toBe('BLIND')
   })
 
@@ -247,51 +290,13 @@ describe('searchResultsView — pageEmpty', () => {
   })
 })
 
-describe('searchResultsView — showUnavailableNotice', () => {
-  const suggestions = { autoActive: true, fresh: local({ items: [workItem] }) }
-
-  it('shows one neutral line when a source failed or did not answer in suggestion mode', () => {
-    expect(
-      view({ ...suggestions, external: { status: 'failed', message: 'x' } }).showUnavailableNotice,
-    ).toBe(true)
-    expect(
-      view({
-        ...suggestions,
-        external: externalReady({ sources: [{ source: 'GOOGLE_BOOKS', status: 'RATE_LIMITED' }] }),
-      }).showUnavailableNotice,
-    ).toBe(true)
-  })
-
-  it('is absent when every source answered', () => {
-    expect(view({ ...suggestions, external: externalReady() }).showUnavailableNotice).toBe(false)
-  })
-
-  it('is absent outside suggestion mode: the full search has its own status', () => {
-    expect(view({ external: { status: 'failed', message: 'x' } }).showUnavailableNotice).toBe(false)
-  })
-
-  it('yields to the empty-state sentence, which already says the sources did not answer', () => {
-    const empty = view({
-      autoActive: true,
-      external: { status: 'failed', message: 'x' },
-    })
-
-    expect(empty.emptyState).toBe('BLIND')
-    expect(empty.showUnavailableNotice).toBe(false)
-  })
-})
-
 describe('searchResultsView — localLoading', () => {
   it('is on while the local request is in flight', () => {
     expect(view({ fresh: undefined, requestStatus: 'loading' }).localLoading).toBe(true)
   })
 
-  it('is on in suggestion mode while the typed text has not reached the address', () => {
-    expect(view({ autoActive: true, localPending: true }).localLoading).toBe(true)
-  })
-
-  it('ignores the pending text outside suggestion mode', () => {
-    expect(view({ localPending: true }).localLoading).toBe(false)
+  it('is on while the typed text has not reached the address', () => {
+    expect(view({ localPending: true }).localLoading).toBe(true)
   })
 
   it('is off once the answer is in', () => {
@@ -299,20 +304,24 @@ describe('searchResultsView — localLoading', () => {
   })
 })
 
-describe('searchResultsView — showAllResults', () => {
-  it('is offered once the suggestions answer is in', () => {
-    expect(view({ autoActive: true }).showAllResults).toBe(true)
+describe('searchResultsView — settled', () => {
+  it('is the final page: fresh answer, both halves and the lookup done, no typed text on its way', () => {
+    expect(view().settled).toBe(true)
   })
 
-  it('is not offered on a stale list while the next answer loads', () => {
-    expect(
-      view({ autoActive: true, fresh: undefined, stale: local(), requestStatus: 'loading' })
-        .showAllResults,
-    ).toBe(false)
+  it.each<[string, Partial<SearchResultsViewInput<string>>]>([
+    ['the local answer is not in', { fresh: undefined, requestStatus: 'loading' }],
+    ['only a stale list is on screen', { typing: true, fresh: undefined, stale: local() }],
+    ['the external half is loading', { external: { status: 'loading' } }],
+    ['the external page is incomplete', { external: externalReady({ complete: false }) }],
+    ['the ISBN lookup is loading', { isbn: ISBN, lookup: { status: 'loading' } }],
+    ['typed text waits for the debounce', { localPending: true }],
+  ])('is false while %s', (_name, overrides) => {
+    expect(view(overrides).settled).toBe(false)
   })
 
-  it('is not offered outside suggestion mode', () => {
-    expect(view().showAllResults).toBe(false)
+  it('a failed external half is final too (the empty state says so)', () => {
+    expect(view({ external: { status: 'failed', message: 'x' } }).settled).toBe(true)
   })
 })
 
@@ -328,6 +337,17 @@ describe('searchResultsView — showPagination', () => {
   })
 
   it('is hidden when the full search is not the one executed', () => {
-    expect(view({ enabled: false, autoActive: true }).showPagination).toBe(false)
+    expect(view({ enabled: false }).showPagination).toBe(false)
+  })
+
+  it('is hidden under a stale list: its links would promise pages of another query', () => {
+    expect(
+      view({
+        typing: true,
+        fresh: undefined,
+        stale: local({ hasMore: true }),
+        requestStatus: 'loading',
+      }).showPagination,
+    ).toBe(false)
   })
 })

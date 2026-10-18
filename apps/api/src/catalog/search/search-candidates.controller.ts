@@ -1,6 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common'
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
-import type { SearchCandidatesResponse } from '@bookswap/shared'
+import { SEARCH_CANDIDATES_LIMIT, type SearchCandidatesResponse } from '@bookswap/shared'
 import { SessionGuard } from '../../auth/session.guard'
 import { SearchCandidatesQueryDto } from './dto/search-candidates-query.dto'
 import { SearchCandidatesService } from './search-candidates.service'
@@ -18,6 +18,7 @@ export class SearchCandidatesController {
   @UseGuards(ThrottlerGuard)
   @Throttle(SEARCH_CANDIDATES_RATE_LIMIT)
   candidates(@Query() dto: SearchCandidatesQueryDto): Promise<SearchCandidatesResponse> {
-    return this.search.search(dto.q, dto.page, dto.pageSize)
+    // No size asked: the duplicate check's own top-N, never the list's default page size.
+    return this.search.search(dto.q, dto.page, dto.pageSize ?? SEARCH_CANDIDATES_LIMIT)
   }
 }

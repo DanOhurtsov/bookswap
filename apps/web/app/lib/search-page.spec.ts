@@ -36,31 +36,65 @@ describe('pageSizeFromParam', () => {
     expect(pageSizeFromParam(null)).toBe(DEFAULT_SEARCH_PAGE_SIZE)
   })
 
-  it.each(['10', '20', '50'])('приймає %s', (raw) => {
+  it.each(['12', '24', '36', '48'])('приймає %s', (raw) => {
     expect(pageSizeFromParam(raw)).toBe(Number(raw))
   })
 
-  it.each(['0', '5', '15', '100', 'abc'])('%s — не розмір сторінки', (raw) => {
+  // 10, 20 і 50 — колишні розміри.
+  it.each(['0', '5', '10', '15', '20', '50', '100', 'abc'])('%s — не розмір сторінки', (raw) => {
     expect(pageSizeFromParam(raw)).toBeUndefined()
   })
 })
 
 describe('readSearchAddress', () => {
   it('читає q, page і pageSize', () => {
-    expect(readSearchAddress(new URLSearchParams('q=тигр&page=3&pageSize=20'))).toEqual({
+    expect(readSearchAddress(new URLSearchParams('q=тигр&page=3&pageSize=24'))).toEqual({
       q: 'тигр',
       page: 3,
-      pageSize: 20,
+      pageSize: 24,
       valid: true,
     })
   })
 
-  it('поламане значення дає першу сторінку типового розміру й valid=false', () => {
-    expect(readSearchAddress(new URLSearchParams('q=x&page=abc'))).toMatchObject({
+  it('без page і pageSize — перша сторінка типового розміру, і адреса допустима', () => {
+    expect(readSearchAddress(new URLSearchParams('q=тигр'))).toEqual({
+      q: 'тигр',
       page: 1,
-      valid: false,
+      pageSize: DEFAULT_SEARCH_PAGE_SIZE,
+      valid: true,
     })
-    expect(readSearchAddress(new URLSearchParams('q=x&pageSize=7'))).toMatchObject({
+  })
+
+  // 10, 20 і 50 — колишні розміри. Сторінка 3 зі старим розміром — не сторінка 3 нового: пара
+  // page/pageSize має сенс лише разом, тож скидається цілком, а не лише розмір.
+  it.each(['10', '20', '50'])(
+    'стара адреса page=3&pageSize=%s — перша сторінка типового розміру, запит той самий',
+    (raw) => {
+      expect(readSearchAddress(new URLSearchParams(`q=тигр&page=3&pageSize=${raw}`))).toEqual({
+        q: 'тигр',
+        page: 1,
+        pageSize: DEFAULT_SEARCH_PAGE_SIZE,
+        valid: false,
+      })
+    },
+  )
+
+  it.each(['abc', '0', '999'])(
+    'недопустимий page=%s з допустимим pageSize=24 — та сама пара 1 і типовий розмір',
+    (raw) => {
+      expect(readSearchAddress(new URLSearchParams(`q=тигр&page=${raw}&pageSize=24`))).toEqual({
+        q: 'тигр',
+        page: 1,
+        pageSize: DEFAULT_SEARCH_PAGE_SIZE,
+        valid: false,
+      })
+    },
+  )
+
+  it('недопустимий розмір без page — та сама нормалізована пара', () => {
+    expect(readSearchAddress(new URLSearchParams('q=x&pageSize=7'))).toEqual({
+      q: 'x',
+      page: 1,
       pageSize: DEFAULT_SEARCH_PAGE_SIZE,
       valid: false,
     })
@@ -70,20 +104,20 @@ describe('readSearchAddress', () => {
 describe('searchHref', () => {
   const none = new URLSearchParams()
 
-  it('канонічна адреса мінімальна: без page=1 і без типового pageSize', () => {
-    expect(searchHref('/catalog', none, { q: 'Тигр', page: 1, pageSize: 10 })).toBe(
+  it('канонічна адреса мінімальна: без page=1 і без типового pageSize=12', () => {
+    expect(searchHref('/catalog', none, { q: 'Тигр', page: 1, pageSize: 12 })).toBe(
       '/catalog?q=%D0%A2%D0%B8%D0%B3%D1%80',
     )
   })
 
   it('глибша сторінка й нетиповий розмір їдуть в адресі', () => {
-    expect(searchHref('/catalog', none, { q: 'a b', page: 2, pageSize: 50 })).toBe(
-      '/catalog?q=a+b&page=2&pageSize=50',
+    expect(searchHref('/catalog', none, { q: 'a b', page: 2, pageSize: 48 })).toBe(
+      '/catalog?q=a+b&page=2&pageSize=48',
     )
   })
 
   it('екранує запит — інакше «&» у назві розірвав би адресу', () => {
-    expect(searchHref('/catalog', none, { q: 'Ніч & день', page: 2, pageSize: 10 })).toContain(
+    expect(searchHref('/catalog', none, { q: 'Ніч & день', page: 2, pageSize: 12 })).toContain(
       '%26',
     )
   })
@@ -91,12 +125,12 @@ describe('searchHref', () => {
   it('переносить параметри сторінки додавання, окрім названих у drop', () => {
     const current = new URLSearchParams('q=old&page=4&mode=scan&workId=w1&external=tok')
 
-    expect(searchHref('/catalog/new', current, { q: 'new', page: 1, pageSize: 20 })).toBe(
-      '/catalog/new?q=new&pageSize=20&mode=scan&workId=w1&external=tok',
+    expect(searchHref('/catalog/new', current, { q: 'new', page: 1, pageSize: 24 })).toBe(
+      '/catalog/new?q=new&pageSize=24&mode=scan&workId=w1&external=tok',
     )
     expect(
-      searchHref('/catalog/new', current, { q: 'new', page: 1, pageSize: 20 }, ['external']),
-    ).toBe('/catalog/new?q=new&pageSize=20&mode=scan&workId=w1')
+      searchHref('/catalog/new', current, { q: 'new', page: 1, pageSize: 24 }, ['external']),
+    ).toBe('/catalog/new?q=new&pageSize=24&mode=scan&workId=w1')
   })
 })
 

@@ -2,6 +2,23 @@ import type { ReactNode } from 'react'
 import { BookCover } from '@/components/BookCover'
 import { cn } from '@/lib/utils'
 
+type ResultCardGridProps = {
+  /** `ResultCardShell` items. */
+  children: ReactNode
+}
+
+/**
+ * The one geometry of search results on `/catalog` and `/catalog/new` (BS-134): 1–4 columns by the
+ * width of the list itself — `.result-grid` in `globals.css` owns the thresholds.
+ */
+export function ResultCardGrid({ children }: ResultCardGridProps) {
+  return (
+    <div className="result-grid">
+      <ul>{children}</ul>
+    </div>
+  )
+}
+
 type ResultCardShellBaseProps = {
   title: ReactNode
   coverUrl?: string | undefined
@@ -29,13 +46,14 @@ export function ResultCardShell(props: ResultCardShellProps) {
     <li
       data-slot="result-card"
       className={cn(
-        'grid grid-cols-[auto_minmax(0,1fr)] gap-[0.85rem] rounded-md border border-(--line) px-4 py-[0.9rem]',
+        'grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-[0.85rem] rounded-md border border-(--line) px-4 py-[0.9rem]',
         onSelect !== undefined && 'relative hover:border-(--bookswap-muted)',
       )}
     >
       <BookCover url={coverUrl} alt={coverAlt} />
 
-      <div className="grid min-w-0 content-start justify-items-start gap-1">
+      {/* In a grid column a title, an author or an ISBN with no spaces must break, not widen the card. */}
+      <div className="grid min-w-0 content-start justify-items-start gap-1 wrap-anywhere">
         {props.showBadge === true && (
           <span className="rounded-[1rem] border border-(--line) px-2 py-[0.05rem] text-[0.8rem] text-(--bookswap-muted)">
             {props.badge}

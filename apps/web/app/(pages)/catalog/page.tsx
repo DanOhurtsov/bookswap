@@ -7,7 +7,6 @@ import {
   CATALOG_DISCOVERY_AVAILABILITY,
   CATALOG_DISCOVERY_TRANSLATION,
   DEFAULT_SEARCH_PAGE_SIZE,
-  SEARCH_MAX_PAGE,
   catalogQuerySchema,
   type CatalogDiscoveryScope,
 } from '@bookswap/shared'
@@ -20,13 +19,17 @@ import {
   type DiscoveryFilters,
 } from '@/app/lib/discovery-filters'
 import { readSearchAddress, type SearchAddress } from '@/app/lib/search-page'
-import { useCatalogDiscovery } from '@/app/lib/use-catalog'
+import { discoveryNextPage, useCatalogDiscovery } from '@/app/lib/use-catalog'
 import { useSession } from '@/app/lib/use-session'
 import { FieldErrors, validate } from '@/app/lib/validation'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
 import { LanguageSelect } from '@/components/Form/LanguageSelect'
-import { LocalResultCard, SearchPagination } from '@/features/catalog/add-book/index.client'
+import {
+  LocalResultCard,
+  ResultCardGrid,
+  SearchPagination,
+} from '@/features/catalog/add-book/index.client'
 import { NetworkOwnerCopies } from '@/features/network/index.client'
 
 export default function CatalogPage() {
@@ -66,10 +69,39 @@ const SCOPE_OPTIONS = [
 const AVAILABILITY_OPTIONS = labelledOptions(CATALOG_DISCOVERY_AVAILABILITY, AVAILABILITY_LABELS)
 const TRANSLATION_OPTIONS = labelledOptions(CATALOG_DISCOVERY_TRANSLATION, TRANSLATION_LABELS)
 
+/** The session guard: the search below needs the viewer, whose cached pages it reads. */
 function CatalogDiscovery() {
   const router = useRouter()
-  const parameters = useSearchParams()
   const { state: session } = useSession()
+
+  useEffect(() => {
+    if (session.status === 'guest') router.replace('/login')
+  }, [session.status, router])
+
+  if (session.status === 'loading') {
+    return (
+      <Shell>
+        <p className="status status--pending">Перевіряю сесію…</p>
+      </Shell>
+    )
+  }
+
+  if (session.status !== 'authenticated') {
+    return (
+      <Shell>
+        <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
+      </Shell>
+    )
+  }
+
+  return <CatalogSearch viewerId={session.user.id} />
+}
+
+type CatalogSearchProps = { viewerId: string }
+
+function CatalogSearch({ viewerId }: CatalogSearchProps) {
+  const router = useRouter()
+  const parameters = useSearchParams()
   const address = readSearchAddress(parameters)
   const { q: submitted, page, pageSize } = address
   const rawScope = parameters.get('scope')
@@ -80,7 +112,10 @@ function CatalogDiscovery() {
   const [refresh, setRefresh] = useState(0)
   const [errors, setErrors] = useState<FieldErrors>({})
   const { filters, valid: filtersValid } = readDiscoveryFilters(parameters)
-  const search = useCatalogDiscovery(submitted, page, pageSize, scope, filters, refresh)
+  const search = useCatalogDiscovery(
+    { viewerId, query: submitted, pageSize, scope, filters, refresh },
+    page,
+  )
 
   function hrefFor(
     target: SearchAddress,
@@ -89,10 +124,6 @@ function CatalogDiscovery() {
   ): string {
     return discoveryHref(target, targetScope, targetFilters)
   }
-
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
 
   if (submitted !== syncedWith) {
     setSyncedWith(submitted)
@@ -131,22 +162,6 @@ function CatalogDiscovery() {
     } else {
       router.push(hrefFor({ q: parsed.data.q, page: 1, pageSize }))
     }
-  }
-
-  if (session.status === 'loading') {
-    return (
-      <Shell>
-        <p className="status status--pending">Перевіряю сесію…</p>
-      </Shell>
-    )
-  }
-
-  if (session.status !== 'authenticated') {
-    return (
-      <Shell>
-        <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </Shell>
-    )
   }
 
   const response = search.status === 'ready' ? search.response : undefined
@@ -239,7 +254,7 @@ function CatalogDiscovery() {
       {search.status === 'error' && <FormStatus error={new Error(search.message)} />}
 
       {response !== undefined && response.results.length > 0 && (
-        <ul className="books">
+        <ResultCardGrid>
           {response.results.map((result) => (
             <LocalResultCard
               key={result.work.id}
@@ -255,7 +270,7 @@ function CatalogDiscovery() {
               )}
             />
           ))}
-        </ul>
+        </ResultCardGrid>
       )}
 
       {response !== undefined && response.results.length === 0 && (
@@ -272,7 +287,7 @@ function CatalogDiscovery() {
         <SearchPagination
           page={page}
           pageSize={pageSize}
-          next={response?.hasMore === true && page < SEARCH_MAX_PAGE ? 'PROVEN' : 'NONE'}
+          next={discoveryNextPage(page, response)}
           currentHasRows={(response?.results.length ?? 0) > 0}
           hrefFor={(target) => hrefFor({ q: submitted, ...target })}
           onPageSizeChange={(size) => {

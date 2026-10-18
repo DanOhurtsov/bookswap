@@ -5,6 +5,7 @@ import type { App } from 'supertest/types'
 import {
   API_ERROR_CODES,
   API_PREFIX,
+  DEFAULT_SEARCH_PAGE_SIZE,
   apiErrorSchema,
   catalogSearchResponseSchema,
   externalSearchResponseSchema,
@@ -287,8 +288,8 @@ describe('GET /catalog/search/external (e2e)', () => {
       const first = await page(QUERY, 1)
       const second = await page(QUERY, 2)
 
-      expect(first.results).toHaveLength(10)
-      expect(second.results).toHaveLength(10)
+      expect(first.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
+      expect(second.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
       expect(first.results.map((result) => result.id)).not.toEqual(
         second.results.map((result) => result.id),
       )
@@ -312,56 +313,80 @@ describe('GET /catalog/search/external (e2e)', () => {
       )
     })
 
-    it('«Далі» обіцяють лише за доказом наступного запису', async () => {
-      openLibrary.streams(series(10))
+    it('«Далі» обіцяють лише за доказом наступного запису: 12 уміщуються, 13-й — наступна сторінка', async () => {
+      openLibrary.streams(series(DEFAULT_SEARCH_PAGE_SIZE))
 
-      await expect(page(QUERY, 1)).resolves.toMatchObject({ more: 'NO', complete: true })
+      await expect(page(QUERY, 1)).resolves.toMatchObject({
+        pageSize: 12,
+        more: 'NO',
+        complete: true,
+      })
 
       app.get(ExternalSearchCache).clear()
-      openLibrary.streams(series(11))
+      openLibrary.streams(series(DEFAULT_SEARCH_PAGE_SIZE + 1))
 
       await expect(page(QUERY, 1)).resolves.toMatchObject({ more: 'YES' })
     })
 
-    it('pageSize=20 — двадцять карток, а не «10 + 10»; довантаження за complete', async () => {
+    it('pageSize=24 — двадцять чотири картки, а не «12 + 12»; довантаження за complete', async () => {
       openLibrary.streams(series(45))
 
-      let response = await page(QUERY, 1, 20)
+      let response = await page(QUERY, 1, 24)
       let asks = 1
 
       while (!response.complete && asks < 10) {
-        response = await page(QUERY, 1, 20)
+        response = await page(QUERY, 1, 24)
         asks += 1
       }
 
-      expect(response.results).toHaveLength(20)
-      expect(response.pageSize).toBe(20)
-      expect(response.more).toBe('YES')
+      expect(response.results).toHaveLength(24)
+      expect(response.pageSize).toBe(24)
+      // The proof (the 25th record) lies in the next block of 24, which one request does not read
+      // after the page is full: no promise yet. The next ask reads that block and proves it.
+      expect(response.more).toBe('UNKNOWN')
+      await expect(page(QUERY, 1, 24)).resolves.toMatchObject({ more: 'YES' })
+    })
+
+    it('остання сторінка коротша й не доповнюється: 13 записів → 12 + 1', async () => {
+      openLibrary.streams(series(13))
+
+      const first = await page(QUERY, 1)
+      const second = await page(QUERY, 2)
+
+      expect(first).toMatchObject({ more: 'YES', complete: true })
+      expect(second).toMatchObject({ more: 'NO', complete: true })
+      expect([...first.results, ...second.results].map((result) => result.title)).toEqual(
+        series(13).map((result) => result.title),
+      )
     })
 
     it('глибока сторінка на холодному кеші не хибно порожня: complete=false, потім записи', async () => {
       openLibrary.streams(series(60))
 
-      let response = await page(QUERY, 4, 10)
+      let response = await page(QUERY, 4)
 
       expect(response).toMatchObject({ results: [], complete: false, more: 'UNKNOWN' })
 
       let asks = 1
 
       while (!response.complete && asks < 10) {
-        response = await page(QUERY, 4, 10)
+        response = await page(QUERY, 4)
         asks += 1
       }
 
-      expect(response.results).toHaveLength(10)
-      expect(response.results[0]?.title).toBe('Книжка 30')
+      // Page 4 of 12 starts at the 37th record.
+      expect(response.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
+      expect(response.results[0]?.title).toBe('Книжка 36')
     })
 
     it('недопустимий pageSize — 400 і жодного звернення до провайдера', async () => {
-      await request(app.getHttpServer())
-        .get(url(`/catalog/search/external?q=${QUERY}&pageSize=15`))
-        .set('Cookie', cookie)
-        .expect(400)
+      // 10, 20 і 50 — колишні розміри.
+      for (const pageSize of ['15', '10', '20', '50']) {
+        await request(app.getHttpServer())
+          .get(url(`/catalog/search/external?q=${QUERY}&pageSize=${pageSize}`))
+          .set('Cookie', cookie)
+          .expect(400)
+      }
 
       expect(openLibrary.queries).toEqual([])
     })
@@ -385,7 +410,7 @@ describe('GET /catalog/search/external (e2e)', () => {
 
       const second = await page(QUERY, 2)
 
-      expect(second.results).toHaveLength(10)
+      expect(second.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
       expect(second.sources).toEqual(
         expect.arrayContaining([{ source: 'GOOGLE_BOOKS', status: 'ERROR' }]),
       )
@@ -448,30 +473,42 @@ describe('GET /catalog/search/external (e2e)', () => {
       }
     }
 
-    it('локальна й зовнішня частини разом дають рівно pageSize карток, без повторів між сторінками', async () => {
-      const token = `змш${String(process.pid)}${String(Date.now() % 100_000)}`
-      await createLocalWorks(token, 3)
-      openLibrary.streams(
-        Array.from({ length: 30 }, (_, index) =>
-          work(
-            `OL${String(index).padStart(2, '0')}W`,
-            `Змішана ${token} зовн ${String(index).padStart(2, '0')}`,
+    it.each([DEFAULT_SEARCH_PAGE_SIZE, 24])(
+      'локальна й зовнішня частини разом дають рівно pageSize=%s карток, без повторів між сторінками',
+      async (size) => {
+        const token = `змш${String(size)}${String(process.pid)}${String(Date.now() % 100_000)}`
+        await createLocalWorks(token, 3)
+        openLibrary.streams(
+          Array.from({ length: 30 }, (_, index) =>
+            work(
+              `OL${String(index).padStart(2, '0')}W`,
+              `Змішана ${token} зовн ${String(index).padStart(2, '0')}`,
+            ),
           ),
-        ),
-      )
+        )
 
-      const query = `Змішана ${token}`
-      const first = await both(query, 1, 10)
+        const query = `Змішана ${token}`
+        const first = await both(query, 1, size)
 
-      expect(first.local.total).toBeGreaterThanOrEqual(3)
-      expect(first.local.results.length + first.external.results.length).toBe(10)
+        expect(first.local.total).toBeGreaterThanOrEqual(3)
+        expect(first.local.results.length + first.external.results.length).toBe(size)
 
-      // Друга сторінка починається з того місця пулу, де скінчилася перша.
-      const second = await both(query, 2, 10)
-      const ids = [...first.external.results, ...second.external.results].map((result) => result.id)
+        // Друга сторінка починається з того місця пулу, де скінчилася перша.
+        const second = await both(query, 2, size)
+        const ids = [...first.external.results, ...second.external.results].map(
+          (result) => result.id,
+        )
 
-      expect(new Set(ids).size).toBe(ids.length)
-    })
+        expect(new Set(ids).size).toBe(ids.length)
+        // No gap either: the external rows of both pages are the head of the stream, in order.
+        expect(ids).toEqual(
+          Array.from(
+            { length: ids.length },
+            (_, index) => `OPEN_LIBRARY:OL${String(index).padStart(2, '0')}W`,
+          ),
+        )
+      },
+    )
 
     it('зовнішній запис з ISBN нашого збігу відкидається на КОЖНІЙ сторінці', async () => {
       const token = `дед${String(process.pid)}${String(Date.now() % 100_000)}`
@@ -486,18 +523,19 @@ describe('GET /catalog/search/external (e2e)', () => {
         edition('other', `Змішана ${token} інша`, known),
       ])
 
-      const result = await both(`Змішана ${token}`, 1, 10)
+      const result = await both(`Змішана ${token}`, 1, DEFAULT_SEARCH_PAGE_SIZE)
 
       expect(result.external.results.map((record) => record.id)).toEqual(['GOOGLE_BOOKS:other'])
     })
 
     it('сторінка з самих локальних рядків не питає зовнішні джерела', async () => {
       const token = `лок${String(process.pid)}${String(Date.now() % 100_000)}`
-      await createLocalWorks(token, 12)
+      // One more than the page: the page is all ours AND the next one starts with ours too.
+      await createLocalWorks(token, DEFAULT_SEARCH_PAGE_SIZE + 1)
 
-      const { external, local } = await both(`Змішана ${token}`, 1, 10)
+      const { external, local } = await both(`Змішана ${token}`, 1, DEFAULT_SEARCH_PAGE_SIZE)
 
-      expect(local.results).toHaveLength(10)
+      expect(local.results).toHaveLength(DEFAULT_SEARCH_PAGE_SIZE)
       expect(external.results).toEqual([])
       expect(external.sources).toEqual([])
       expect(openLibrary.queries).toEqual([])

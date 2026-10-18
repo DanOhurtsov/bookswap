@@ -1,5 +1,6 @@
 'use client'
 
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CATALOG_LIMITS,
@@ -11,7 +12,8 @@ import {
 } from '@bookswap/shared'
 import { apiRequest, apiRequestWithRedirect, describeError } from './api'
 import { discoveryQuery, type DiscoveryFilters } from './discovery-filters'
-import { useKeyedRequest } from './use-keyed-request'
+import { nextPageOf, type NextPage } from './search-page'
+import { searchPageQueryDefaults, usePagesAhead } from './use-pages-ahead'
 
 /**
  * Ті самі три стани, що й у `useSession` та `useFriends`: «ще шукаю» і «нічого не
@@ -24,33 +26,97 @@ export type CatalogDiscoveryState =
   | { status: 'ready'; response: CatalogDiscoveryResponse }
   | { status: 'error'; message: string }
 
+/** Everything that decides which copies a discovery page lists, except the page number. */
+export interface CatalogDiscoverySearch {
+  /** Pages are per viewer: another account never sees this one's cached answers. */
+  viewerId: string
+  query: string
+  pageSize: number
+  scope: CatalogDiscoveryScope
+  filters: DiscoveryFilters
+  /** Bumped to ask the same search again (a repeated submit, a copy just requested). */
+  refresh: number
+}
+
+/** One resource, one key prefix (CONVENTIONS §3.9): every discovery page of every viewer. */
+export const CATALOG_DISCOVERY_QUERY_KEY = ['catalog', 'discover'] as const
+
+function discoverySearchKeyOf(search: CatalogDiscoverySearch) {
+  const { viewerId, query, pageSize, scope, filters, refresh } = search
+
+  return [
+    ...CATALOG_DISCOVERY_QUERY_KEY,
+    viewerId,
+    { q: query.trim(), pageSize, scope, filters },
+    refresh,
+  ] as const
+}
+
+/** In the circle an empty query is a browse; in the legacy `ALL` scope it needs text. */
+function discoveryEnabled({ query, scope }: CatalogDiscoverySearch): boolean {
+  const trimmed = query.trim()
+
+  return trimmed.length >= CATALOG_LIMITS.queryMin || (scope === 'CIRCLE' && trimmed === '')
+}
+
+/** One discovery page — the same options for the page on screen and the pages loaded ahead. */
+function discoveryPageQuery(search: CatalogDiscoverySearch, page: number) {
+  const parameters = discoveryQuery({
+    q: search.query.trim(),
+    page,
+    pageSize: search.pageSize,
+    scope: search.scope,
+    filters: search.filters,
+  })
+
+  return {
+    queryKey: [...discoverySearchKeyOf(search), page] as const,
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiRequest(`/catalog/discover?${parameters}`, {
+        schema: catalogDiscoveryResponseSchema,
+        signal,
+      }),
+    ...searchPageQueryDefaults<CatalogDiscoveryResponse>(),
+  }
+}
+
+/** Discovery lists only our catalog: a further page exists exactly when the server says `hasMore`. */
+export function discoveryNextPage(
+  page: number,
+  response: CatalogDiscoveryResponse | undefined,
+): NextPage {
+  return nextPageOf({ page, localHasMore: response?.hasMore === true, externalMore: 'NO' })
+}
+
 /**
  * Discovery of physical copies for the selected viewer scope, filters and URL
- * page. In the circle an empty query is a browse; in the legacy `ALL` scope it
- * stays idle. Stale responses never render for another key.
+ * page. The page on screen comes from the shared cache, and the two pages after
+ * it are loaded there in the background (`usePagesAhead`), so moving on costs no
+ * wait. Stale responses never render for another key.
  */
 export function useCatalogDiscovery(
-  query: string,
+  search: CatalogDiscoverySearch,
   page: number,
-  pageSize: number,
-  scope: CatalogDiscoveryScope,
-  filters: DiscoveryFilters,
-  refresh = 0,
 ): CatalogDiscoveryState {
-  const trimmed = query.trim()
-  const enabled =
-    trimmed.length >= CATALOG_LIMITS.queryMin || (scope === 'CIRCLE' && trimmed === '')
+  const queryClient = useQueryClient()
+  const enabled = discoveryEnabled(search)
+  const options = discoveryPageQuery(search, page)
+  const query = useQuery({ ...options, queryFn: enabled ? options.queryFn : skipToken })
 
-  const search = discoveryQuery({ q: trimmed, page, pageSize, scope, filters })
-  const key = `${String(refresh)}\u0000${search}`
-  const state = useKeyedRequest(enabled ? key : undefined, (signal) =>
-    apiRequest(`/catalog/discover?${search}`, { schema: catalogDiscoveryResponseSchema, signal }),
-  )
+  usePagesAhead({
+    search: enabled ? discoverySearchKeyOf(search) : undefined,
+    page,
+    ready: query.status === 'success',
+    next: discoveryNextPage(page, query.data),
+    load: async (target) =>
+      discoveryNextPage(target, await queryClient.fetchQuery(discoveryPageQuery(search, target))),
+  })
 
-  if (state.status === 'ready') return { status: 'ready', response: state.value }
-  if (state.status === 'error') return { status: 'error', message: describeError(state.error) }
+  if (!enabled) return { status: 'idle' }
+  if (query.status === 'success') return { status: 'ready', response: query.data }
+  if (query.status === 'error') return { status: 'error', message: describeError(query.error) }
 
-  return state
+  return { status: 'loading' }
 }
 
 export type WorkState =
@@ -91,10 +157,10 @@ export interface WorkResource {
 
 export function useWork(workId: string): WorkResource {
   // Stored together with the id it resulted from, same idiom as `moved`
-  // below and `useCatalogDiscovery` above: otherwise a workId change (navigating
-  // to a different book) would keep showing the PREVIOUS book's `ready`
-  // detail — including its title, authors, everything — for as long as the
-  // new book's own fetch takes, instead of `loading`.
+  // below: otherwise a workId change (navigating to a different book) would
+  // keep showing the PREVIOUS book's `ready` detail — including its title,
+  // authors, everything — for as long as the new book's own fetch takes,
+  // instead of `loading`.
   const [stored, setStored] = useState<{ workId: string; state: WorkState }>({
     workId,
     state: { status: 'loading' },
