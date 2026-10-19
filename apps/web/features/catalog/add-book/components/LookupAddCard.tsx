@@ -1,5 +1,4 @@
 import type { BookLookupResult } from '@bookswap/shared'
-import { languageName } from '@/app/lib/language-names'
 import type { QuickAddSlot } from '../model/quick-add-slots'
 import { QuickAddStatus } from './QuickAddActions'
 import { ResultCardShell } from './ResultCardShell'
@@ -22,14 +21,10 @@ export function LookupAddCard({ lookup, slot, onSelect }: LookupAddCardProps) {
           <span className="wrap-anywhere">{lookup.authors.join(', ')}</span>
         )
       }
-      meta={[
-        lookup.publisher,
-        lookup.publishedYear === undefined ? undefined : String(lookup.publishedYear),
-        lookup.language === undefined ? undefined : languageName(lookup.language),
-      ]}
+      meta={[lookup.publishedYear === undefined ? undefined : String(lookup.publishedYear)]}
       onSelect={onSelect}
-    >
-      <QuickAddStatus slot={slot} />
-    </ResultCardShell>
+      selectTitle={lookup.title}
+      status={<QuickAddStatus slot={slot} />}
+    />
   )
 }

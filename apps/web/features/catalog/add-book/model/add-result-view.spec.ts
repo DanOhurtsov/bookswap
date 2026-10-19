@@ -49,13 +49,23 @@ function external(over: Partial<ExternalSearchResult> = {}): ExternalSearchResul
 describe('addResultView — our edition', () => {
   const view = addResultView({ kind: 'EDITION', item: EDITION_ITEM })
 
-  it('the edition facts in order, the language by its Ukrainian name', () => {
+  it('the edition facts in order, the language by its Ukrainian name, the format the card used to show', () => {
     expect(view.facts).toEqual([
       { label: 'Мова', value: 'українська' },
       { label: 'Видавництво', value: 'Наука' },
       { label: 'Рік видання', value: '2019' },
+      { label: 'Формат', value: 'тверда' },
       { label: 'ISBN', value: '9783161484100' },
     ])
+  })
+
+  it('an unknown format is absent, not «невідомо»', () => {
+    const unknown = addResultView({
+      kind: 'EDITION',
+      item: { ...EDITION_ITEM, edition: { ...EDITION_ITEM.edition, format: null } },
+    })
+
+    expect(unknown.facts.map((fact) => fact.label)).not.toContain('Формат')
   })
 
   it('one press adds THIS edition, in the slot of all its identities', () => {

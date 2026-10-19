@@ -700,7 +700,7 @@ describe('відновлена операція діалогу пошуку бе
       return found
     })
 
-    await user.click(within(card).getByRole('button'))
+    await user.click(within(card).getByRole('button', { name: /^Додати «/ }))
 
     const dialog = await screen.findByRole('dialog')
 
@@ -841,7 +841,7 @@ describe('«Уточнити дані» зовнішнього результа�
       return found
     })
 
-    await user.click(within(card).getByRole('button'))
+    await user.click(within(card).getByRole('button', { name: /^Додати «/ }))
 
     const dialog = await screen.findByRole('dialog')
     const href = within(dialog).getByRole('link', { name: 'Уточнити дані' }).getAttribute('href')
@@ -892,7 +892,7 @@ describe('діалог пошуку (поза BS-79)', () => {
       return found
     })
 
-    await user.click(within(card).getByRole('button'))
+    await user.click(within(card).getByRole('button', { name: /^Додати «/ }))
 
     const dialog = await screen.findByRole('dialog')
 

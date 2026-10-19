@@ -1,5 +1,4 @@
 import type { ExternalSearchResult } from '@bookswap/shared'
-import { languageName } from '@/app/lib/language-names'
 import type { QuickAddSlot } from '../model/quick-add-slots'
 import { QuickAddStatus } from './QuickAddActions'
 import { ResultCardShell } from './ResultCardShell'
@@ -12,11 +11,12 @@ type ExternalEditionCardProps = {
 }
 
 /**
- * Конкретне видання із зовнішнього джерела — та сама картка, що й у нашого видання; вибір відкриває
- * діалог з деталями, атрибуцією джерела й діями (BS-114).
+ * A specific edition from an external source — the same card as our own edition's; choosing it opens the
+ * dialog with the details, the source attribution and the actions (BS-114).
  *
- * Показує лише те, що джерело справді повідомило: порожнє поле просто відсутнє — без прочерків і без
- * «невідомо» (§6.3, п. 7).
+ * Shows only what the source actually reported: an empty field is simply absent — no dashes and no
+ * «невідомо» (§6.3, item 7). The year is the printing year; the work-level first publication year an
+ * edition may also carry stays in the dialog.
  */
 export function ExternalEditionCard({ result, slot, onSelect }: ExternalEditionCardProps) {
   return (
@@ -29,14 +29,10 @@ export function ExternalEditionCard({ result, slot, onSelect }: ExternalEditionC
           <span className="wrap-anywhere">{result.authors.join(', ')}</span>
         )
       }
-      meta={[
-        result.publisher,
-        result.publishedYear === undefined ? undefined : String(result.publishedYear),
-        result.language === undefined ? undefined : languageName(result.language),
-      ]}
+      meta={[result.publishedYear === undefined ? undefined : String(result.publishedYear)]}
       onSelect={onSelect}
-    >
-      <QuickAddStatus slot={slot} />
-    </ResultCardShell>
+      selectTitle={result.title}
+      status={<QuickAddStatus slot={slot} />}
+    />
   )
 }

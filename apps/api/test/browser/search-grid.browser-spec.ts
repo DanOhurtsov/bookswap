@@ -307,8 +307,9 @@ function expectSoundGrid(
   expect(found.laidOutColumns).toBe(Math.min(found.columns, found.cards))
   expect(found.laidOutRows).toBe(Math.ceil(found.cards / found.columns))
   expect(found.overflowing).toEqual([])
-  // One box for every cover: the picture, the missing one and the broken one alike.
-  expect(new Set(found.coverBoxes)).toEqual(new Set(['72×108']))
+  // One box for every cover: the picture, the missing one and the broken one alike — the vertical card's
+  // (docs/plan/vertical-search-cards.md).
+  expect(new Set(found.coverBoxes)).toEqual(new Set(['128×192']))
 }
 
 /** Requests the browser made for one page of the add-book search's local half. */
