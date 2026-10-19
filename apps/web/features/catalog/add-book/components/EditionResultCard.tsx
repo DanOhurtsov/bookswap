@@ -1,6 +1,4 @@
 import type { AddSearchEditionItem } from '@bookswap/shared'
-import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
-import { languageName } from '@/app/lib/language-names'
 import type { QuickAddSlot } from '../model/quick-add-slots'
 import { QuickAddStatus } from './QuickAddActions'
 import { ResultCardShell } from './ResultCardShell'
@@ -14,18 +12,13 @@ type EditionResultCardProps = {
 }
 
 /**
- * Одна картка = одне КОНКРЕТНЕ видання (docs/plan/fast-book-add.md, §2.1–2.2). Вибір картки відкриває
- * діалог із деталями й діями (BS-114); на картці лишається короткий стан — «Додаю…», «✓ У моїй бібліотеці».
- * Невідомі поля не заповнюються здогадками: порожнє просто відсутнє.
+ * One card = one SPECIFIC edition (docs/plan/fast-book-add.md, §2.1–2.2): cover, title, authors, the
+ * edition's year. Choosing the card opens the dialog with the details (publisher, language, format, ISBN)
+ * and the actions (BS-114); the card keeps the short state — «Додаю…», «✓ У моїй бібліотеці». Unknown
+ * fields are not filled with guesses: an empty one is simply absent.
  */
 export function EditionResultCard({ item, slot, onSelect }: EditionResultCardProps) {
   const { edition, work, authors, ownership } = item
-  const facts = [
-    edition.publisher ?? undefined,
-    edition.year === null ? undefined : String(edition.year),
-    edition.lang === null ? undefined : languageName(edition.lang),
-    edition.format === null ? undefined : EDITION_FORMAT_LABELS[edition.format],
-  ]
 
   return (
     <ResultCardShell
@@ -37,10 +30,10 @@ export function EditionResultCard({ item, slot, onSelect }: EditionResultCardPro
           <span className="wrap-anywhere">{authors.map((a) => a.name).join(', ')}</span>
         )
       }
-      meta={facts}
+      meta={[edition.year === null ? undefined : String(edition.year)]}
       onSelect={onSelect}
-    >
-      <QuickAddStatus slot={slot} ownership={ownership} />
-    </ResultCardShell>
+      selectTitle={work.title}
+      status={<QuickAddStatus slot={slot} ownership={ownership} />}
+    />
   )
 }

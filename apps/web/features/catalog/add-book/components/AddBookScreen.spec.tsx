@@ -9,6 +9,7 @@ import type {
   AddSearchItem,
   AddSearchResponse,
   BookLookupResult,
+  ExternalSearchResult,
   QuickAddResponse,
 } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
@@ -200,9 +201,31 @@ function cardAt(index: number): HTMLElement {
   return card
 }
 
-/** BS-114: the card's one button chooses the result; its dialog holds the details and the actions. */
-async function openCard(user: User, index = 0): Promise<HTMLElement> {
-  const choose = await waitFor(() => within(cardAt(index)).getByRole('button'))
+/** The card's «+»: its accessible name carries the book's title. */
+const PLUS_NAME = /^Додати «.*»$/
+
+/** A card's two ways into its dialog: the title (stretched over the card) and «+» at the bottom. */
+function cardButton(card: HTMLElement, via: 'title' | 'plus'): HTMLElement {
+  const plus = within(card).getByRole('button', { name: PLUS_NAME })
+
+  if (via === 'plus') return plus
+
+  const title = within(card)
+    .getAllByRole('button')
+    .find((button) => button !== plus)
+
+  if (title === undefined) throw new Error('На картці немає кнопки-назви')
+
+  return title
+}
+
+/** BS-114: the title or «+» chooses the result; its dialog holds the details and the actions. */
+async function openCard(
+  user: User,
+  index = 0,
+  via: 'title' | 'plus' = 'title',
+): Promise<HTMLElement> {
+  const choose = await waitFor(() => cardButton(cardAt(index), via))
 
   await user.click(choose)
 
@@ -307,11 +330,14 @@ describe('результати: одна картка — одне виданн�
       expect.anything(),
     )
     expect(screen.getByText('Тарас Шевченко')).toBeInTheDocument()
-    expect(screen.getByText(/Наука/)).toBeInTheDocument()
-    expect(screen.getByText(/2019/)).toBeInTheDocument()
-    expect(screen.getByText(/українська/)).toBeInTheDocument()
-    // The card is chosen by its title; the actions are in its dialog, which nothing opens by itself.
+    expect(screen.getByText('2019')).toBeInTheDocument()
+    // The vertical card: publisher, language and format are the dialog's, not the card's.
+    expect(screen.queryByText(/Наука/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/українська/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/тверда/)).not.toBeInTheDocument()
+    // The card is chosen by its title or «+»; the actions are in its dialog, which nothing opens by itself.
     expect(screen.getByRole('button', { name: 'Кобзар' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Додати «Кобзар»' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -341,7 +367,11 @@ describe('результати: одна картка — одне виданн�
 
     await screen.findByText('Абстрактний твір')
 
-    expect(screen.getByText('Для цього твору ще немає конкретного видання.')).toBeInTheDocument()
+    // The card shows the first publication, captioned; why there is nothing to add is the dialog's.
+    expect(within(cardAt(0)).getByText('Уперше видано 1840')).toBeInTheDocument()
+    expect(
+      screen.queryByText('Для цього твору ще немає конкретного видання.'),
+    ).not.toBeInTheDocument()
 
     const dialog = await openCard(userEvent.setup())
 
@@ -671,11 +701,15 @@ describe('зовнішня половина: перше додавання (QA2,
 
     const card = cardAt(0)
 
-    expect(within(card).getByText(/Видавець/)).toBeInTheDocument()
-    expect(within(card).getByText(/українська/)).toBeInTheDocument()
+    // The vertical card keeps the title, the author and the year; the publisher and the language are the
+    // dialog's, next to the source's attribution.
+    expect(within(card).queryByText(/Видавець/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/українська/)).not.toBeInTheDocument()
 
     const dialog = await openCard(user)
 
+    expect(within(dialog).getByText('Видавництво').nextElementSibling).toHaveTextContent('Видавець')
+    expect(within(dialog).getByText('Мова').nextElementSibling).toHaveTextContent('українська')
     // The source's attribution stays with its data.
     expect(within(dialog).getByText('Джерело: Google Books')).toBeInTheDocument()
 
@@ -702,7 +736,10 @@ describe('зовнішня половина: перше додавання (QA2,
     renderScreen()
 
     expect(await screen.findByText('Лише твір')).toBeInTheDocument()
-    expect(screen.getByText('Запис про твір, а не про конкретне видання.')).toBeInTheDocument()
+    // The card says nothing more about it; the dialog explains what a work record adds.
+    expect(
+      screen.queryByText('Запис про твір, а не про конкретне видання.'),
+    ).not.toBeInTheDocument()
 
     const dialog = await openCard(userEvent.setup())
 
@@ -3167,6 +3204,225 @@ describe('діалог результату (BS-114)', () => {
     expect(within(dialog).getByRole('heading', { name: long })).toHaveClass('wrap-anywhere')
     expect(within(dialog).getByText('Автор'.repeat(40))).toHaveClass('wrap-anywhere')
     expect(within(dialog).getByText('9783161484100')).toHaveClass('wrap-anywhere')
+  })
+})
+
+describe('вертикальна картка: «+» відкриває діалог саме цієї книжки', () => {
+  function external(id: string, over: Partial<ExternalSearchResult>): AddSearchExternalItem {
+    return {
+      kind: 'EXTERNAL',
+      key: `external:GOOGLE_BOOKS:${id}`,
+      result: {
+        id: `GOOGLE_BOOKS:${id}`,
+        kind: 'EDITION',
+        sources: ['GOOGLE_BOOKS'],
+        title: `Зовнішня ${id}`,
+        authors: ['Якийсь Автор'],
+        ...over,
+      },
+    }
+  }
+
+  /** The card's own text, in document order. */
+  function positions(card: HTMLElement, texts: string[]): number[] {
+    const content = card.textContent ?? ''
+
+    return texts.map((text) => content.indexOf(text))
+  }
+
+  it('кожен вид картки: назва, автор і рік окремими рядками в цьому порядку; рік твору — з підписом', async () => {
+    items = [
+      editionItem('e-1'),
+      {
+        kind: 'WORK',
+        key: 'work:w-9',
+        work: { ...WORK, id: 'w-9', title: 'Абстрактний твір', firstPubYear: 1798 },
+        authors: AUTHORS,
+        matchedOn: 'TITLE',
+      },
+    ]
+    externalItems = [
+      external('vol-2', {
+        title: 'Зовнішнє видання',
+        publishedYear: 2001,
+        firstPublishedYear: 1950,
+        publisher: 'Видавець',
+        language: 'en',
+        isbn13: '9780306406157',
+      }),
+      external('work-2', { kind: 'WORK', title: 'Зовнішній твір', firstPublishedYear: 1925 }),
+    ]
+    renderScreen()
+    await screen.findByText('Зовнішній твір')
+
+    const expected = [
+      ['Кобзар', 'Тарас Шевченко', '2019'],
+      ['Абстрактний твір', 'Тарас Шевченко', 'Уперше видано 1798'],
+      ['Зовнішнє видання', 'Якийсь Автор', '2001'],
+      ['Зовнішній твір', 'Якийсь Автор', 'Уперше видано 1925'],
+    ] as const
+
+    for (const [index, lines] of expected.entries()) {
+      const card = cardAt(index)
+
+      // Each its own element (an exact match), in this order, and «+» named after the book.
+      for (const line of lines) expect(within(card).getByText(line)).toBeInTheDocument()
+      expect(positions(card, [...lines])).toEqual(
+        [...positions(card, [...lines])].sort((a, b) => a - b),
+      )
+      expect(cardButton(card, 'plus')).toHaveAccessibleName(`Додати «${lines[0]}»`)
+      expect(cardButton(card, 'plus')).toHaveAttribute('aria-haspopup', 'dialog')
+    }
+
+    // The edition's printing year only: the work-level year, the publisher, the language and the ISBN are
+    // the dialog's.
+    const edition = cardAt(2)
+
+    for (const fact of ['1950', 'Видавець', 'англійська', '9780306406157']) {
+      expect(edition).not.toHaveTextContent(fact)
+    }
+  })
+
+  it('відсутні дані не вигадуються: без автора й року — лише назва й «+»', async () => {
+    items = []
+    externalItems = [external('vol-3', { title: 'Без нічого', authors: undefined })]
+    renderScreen()
+    await screen.findByText('Без нічого')
+
+    const card = cardAt(0)
+
+    expect(card).toHaveTextContent(/^Без нічого$/)
+    expect(card.querySelector("[data-slot='book-cover-placeholder']")).not.toBeNull()
+  })
+
+  it.each([
+    ['ISBN-запит', 'lookup'],
+    ['наше видання', 'edition'],
+    ['зовнішнє видання', 'external'],
+    ['твір', 'work'],
+  ] as const)(
+    '«+» (%s) відкриває діалог саме цієї книжки, нічого не додаючи',
+    async (_case, kind) => {
+      const titles = {
+        lookup: 'Знайдена за ISBN',
+        edition: 'Друге',
+        external: 'Друге',
+        work: 'Друге',
+      }
+
+      if (kind === 'lookup') {
+        searchParams = new URLSearchParams('q=9783161484100')
+        items = []
+        lookupHandler = () =>
+          Promise.resolve({
+            result: { title: titles.lookup, publishedYear: 2005, source: 'GOOGLE_BOOKS' },
+          })
+      } else if (kind === 'edition') {
+        items = [
+          editionItem('e-1'),
+          editionItem('e-2', { work: { ...WORK, id: 'work-2', title: 'Друге' } }),
+        ]
+      } else if (kind === 'external') {
+        externalItems = [external('vol-4', { title: 'Друге', publisher: 'Видавець' })]
+      } else {
+        items = [
+          editionItem('e-1'),
+          {
+            kind: 'WORK',
+            key: 'work:w-2',
+            work: { ...WORK, id: 'w-2', title: 'Друге' },
+            authors: [],
+            matchedOn: 'TITLE',
+          },
+        ]
+      }
+
+      const user = userEvent.setup()
+
+      renderScreen()
+      await screen.findByText(titles[kind])
+
+      const index = kind === 'lookup' ? 0 : 1
+      const dialog = await openCard(user, index, 'plus')
+
+      expect(dialog).toHaveAccessibleName(titles[kind])
+      expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      expect(quickAddCalls()).toHaveLength(0)
+    },
+  )
+
+  it('Enter і пробіл на «+» відкривають діалог; після закриття фокус повертається на «+»', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Кобзар')
+
+    const plus = cardButton(cardAt(0), 'plus')
+
+    for (const key of ['{Enter}', ' ']) {
+      plus.focus()
+      await user.keyboard(key)
+
+      const dialog = await screen.findByRole('dialog')
+
+      expect(dialog).toHaveAccessibleName('Кобзар')
+      await user.keyboard('{Escape}')
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+      expect(plus).toHaveFocus()
+    }
+
+    expect(quickAddCalls()).toHaveLength(0)
+  })
+
+  it('після закриття фокус повертається саме на той елемент, що відкрив: назву або «+»', async () => {
+    const user = userEvent.setup()
+
+    renderScreen()
+    await screen.findByText('Кобзар')
+
+    for (const via of ['plus', 'title'] as const) {
+      await openCard(user, 0, via)
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Закрити' }))
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+      expect(cardButton(cardAt(0), via)).toHaveFocus()
+    }
+  })
+
+  it('короткий стан лишається на картці поруч із «+»: «Додаю…» → «✓ У моїй бібліотеці»', async () => {
+    let finish: (() => void) | undefined
+
+    quickAddHandler = (body) =>
+      new Promise((resolve) => {
+        finish = () => {
+          resolve(addedResponse(body))
+        }
+      })
+
+    const user = userEvent.setup()
+
+    renderScreen()
+    await addFromCard(user)
+
+    await waitFor(() => {
+      expect(within(cardAt(0)).getByText('Додаю…')).toBeInTheDocument()
+    })
+    await act(async () => {
+      finish?.()
+    })
+    await waitFor(() => {
+      expect(within(cardAt(0)).getByText('✓ У моїй бібліотеці')).toBeInTheDocument()
+    })
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+    // The status sits beside «+», which still opens the dialog (now with «Додати ще один примірник»).
+    expect(cardButton(cardAt(0), 'plus').parentElement).toHaveTextContent('✓ У моїй бібліотеці')
+    expect(quickAddCalls()).toHaveLength(1)
   })
 })
 

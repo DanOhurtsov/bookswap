@@ -74,6 +74,30 @@ describe('BookCover', () => {
     expect(placeholder(container)).toHaveClass('h-[6.75rem]', 'w-[4.5rem]', 'rounded-[0.25rem]')
   })
 
+  it('the default box is unchanged for its other consumers: 72×108, cropped to fill', () => {
+    render(<BookCover url={COVER} alt={ALT} />)
+
+    const image = screen.getByAltText(ALT)
+    expect(image).toHaveAttribute('width', '72')
+    expect(image).toHaveAttribute('height', '108')
+    expect(image).toHaveClass('h-[6.75rem]', 'w-[4.5rem]', 'object-cover')
+  })
+
+  it('the card box shows the whole cover, and the placeholder takes the same box', () => {
+    const { container } = render(<BookCover url={COVER} alt={ALT} variant="card" />)
+
+    const image = screen.getByAltText(ALT)
+    expect(image).toHaveAttribute('width', '128')
+    expect(image).toHaveAttribute('height', '192')
+    // Contained, not cropped: the proportions stay, the picture is centered in the box.
+    expect(image).toHaveClass('h-48', 'w-32', 'object-contain')
+    expect(image).not.toHaveClass('object-cover')
+
+    fireEvent.error(image)
+
+    expect(placeholder(container)).toHaveClass('h-48', 'w-32', 'rounded-[0.25rem]')
+  })
+
   it('does not ask for a failed URL again', () => {
     render(<BookCover url={COVER} alt={ALT} />)
     const image = screen.getByAltText(ALT)

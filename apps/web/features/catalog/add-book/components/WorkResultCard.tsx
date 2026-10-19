@@ -7,9 +7,9 @@ type WorkResultCardProps = {
 }
 
 /**
- * Твір, у якого ще немає жодного видання в нашому каталозі. Це абстрактний результат, а не конкретна
- * книжка: його діалог пропонує лише «Уточнити дані», бо додавати нічого, а обкладинка, ISBN чи переклад
- * не вигадуються.
+ * A work with no edition in our catalog yet. It is an abstract result, not a specific book: its dialog
+ * offers only «Уточнити дані» and says why — there is nothing to add, and a cover, an ISBN or a
+ * translation is not invented. The card shows the first publication year, captioned as such.
  */
 export function WorkResultCard({ item, onSelect }: WorkResultCardProps) {
   return (
@@ -29,8 +29,7 @@ export function WorkResultCard({ item, onSelect }: WorkResultCardProps) {
           : `Уперше видано ${String(item.work.firstPubYear)}`,
       ]}
       onSelect={onSelect}
-    >
-      <span className="book__meta">Для цього твору ще немає конкретного видання.</span>
-    </ResultCardShell>
+      selectTitle={item.work.title}
+    />
   )
 }

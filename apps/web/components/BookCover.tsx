@@ -1,21 +1,39 @@
 'use client'
 
+import { cva } from 'class-variance-authority'
 import { BookIcon } from 'lucide-react'
 import Image from 'next/image'
 import { useState } from 'react'
+import { cn } from '@/lib/utils'
+
+type BookCoverVariant = 'inline' | 'card'
 
 /**
- * Cover box size, in the one place that owns it.
+ * Cover box sizes, in the one place that owns them.
  *
- * The image and the placeholder are laid out by the SAME `COVER_BOX_CLASS`,
+ * The image and the placeholder are laid out by the SAME `coverBox` variant,
  * so the box is identical whether or not there is a picture. That is the
  * point of routing both through one component: a row must not change height,
  * width or alignment because a source happened to know a cover URL.
+ *
+ * `inline` (the default) sits beside text: the dialog, the own-book page.
+ * `card` sits on top of a vertical search card: a larger box that shows the
+ * whole cover — `object-contain`, centered, never cropped — because a card
+ * that crops one cover and not the next reads as inconsistent.
  */
-const COVER_WIDTH = 72
-const COVER_HEIGHT = 108
-const COVER_BOX_CLASS =
-  'h-[6.75rem] w-[4.5rem] rounded-[0.25rem] bg-[color:var(--field-bg)] object-cover'
+const COVER_SIZE: Record<BookCoverVariant, { width: number; height: number }> = {
+  inline: { width: 72, height: 108 },
+  card: { width: 128, height: 192 },
+}
+
+const coverBox = cva('rounded-[0.25rem] bg-[color:var(--field-bg)]', {
+  variants: {
+    variant: {
+      inline: 'h-[6.75rem] w-[4.5rem] object-cover',
+      card: 'h-48 w-32 object-contain',
+    },
+  },
+})
 
 type BookCoverProps = {
   /**
@@ -27,6 +45,7 @@ type BookCoverProps = {
   url?: string | null
   /** Describes the book, e.g. `Обкладинка «Кобзар»`. */
   alt: string
+  variant?: BookCoverVariant
 }
 
 /**
@@ -74,7 +93,7 @@ function usableSrc(url: string | null | undefined): string | undefined {
  * it does not already carry, and labelling it "cover" would announce a cover
  * that does not exist.
  */
-export function BookCover({ url, alt }: BookCoverProps) {
+export function BookCover({ url, alt, variant = 'inline' }: BookCoverProps) {
   const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined)
   const src = usableSrc(url)
 
@@ -82,10 +101,13 @@ export function BookCover({ url, alt }: BookCoverProps) {
     return (
       <span
         data-slot="book-cover-placeholder"
-        className={`${COVER_BOX_CLASS} grid place-items-center border border-[color:var(--line)] text-[color:var(--bookswap-muted)]`}
+        className={cn(
+          coverBox({ variant }),
+          'grid place-items-center border border-[color:var(--line)] text-[color:var(--bookswap-muted)]',
+        )}
         aria-hidden="true"
       >
-        <BookIcon className="size-7 stroke-[1.25]" />
+        <BookIcon className={cn('stroke-[1.25]', variant === 'card' ? 'size-10' : 'size-7')} />
       </span>
     )
   }
@@ -93,11 +115,11 @@ export function BookCover({ url, alt }: BookCoverProps) {
   return (
     <Image
       data-slot="book-cover"
-      className={COVER_BOX_CLASS}
+      className={coverBox({ variant })}
       src={src}
       alt={alt}
-      width={COVER_WIDTH}
-      height={COVER_HEIGHT}
+      width={COVER_SIZE[variant].width}
+      height={COVER_SIZE[variant].height}
       unoptimized
       onError={() => {
         setFailedSrc(src)

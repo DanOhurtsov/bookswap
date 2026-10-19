@@ -11,9 +11,10 @@ type ExternalWorkCardProps = {
 }
 
 /**
- * Запис про ТВІР із зовнішнього джерела — не конкретне видання. Діалог пропонує «Додати до бібліотеки»
- * (BS-114): твір, видання «без уточнення» й примірник, де видавничі дані невідомі, — і «Уточнити дані».
- * ISBN, видавництво чи рік видання з агрегованого запису не вигадуються (docs/plan/fast-book-add.md, §2.4).
+ * A WORK record from an external source — not a specific edition. Its dialog says so and offers
+ * «Додати до бібліотеки» (BS-114): the work, an "unspecified" edition and a copy whose publishing data is
+ * unknown — and «Уточнити дані». The card shows the first publication year, captioned as such; an ISBN,
+ * a publisher or a printing year is not invented from an aggregated record (docs/plan/fast-book-add.md, §2.4).
  */
 export function ExternalWorkCard({ result, slot, onSelect }: ExternalWorkCardProps) {
   return (
@@ -32,9 +33,8 @@ export function ExternalWorkCard({ result, slot, onSelect }: ExternalWorkCardPro
           : `Уперше видано ${String(result.firstPublishedYear)}`,
       ]}
       onSelect={onSelect}
-    >
-      <span className="book__meta">Запис про твір, а не про конкретне видання.</span>
-      <QuickAddStatus slot={slot} />
-    </ResultCardShell>
+      selectTitle={result.title}
+      status={<QuickAddStatus slot={slot} />}
+    />
   )
 }

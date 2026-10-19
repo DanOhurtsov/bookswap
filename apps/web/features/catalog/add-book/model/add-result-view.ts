@@ -4,9 +4,11 @@ import type {
   AddSearchWorkItem,
   BookLookupResult,
   BookLookupSource,
+  EditionFormat,
   ExternalSearchResult,
   QuickAddTarget,
 } from '@bookswap/shared'
+import { EDITION_FORMAT_LABELS } from '@/app/lib/labels'
 import { languageName } from '@/app/lib/language-names'
 import { externalIdentities, externalTarget } from './external-target'
 import { manualPrefillParams } from './manual-form'
@@ -37,8 +39,8 @@ export interface AddResultView {
   authors: string | undefined
   coverUrl: string | undefined
   /**
-   * Only what is known about this edition — language (by name), publisher, year, ISBN — and, labelled
-   * apart, the work's first publication. The edition's year is never filled from the work's.
+   * Only what is known about this edition — language (by name), publisher, year, format (our catalog's
+   * editions), ISBN — and, labelled apart, the work's first publication. The edition's year is never filled from the work's.
    */
   facts: AddResultFact[]
   source: AddResultSource
@@ -61,13 +63,16 @@ function editionFacts(edition: {
   lang?: string | null | undefined
   publisher?: string | null | undefined
   year?: number | null | undefined
+  format?: EditionFormat | null | undefined
   isbn13?: string | null | undefined
 }): AddResultFact[] {
-  const { lang, publisher, year, isbn13 } = edition
+  const { lang, publisher, year, format, isbn13 } = edition
   const facts: [string, string | null | undefined][] = [
     ['Мова', typeof lang === 'string' ? languageName(lang) : undefined],
     ['Видавництво', publisher],
     ['Рік видання', typeof year === 'number' ? String(year) : undefined],
+    // The vertical card no longer shows the format; the dialog keeps it.
+    ['Формат', format === null || format === undefined ? undefined : EDITION_FORMAT_LABELS[format]],
     ['ISBN', isbn13],
   ]
 
