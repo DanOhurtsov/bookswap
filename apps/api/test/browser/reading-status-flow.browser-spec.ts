@@ -32,6 +32,8 @@ import { startWeb, stopWeb } from './web-server'
  * списку, відкритому з навігації → змінює статус на «Читаю» → список і фільтри показують оновлення. Окремо:
  * власник примірника на тій самій сторінці твору не бачить статусу читача (R-8).
  *
+ * BS-140: статус — один Select замість трьох кнопок; без запису він показує «Вказати статус читання».
+ *
  * Запуск: `pnpm --filter @bookswap/api test:browser`. Без Chromium тест ПАДАЄ (не пропускається).
  */
 
@@ -99,7 +101,7 @@ async function login(page: Page, email: string): Promise<void> {
 }
 
 function statusControl(page: Page): Locator {
-  return page.getByRole('group', { name: 'Мій статус читання' })
+  return page.getByRole('combobox', { name: 'Мій статус читання' })
 }
 
 async function openWork(page: Page, workId: string): Promise<void> {
@@ -109,12 +111,16 @@ async function openWork(page: Page, workId: string): Promise<void> {
 }
 
 async function setStatus(page: Page, label: 'Читаю' | 'Прочитано'): Promise<void> {
-  await statusControl(page).getByRole('button', { name: label }).click()
+  await statusControl(page).click()
+  await page.getByRole('option', { name: label }).click()
   await page.getByText(`Збережено: «${label}».`).waitFor()
 }
 
-async function expectPressed(page: Page, label: string): Promise<void> {
-  await statusControl(page).getByRole('button', { name: label, pressed: true }).waitFor()
+async function expectShown(page: Page, label: string): Promise<void> {
+  await page
+    .getByRole('combobox', { name: 'Мій статус читання' })
+    .filter({ hasText: label })
+    .waitFor()
 }
 
 function listRow(page: Page, title: string): Locator {
@@ -158,16 +164,17 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
     await page.getByRole('heading', { name: 'Хто має цю книжку?' }).waitFor()
     expect(await page.getByText('Хто з друзів це читав').count()).toBe(0)
 
-    await expectPressed(page, 'Не читав')
+    // BS-140: без запису статус не встановлено — не «Не читав».
+    await expectShown(page, 'Вказати статус читання')
     await page.getByText('Була позичена').waitFor()
 
     await setStatus(page, 'Прочитано')
-    await expectPressed(page, 'Прочитано')
+    await expectShown(page, 'Прочитано')
 
     // Повторне зчитування з сервера, а не лише локальний стан.
     await page.reload()
     await statusControl(page).waitFor()
-    await expectPressed(page, 'Прочитано')
+    await expectShown(page, 'Прочитано')
 
     // Особистий список — з навігації (меню профілю).
     await settle(page)
@@ -193,7 +200,7 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
     await statusControl(page).waitFor()
     await settle(page)
     await setStatus(page, 'Читаю')
-    await expectPressed(page, 'Читаю')
+    await expectShown(page, 'Читаю')
 
     await page.goto(`${WEB_ORIGIN}/reading-list`)
     await settle(page)
@@ -212,7 +219,7 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
 
     expect(stored).toEqual([{ workId: shelf.workId, status: 'READING' }])
 
-    // R-8: власник позиченого примірника бачить лише СВІЙ статус («Не читав»), не статус читача.
+    // R-8: власник позиченого примірника бачить лише СВІЙ стан (не встановлено), не статус читача.
     const ownerPage = await newPage()
     const ownerEmail = await prisma.user.findUniqueOrThrow({
       where: { id: owner.id },
@@ -221,7 +228,7 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
 
     await login(ownerPage, ownerEmail.email)
     await openWork(ownerPage, shelf.workId)
-    await expectPressed(ownerPage, 'Не читав')
+    await expectShown(ownerPage, 'Вказати статус читання')
 
     const history = ownerPage.locator('section').filter({
       has: ownerPage.getByRole('heading', { name: 'Хто брав цю книжку' }),

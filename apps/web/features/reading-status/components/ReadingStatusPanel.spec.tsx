@@ -1,15 +1,19 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReadingStatus } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
+import { withQueryClient } from '@/app/lib/test-query-client'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import { ReadingStatusPanel } from './ReadingStatusPanel'
 
 /**
- * RS14 (10j.2): the viewer's own status control on the work page. `apiRequest` is replaced by a
- * tiny in-memory server, so "re-reading" means a fresh GET that returns what the last PUT stored.
+ * RS14 (10j.2), BS-140: the viewer's own status control on the work and own-book pages. `apiRequest`
+ * is replaced by a tiny in-memory server, so "re-reading" means a fresh GET that returns what the
+ * last PUT stored. BS-140 replaced the three `aria-pressed` buttons with one select; the checks of
+ * saving, failure, retry and privacy are the same ones.
  */
 
 jest.mock('@/app/lib/api', () => {
@@ -18,7 +22,13 @@ jest.mock('@/app/lib/api', () => {
   return { ...actual, apiRequest: jest.fn() }
 })
 
+jest.mock('@/app/lib/use-session', () => ({
+  useSession: () => ({ state: { status: 'authenticated', user: { id: 'me' } } }),
+}))
+
 const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
+
+const FIELD = 'Мій статус читання'
 
 function apiError(message: string): ApiRequestError {
   return new ApiRequestError(503, { code: 'INTERNAL_ERROR', message })
@@ -29,7 +39,8 @@ interface RequestOptions {
   body?: { status: ReadingStatus }
 }
 
-let stored: ReadingStatus
+/** `null` — no row at all. */
+let stored: ReadingStatus | null
 let wasBorrowed: boolean
 
 function serve(): void {
@@ -42,14 +53,17 @@ function serve(): void {
       return Promise.resolve({ workId: 'w-1', status: stored })
     }
 
-    return Promise.resolve({ workId: 'w-1', status: stored, wasBorrowed })
+    return Promise.resolve({
+      workId: 'w-1',
+      status: stored ?? 'NOT_READ',
+      isSet: stored !== null,
+      wasBorrowed,
+    })
   })
 }
 
-function statusButton(name: string): HTMLElement {
-  return within(screen.getByRole('group', { name: 'Мій статус читання' })).getByRole('button', {
-    name,
-  })
+function field(): HTMLElement {
+  return screen.getByRole('combobox', { name: FIELD })
 }
 
 function puts(): unknown[] {
@@ -58,44 +72,67 @@ function puts(): unknown[] {
   )
 }
 
+function renderPanel(): ReturnType<typeof render> {
+  return render(withQueryClient(<ReadingStatusPanel workId="w-1" />))
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   apiRequest.mockReset()
-  stored = 'NOT_READ'
+  stored = null
   wasBorrowed = false
   serve()
 })
 
-describe('ReadingStatusPanel (RS14)', () => {
-  it('shows loading, then the default «Не читав» with no tag', async () => {
-    render(<ReadingStatusPanel workId="w-1" />)
+describe('ReadingStatusPanel (RS14, BS-140)', () => {
+  it('without a row shows loading, then «Вказати статус читання» — not «Не читав» — and no tag', async () => {
+    renderPanel()
 
     expect(screen.getByText('Завантажую статус…')).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: 'Не читав' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent(
+      'Вказати статус читання',
     )
-    expect(statusButton('Читаю')).toHaveAttribute('aria-pressed', 'false')
-    expect(statusButton('Прочитано')).toHaveAttribute('aria-pressed', 'false')
+    expect(field()).not.toHaveTextContent('Не читав')
     expect(screen.queryByText('Була позичена')).not.toBeInTheDocument()
     expect(screen.getByText('Статус бачите лише ви.')).toBeInTheDocument()
   })
 
+  it('an explicit NOT_READ shows «Не читав»', async () => {
+    stored = 'NOT_READ'
+    renderPanel()
+
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent('Не читав')
+  })
+
+  it('choosing «Не читав» with nothing set sends it (BS-140: it creates the record)', async () => {
+    const user = userEvent.setup()
+
+    renderPanel()
+    await chooseOption(user, FIELD, 'Не читав')
+
+    expect(await screen.findByText('Збережено: «Не читав».')).toBeInTheDocument()
+    expect(field()).toHaveTextContent('Не читав')
+    expect(apiRequest).toHaveBeenLastCalledWith('/me/reading-statuses/w-1', {
+      method: 'PUT',
+      body: { status: 'NOT_READ' },
+      schema: expect.anything() as unknown,
+    })
+  })
+
   it('changes to every status in turn and a fresh mount re-reads the saved value', async () => {
     const user = userEvent.setup()
-    const { unmount } = render(<ReadingStatusPanel workId="w-1" />)
-
-    await screen.findByRole('group', { name: 'Мій статус читання' })
+    const { unmount } = renderPanel()
 
     for (const [label, status] of [
       ['Читаю', 'READING'],
       ['Прочитано', 'READ'],
       ['Не читав', 'NOT_READ'],
+      ['Прочитано', 'READ'],
     ] as const) {
-      await user.click(statusButton(label))
+      await chooseOption(user, FIELD, label)
 
       expect(await screen.findByText(`Збережено: «${label}».`)).toBeInTheDocument()
-      expect(statusButton(label)).toHaveAttribute('aria-pressed', 'true')
+      expect(field()).toHaveTextContent(label)
       expect(apiRequest).toHaveBeenLastCalledWith('/me/reading-statuses/w-1', {
         method: 'PUT',
         body: { status },
@@ -103,27 +140,52 @@ describe('ReadingStatusPanel (RS14)', () => {
       })
     }
 
-    await user.click(statusButton('Прочитано'))
-    await screen.findByText('Збережено: «Прочитано».')
     unmount()
-
-    render(<ReadingStatusPanel workId="w-1" />)
+    // A new client is a new page load: nothing is cached, so the value comes from a fresh GET.
+    renderPanel()
 
     await waitFor(() => {
-      expect(statusButton('Прочитано')).toHaveAttribute('aria-pressed', 'true')
+      expect(field()).toHaveTextContent('Прочитано')
     })
     expect(apiRequest).toHaveBeenLastCalledWith('/me/reading-statuses/w-1', {
       schema: expect.anything() as unknown,
-      signal: expect.any(AbortSignal) as unknown,
     })
   })
 
-  it('clicking the current status sends nothing', async () => {
+  it('choosing the current status sends nothing', async () => {
     const user = userEvent.setup()
 
-    render(<ReadingStatusPanel workId="w-1" />)
-    await user.click(await screen.findByRole('button', { name: 'Не читав' }))
+    stored = 'READING'
+    renderPanel()
+    await chooseOption(user, FIELD, 'Читаю')
 
+    expect(puts()).toHaveLength(0)
+  })
+
+  // Choosing with Enter needs `PointerEvent`, which jsdom lacks: that step is checked in a real browser
+  // (`reading-status-controls.browser-spec.ts`). Here: focus, open, close, and nothing sent.
+  it('is reachable from the keyboard: Tab focuses it, ArrowDown opens the list, Escape returns focus', async () => {
+    const user = userEvent.setup()
+
+    renderPanel()
+    await screen.findByRole('combobox', { name: FIELD })
+
+    await user.tab()
+    expect(field()).toHaveFocus()
+
+    await user.keyboard('{ArrowDown}')
+    expect(await screen.findByRole('listbox')).toBeInTheDocument()
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Не читав',
+      'Читаю',
+      'Прочитано',
+    ])
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    })
+    expect(field()).toHaveFocus()
     expect(puts()).toHaveLength(0)
   })
 
@@ -131,8 +193,8 @@ describe('ReadingStatusPanel (RS14)', () => {
     const user = userEvent.setup()
     let finish: (value: unknown) => void = () => undefined
 
-    render(<ReadingStatusPanel workId="w-1" />)
-    await screen.findByRole('group', { name: 'Мій статус читання' })
+    renderPanel()
+    await screen.findByRole('combobox', { name: FIELD })
 
     apiRequest.mockImplementationOnce(
       () =>
@@ -140,29 +202,29 @@ describe('ReadingStatusPanel (RS14)', () => {
           finish = resolve
         }),
     )
-    await user.click(statusButton('Читаю'))
+    await chooseOption(user, FIELD, 'Читаю')
 
     expect(screen.getByText('Зберігаю…')).toBeInTheDocument()
-    expect(statusButton('Прочитано')).toBeDisabled()
+    expect(field()).toHaveAttribute('data-disabled')
 
     finish({ workId: 'w-1', status: 'READING' })
 
     expect(await screen.findByText('Збережено: «Читаю».')).toBeInTheDocument()
-    expect(statusButton('Прочитано')).toBeEnabled()
+    expect(field()).not.toHaveAttribute('data-disabled')
   })
 
   it('a failed save keeps the confirmed status and a retry re-sends the attempted one', async () => {
     const user = userEvent.setup()
 
-    render(<ReadingStatusPanel workId="w-1" />)
-    await screen.findByRole('group', { name: 'Мій статус читання' })
+    stored = 'NOT_READ'
+    renderPanel()
+    await screen.findByRole('combobox', { name: FIELD })
 
     apiRequest.mockRejectedValueOnce(apiError('Сервер недоступний'))
-    await user.click(statusButton('Прочитано'))
+    await chooseOption(user, FIELD, 'Прочитано')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Сервер недоступний')
-    expect(statusButton('Не читав')).toHaveAttribute('aria-pressed', 'true')
-    expect(statusButton('Прочитано')).toHaveAttribute('aria-pressed', 'false')
+    expect(field()).toHaveTextContent('Не читав')
 
     await user.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
 
@@ -172,20 +234,20 @@ describe('ReadingStatusPanel (RS14)', () => {
     expect(stored).toBe('READ')
   })
 
-  it('a failed load shows an error with a retry that loads the status', async () => {
+  it('a failed load shows an error, not «not set», with a retry that loads the status', async () => {
     const user = userEvent.setup()
 
     apiRequest.mockRejectedValueOnce(apiError('Немає звʼязку'))
-    render(<ReadingStatusPanel workId="w-1" />)
+    renderPanel()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Немає звʼязку')
-    expect(screen.queryByRole('group', { name: 'Мій статус читання' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: FIELD })).not.toBeInTheDocument()
+    expect(screen.queryByText('Вказати статус читання')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
 
-    expect(await screen.findByRole('button', { name: 'Не читав' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent(
+      'Вказати статус читання',
     )
   })
 
@@ -193,11 +255,11 @@ describe('ReadingStatusPanel (RS14)', () => {
     const user = userEvent.setup()
 
     wasBorrowed = true
-    render(<ReadingStatusPanel workId="w-1" />)
+    renderPanel()
 
     expect(await screen.findByText('Була позичена')).toBeInTheDocument()
 
-    await user.click(statusButton('Читаю'))
+    await chooseOption(user, FIELD, 'Читаю')
     await screen.findByText('Збережено: «Читаю».')
 
     expect(screen.getByText('Була позичена')).toBeInTheDocument()
@@ -206,8 +268,8 @@ describe('ReadingStatusPanel (RS14)', () => {
   it('asks only the viewer-scoped /me route — no user id is ever sent (R-8)', async () => {
     const user = userEvent.setup()
 
-    render(<ReadingStatusPanel workId="w-1" />)
-    await user.click(await screen.findByRole('button', { name: 'Читаю' }))
+    renderPanel()
+    await chooseOption(user, FIELD, 'Читаю')
     await screen.findByText('Збережено: «Читаю».')
 
     for (const [path, options] of apiRequest.mock.calls as [string, RequestOptions?][]) {

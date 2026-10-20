@@ -4,6 +4,7 @@ import type { LibraryGroup, LibraryQueryRequest } from '@bookswap/shared'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { useOwnLibrary } from '@/app/lib/use-library'
+import { ShelfReadingStatus } from '@/features/reading-status/index.client'
 import { LIBRARY_PATH, libraryBookHref } from '../model/library-address'
 import { useLibraryFilters } from '../model/use-library-filters'
 import { useShelfActions } from '../model/use-shelf-actions'
@@ -61,6 +62,7 @@ export function OwnShelf({ view, filters, onApplyFilters }: OwnShelfProps) {
             href={groupHref(group)}
             stretchedLink
             cornerMenu={group.copies.length === 1}
+            footer={<ShelfReadingStatus workId={group.work.id} title={group.work.title} />}
           >
             {group.copies.map((copy) =>
               view === 'archive' ? (

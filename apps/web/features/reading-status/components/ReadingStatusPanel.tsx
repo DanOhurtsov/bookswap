@@ -1,60 +1,71 @@
 'use client'
 
-import { READING_STATUS } from '@bookswap/shared'
+import { useId } from 'react'
 import { Chip } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { READING_STATUS_LABELS, WAS_BORROWED_LABEL } from '@/app/lib/labels'
+import { useSession } from '@/app/lib/use-session'
 import { useReadingStatus } from '../model/use-reading-status'
+import { ReadingStatusSelect } from './ReadingStatusSelect'
+
+const HEADING = 'Мій статус читання'
 
 /**
- * Stage 10 (10j.2, §0.15): the viewer's OWN reading status on the work page. Nobody else's status
- * is shown here or anywhere else (R-8), and there is no list of who read the work.
+ * Stage 10 (10j.2, §0.15): the viewer's OWN reading status on the work page and on the own-book
+ * page. Nobody else's status is shown here or anywhere else (R-8), and there is no list of who read
+ * the work.
  *
  * Its failures stay inside this section: a status that cannot be loaded or saved must not take
- * the rest of the work page down with it.
+ * the rest of the page down with it.
  */
 export function ReadingStatusPanel({ workId }: { workId: string }) {
-  const { state, reload, saving, saved, saveError, failed, save } = useReadingStatus(workId)
+  const { state: session } = useSession()
+
+  // The pages render this only for a signed-in viewer; the check names that, so the body below has a
+  // real user id instead of a placeholder.
+  if (session.status !== 'authenticated') return null
+
+  return (
+    <ReadingStatusPanelBody
+      key={`${session.user.id}:${workId}`}
+      userId={session.user.id}
+      workId={workId}
+    />
+  )
+}
+
+function ReadingStatusPanelBody({ userId, workId }: { userId: string; workId: string }) {
+  const { view, retryLoad, save, retrySave } = useReadingStatus({ userId, workId })
+  const id = useId()
 
   return (
     <section className="friends-section">
-      <h2>Мій статус читання</h2>
+      <h2>{HEADING}</h2>
 
-      {state.status === 'loading' && <p className="status status--pending">Завантажую статус…</p>}
+      {view.kind === 'loading' && <p className="status status--pending">Завантажую статус…</p>}
 
-      {state.status === 'error' && (
+      {view.kind === 'error' && (
         <div role="alert">
-          <p className="status status--error">{state.message}</p>
-          <button type="button" onClick={reload}>
+          <p className="status status--error">{view.message}</p>
+          <button type="button" onClick={retryLoad}>
             Спробувати ще раз
           </button>
         </div>
       )}
 
-      {state.status === 'ready' && (
+      {view.kind === 'ready' && (
         <>
-          <div className="actions" role="group" aria-label="Мій статус читання">
-            {READING_STATUS.map((value) => {
-              const current = state.data.status === value
-
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  className={current ? undefined : 'button--ghost'}
-                  aria-pressed={current}
-                  disabled={saving !== undefined}
-                  onClick={() => {
-                    if (!current) void save(value)
-                  }}
-                >
-                  {READING_STATUS_LABELS[value]}
-                </button>
-              )
-            })}
+          <div className="reading-status">
+            <ReadingStatusSelect
+              id={id}
+              label={HEADING}
+              value={view.current}
+              disabled={view.saving !== undefined}
+              onChange={save}
+            />
           </div>
 
-          {state.data.wasBorrowed && (
+          {view.wasBorrowed && (
             <div className="chips">
               <Chip>{WAS_BORROWED_LABEL}</Chip>
             </div>
@@ -62,17 +73,19 @@ export function ReadingStatusPanel({ workId }: { workId: string }) {
 
           <p className="form__aside">Статус бачите лише ви.</p>
 
-          {saving !== undefined && <p className="status status--pending">Зберігаю…</p>}
+          {view.saving !== undefined && <p className="status status--pending">Зберігаю…</p>}
 
           <FormStatus
-            error={saveError}
+            error={view.saveError}
             success={
-              saved === undefined ? undefined : `Збережено: «${READING_STATUS_LABELS[saved]}».`
+              view.saved === undefined
+                ? undefined
+                : `Збережено: «${READING_STATUS_LABELS[view.saved]}».`
             }
           />
 
-          {failed !== undefined && (
-            <button type="button" onClick={() => void save(failed)}>
+          {view.failed !== undefined && (
+            <button type="button" onClick={retrySave}>
               Спробувати ще раз
             </button>
           )}

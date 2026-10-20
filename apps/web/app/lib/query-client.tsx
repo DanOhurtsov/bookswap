@@ -1,8 +1,8 @@
 'use client'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useSession } from './use-session'
+import { useState, type ReactNode } from 'react'
+import { useSession, type SessionState } from './use-session'
 
 /**
  * §3.9: mutations never retry on their own — an unsafe operation (PATCH with
@@ -24,32 +24,50 @@ function createQueryClient(): QueryClient {
  * replaced — not a module-level singleton, which would be shared across every
  * request on a server and, worse, across users (§3.9). This provider only
  * ever runs in the browser (`'use client'`, mounted from the root layout).
- *
+ */
+export function Providers({ children }: { children: ReactNode }) {
+  const [queryClient] = useState(createQueryClient)
+  const { state: session } = useSession()
+
+  useCacheOfOneIdentity(queryClient, session)
+
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+}
+
+/**
  * The cache is cleared when the authenticated identity changes in this same
  * tab (login as a different account, or logout) — otherwise a relogin would
  * still show the previous person's cached data. The very first resolved
  * session (loading → guest/authenticated) is not a "change": there is nothing
  * stale to clear yet.
+ *
+ * BS-140: the clear happens while `Providers` renders, before any child renders
+ * for the new identity — not in an effect. Children's effects run before their
+ * parent's, so with an effect a control that mounted for the new account had
+ * already started its read, and the clear cancelled and dropped that read with
+ * nothing left to start it again: the control stayed "loading" until some
+ * unrelated re-render. Clearing first, the new identity's queries are created
+ * in an empty cache, and nothing of the previous one is rendered even once.
+ * The clear only notifies subscribers on a later tick (TanStack's
+ * `notifyManager`), so no other component is updated during this render.
+ *
+ * The previous identity is state, not a ref, so the "seen it" update is the
+ * React way of adjusting state to a changed input: `Providers` re-renders at
+ * once, before its children.
  */
-export function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(createQueryClient)
-  const { state: session } = useSession()
-  const identity = useRef<{ known: boolean; userId: string | null }>({
+function useCacheOfOneIdentity(queryClient: QueryClient, session: SessionState): void {
+  const [identity, setIdentity] = useState<{ known: boolean; userId: string | null }>({
     known: false,
     userId: null,
   })
 
-  useEffect(() => {
-    if (session.status === 'loading') return
+  if (session.status === 'loading') return
 
-    const userId = session.status === 'authenticated' ? session.user.id : null
+  const userId = session.status === 'authenticated' ? session.user.id : null
 
-    if (identity.current.known && identity.current.userId !== userId) {
-      queryClient.clear()
-    }
+  if (identity.known && identity.userId === userId) return
 
-    identity.current = { known: true, userId }
-  }, [session, queryClient])
+  if (identity.known) queryClient.clear()
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  setIdentity({ known: true, userId })
 }

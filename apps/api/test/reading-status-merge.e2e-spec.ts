@@ -5,6 +5,7 @@ import {
   apiErrorSchema,
   readingListResponseSchema,
   readingStatusResponseSchema,
+  readingStatusesResponseSchema,
   workMergedDetailsSchema,
   type ReadingStatus,
 } from '@bookswap/shared'
@@ -264,8 +265,25 @@ describe('Stage 10 (10j.1): статуси читання при merge (e2e)', (
       expect(readingStatusResponseSchema.parse(read.body)).toEqual({
         workId: target.workId,
         status: 'READ',
+        isSet: true,
         wasBorrowed: true,
       })
+
+      // BS-140: пакет читає злитий ID так само, як одиночний GET, і каже, про який ID ішлося.
+      const batch = await request(app.getHttpServer())
+        .get(url(`/me/reading-statuses?workIds=${source.workId},${target.workId}`))
+        .set('Cookie', user.cookie)
+        .expect(200)
+
+      expect(readingStatusesResponseSchema.parse(batch.body).items).toEqual(
+        [source.workId, target.workId].map((requestedWorkId) => ({
+          requestedWorkId,
+          workId: target.workId,
+          status: 'READ',
+          isSet: true,
+          wasBorrowed: true,
+        })),
+      )
 
       const list = await request(app.getHttpServer())
         .get(url('/me/reading-list'))

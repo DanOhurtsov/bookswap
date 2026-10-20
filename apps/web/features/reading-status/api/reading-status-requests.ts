@@ -1,6 +1,7 @@
 import {
   readingListResponseSchema,
   readingStatusResponseSchema,
+  readingStatusesResponseSchema,
   setReadingStatusResponseSchema,
   type ReadingListStatus,
   type ReadingStatus,
@@ -16,6 +17,12 @@ const statusPath = (workId: string) => `/me/reading-statuses/${encodeURIComponen
 
 export const fetchReadingStatus = (workId: string, signal?: AbortSignal) =>
   apiRequest(statusPath(workId), { schema: readingStatusResponseSchema, signal })
+
+/** BS-140: many works in one request; `workIds` are unique and at most `READING_STATUS_BATCH_LIMITS.idsMax`. */
+export const fetchReadingStatuses = (workIds: readonly string[]) =>
+  apiRequest(`/me/reading-statuses?workIds=${workIds.map(encodeURIComponent).join(',')}`, {
+    schema: readingStatusesResponseSchema,
+  })
 
 export const saveReadingStatus = (workId: string, status: ReadingStatus) =>
   apiRequest(statusPath(workId), {

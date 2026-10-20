@@ -629,6 +629,34 @@ a:focus-visible > .link-underline {
   gap: 0.35rem;
 }
 
+/*
+ * BS-140: особистий статус читання. На картці полиці — окремий рядок під примірниками, за рискою: це
+ * думка власника про твір, а не стан примірника для обміну, і поруч із доступністю їх не плутають.
+ */
+.reading-status [data-slot='select-trigger'] {
+  width: auto;
+  min-width: 12rem;
+  max-width: 100%;
+}
+
+.reading-status--card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin-top: 0.5rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--bookswap-muted);
+}
+
+.reading-status--card [data-slot='select-trigger'] {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
 /* Ознаки перекладу (§10.3) — факти, а не оцінки, тому нейтральні. */
 .chips {
   display: flex;

@@ -14,12 +14,14 @@ import type {
   WorkHoldersResponse,
 } from '@bookswap/shared'
 import { withQueryClient } from '@/app/lib/test-query-client'
+import { chooseOption } from '@/components/Form/test-choose-option'
 import WorkPage from './page'
 
 /**
  * RS14/RS15 (10j.2) on the real work page: the viewer's own status next to the unchanged
  * holders block and the transfer history renamed «Хто брав цю книжку» (Q16). Only the HTTP
- * client is mocked; the panels are real.
+ * client is mocked; the panels are real. BS-140: the status is one select instead of three
+ * `aria-pressed` buttons — the same checks, read from the select.
  */
 
 jest.mock('@/app/lib/api', () => {
@@ -156,13 +158,20 @@ beforeEach(() => {
         if (options?.method === 'PUT')
           return Promise.resolve({ workId: 'w-1', status: options.body?.status })
 
-        return Promise.resolve({ workId: 'w-1', status: 'NOT_READ', wasBorrowed: true })
+        return Promise.resolve({
+          workId: 'w-1',
+          status: 'NOT_READ',
+          isSet: true,
+          wasBorrowed: true,
+        })
       }
 
       return Promise.reject(new Error(`unexpected ${path}`))
     },
   )
 })
+
+const FIELD = 'Мій статус читання'
 
 function section(heading: string): HTMLElement {
   return screen.getByRole('heading', { name: heading }).closest('section') as HTMLElement
@@ -195,16 +204,14 @@ describe('Work page: own reading status and «Хто брав цю книжку�
 
     render(withQueryClient(<WorkPage />))
 
-    const own = within(await screen.findByRole('group', { name: 'Мій статус читання' }))
-
-    expect(screen.getAllByRole('group', { name: 'Мій статус читання' })).toHaveLength(1)
-    expect(own.getByRole('button', { name: 'Не читав' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent('Не читав')
+    expect(screen.getAllByRole('combobox', { name: FIELD })).toHaveLength(1)
     expect(within(section('Мій статус читання')).getByText('Була позичена')).toBeInTheDocument()
 
-    await user.click(own.getByRole('button', { name: 'Прочитано' }))
+    await chooseOption(user, FIELD, 'Прочитано')
 
     expect(await screen.findByText('Збережено: «Прочитано».')).toBeInTheDocument()
-    expect(own.getByRole('button', { name: 'Прочитано' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('combobox', { name: FIELD })).toHaveTextContent('Прочитано')
     expect(apiRequest).toHaveBeenCalledWith('/me/reading-statuses/w-1', {
       method: 'PUT',
       body: { status: 'READ' },
@@ -260,7 +267,7 @@ describe('Work page: own reading status and «Хто брав цю книжку�
         statusRequestsBy.push(sessionUserId)
 
         return sessionUserId === 'a'
-          ? Promise.resolve({ workId: 'w-1', status: 'READ', wasBorrowed: true })
+          ? Promise.resolve({ workId: 'w-1', status: 'READ', isSet: true, wasBorrowed: true })
           : new Promise((resolve) => {
               settleB = resolve
             })
@@ -270,13 +277,11 @@ describe('Work page: own reading status and «Хто брав цю книжку�
     })
 
     const { rerender } = render(withQueryClient(<WorkPage />))
-    const ownA = within(await screen.findByRole('group', { name: 'Мій статус читання' }))
-
-    expect(ownA.getByRole('button', { name: 'Прочитано' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent('Прочитано')
     expect(within(section('Мій статус читання')).getByText('Була позичена')).toBeInTheDocument()
 
     // A starts a save that is still in flight when the identity changes.
-    await user.click(ownA.getByRole('button', { name: 'Читаю' }))
+    await chooseOption(user, FIELD, 'Читаю')
     expect(screen.getByText('Зберігаю…')).toBeInTheDocument()
 
     sessionUserId = 'b'
@@ -286,7 +291,7 @@ describe('Work page: own reading status and «Хто брав цю книжку�
     const panel = section('Мій статус читання')
 
     expect(within(panel).getByText('Завантажую статус…')).toBeInTheDocument()
-    expect(within(panel).queryByRole('group', { name: 'Мій статус читання' })).toBeNull()
+    expect(within(panel).queryByRole('combobox', { name: FIELD })).toBeNull()
     expect(within(panel).queryByText('Була позичена')).toBeNull()
     expect(within(panel).queryByText('Зберігаю…')).toBeNull()
     await waitFor(() => {
@@ -296,14 +301,12 @@ describe('Work page: own reading status and «Хто брав цю книжку�
     // A's late save answer must not surface under B.
     await act(async () => {
       settleSaveA({ workId: 'w-1', status: 'READING' })
-      settleB({ workId: 'w-1', status: 'NOT_READ', wasBorrowed: false })
+      settleB({ workId: 'w-1', status: 'NOT_READ', isSet: true, wasBorrowed: false })
       await Promise.resolve()
     })
 
-    const ownB = within(await screen.findByRole('group', { name: 'Мій статус читання' }))
-
-    expect(ownB.getByRole('button', { name: 'Не читав' })).toHaveAttribute('aria-pressed', 'true')
-    expect(ownB.getByRole('button', { name: 'Читаю' })).toHaveAttribute('aria-pressed', 'false')
+    expect(await screen.findByRole('combobox', { name: FIELD })).toHaveTextContent('Не читав')
+    expect(screen.getByRole('combobox', { name: FIELD })).not.toHaveTextContent('Читаю')
     expect(screen.queryByText(/Збережено/)).toBeNull()
     expect(within(section('Мій статус читання')).queryByText('Була позичена')).toBeNull()
   })

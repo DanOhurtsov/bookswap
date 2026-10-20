@@ -51,6 +51,21 @@ export class CanonicalWorkService {
   }
 
   /**
+   * {@link resolve} for many ids in one query (BS-140). An id that names no work is absent from the
+   * map instead of failing the rest: a batch answers for what exists.
+   */
+  async resolveMany(requestedWorkIds: readonly string[]): Promise<Map<string, string>> {
+    if (requestedWorkIds.length === 0) return new Map()
+
+    const works = await this.prisma.work.findMany({
+      where: { id: { in: [...requestedWorkIds] } },
+      select: { id: true, mergedIntoId: true },
+    })
+
+    return new Map(works.map((work) => [work.id, work.mergedIntoId ?? work.id]))
+  }
+
+  /**
    * The write-side counterpart of {@link resolve}: refuses instead of redirecting.
    *
    * A write is not silently retargeted. Creating a `Translation` or an `Edition`
