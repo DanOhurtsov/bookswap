@@ -6,6 +6,7 @@ import {
   type ReadingListResponse,
   type ReadingStatus,
   type ReadingStatusResponse,
+  type ReadingStatusesResponse,
   type SetReadingStatusResponse,
 } from '@bookswap/shared'
 import {
@@ -37,8 +38,9 @@ export class ReadingStatusService {
   ) {}
 
   /**
-   * Q17: немає рядка = «не встановлювали». Рядок пишеться лише коли статус справді змінюється: повторний
-   * PUT того самого статусу й `NOT_READ` за відсутності рядка — no-op без жодного запису й без зміни `updatedAt`.
+   * Q17: немає рядка = «не встановлювали». BS-140: будь-який явний вибір, зокрема перший `NOT_READ`, створює
+   * рядок. Наявний рядок пишеться лише коли статус справді змінюється: повторний PUT того самого статусу —
+   * no-op без жодного запису й без зміни `updatedAt`.
    *
    * Q19 вирішує `updatedAt`, тож він мусить іти в порядку фактичних змін. Тому час ставить `stamp` —
    * `clock_timestamp()` бази, а не час початку запиту, — і лише тоді, коли рядок уже належить цій транзакції
@@ -103,8 +105,6 @@ export class ReadingStatusService {
         return
       }
 
-      if (status === 'NOT_READ') return
-
       const created = await tx.workReadingStatus.createManyAndReturn({
         data: [{ userId, workId, status }],
         skipDuplicates: true,
@@ -126,7 +126,10 @@ export class ReadingStatusService {
     )
   }
 
-  /** Немає рядка або явний `NOT_READ` для клієнта однакові. Злитий `Work` читається як канонічний. */
+  /**
+   * Без рядка `status` лишається `NOT_READ` заради наявних споживачів, а `isSet: false` відрізняє це від
+   * явного `NOT_READ` (BS-140). Злитий `Work` читається як канонічний.
+   */
   async get(userId: string, requestedWorkId: string): Promise<ReadingStatusResponse> {
     const { workId } = await this.canonical.resolve(requestedWorkId)
     const [row, borrowed] = await Promise.all([
@@ -137,7 +140,45 @@ export class ReadingStatusService {
       this.borrowedWorkIds(userId, [workId]),
     ])
 
-    return { workId, status: row?.status ?? 'NOT_READ', wasBorrowed: borrowed.has(workId) }
+    return toStatusResponse(workId, row?.status, borrowed.has(workId))
+  }
+
+  /**
+   * BS-140: стан багатьох творів для полиці. Три запити незалежно від кількості ID — канонічні ID, рядки
+   * статусу, тег — а не по запиту на твір. Невідомий ID у відповідь не потрапляє; кілька ID одного
+   * канонічного твору отримують той самий стан.
+   */
+  async getMany(
+    userId: string,
+    requestedWorkIds: readonly string[],
+  ): Promise<ReadingStatusesResponse> {
+    const canonicalOf = await this.canonical.resolveMany(requestedWorkIds)
+    const workIds = [...new Set(canonicalOf.values())]
+    const [rows, borrowed] = await Promise.all([
+      workIds.length === 0
+        ? []
+        : this.prisma.workReadingStatus.findMany({
+            where: { userId, workId: { in: workIds } },
+            select: { workId: true, status: true },
+          }),
+      this.borrowedWorkIds(userId, workIds),
+    ])
+    const statusOf = new Map(rows.map((row) => [row.workId, row.status]))
+
+    return {
+      items: requestedWorkIds.flatMap((requestedWorkId) => {
+        const workId = canonicalOf.get(requestedWorkId)
+
+        if (workId === undefined) return []
+
+        return [
+          {
+            requestedWorkId,
+            ...toStatusResponse(workId, statusOf.get(workId), borrowed.has(workId)),
+          },
+        ]
+      }),
+    }
   }
 
   /**
@@ -207,6 +248,14 @@ export class ReadingStatusService {
 
     return new Set(loans.map((loan) => loan.copy.edition.workId))
   }
+}
+
+function toStatusResponse(
+  workId: string,
+  status: ReadingStatus | undefined,
+  wasBorrowed: boolean,
+): ReadingStatusResponse {
+  return { workId, status: status ?? 'NOT_READ', isSet: status !== undefined, wasBorrowed }
 }
 
 type WriteClient = Pick<PrismaService, 'workReadingStatus' | '$queryRaw' | '$executeRaw'>

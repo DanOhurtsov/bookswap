@@ -733,16 +733,21 @@ export {
 } from './contracts/guest-loan-response'
 export {
   READING_LIST_LIMITS,
+  READING_STATUS_BATCH_LIMITS,
+  parseWorkIdList,
   readingListItemSchema,
   readingListQueryRequestSchema,
   readingListResponseSchema,
   readingStatusResponseSchema,
+  readingStatusesQueryRequestSchema,
+  readingStatusesResponseSchema,
   setReadingStatusRequestSchema,
   setReadingStatusResponseSchema,
   type ReadingListItem,
   type ReadingListQueryRequest,
   type ReadingListResponse,
   type ReadingStatusResponse,
+  type ReadingStatusesResponse,
   type SetReadingStatusRequest,
   type SetReadingStatusResponse,
 } from './contracts/reading-status'

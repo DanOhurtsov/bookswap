@@ -66,6 +66,12 @@ jest.mock('./RecordExistingLoanForm', () => ({
   ),
 }))
 
+// BS-140: the status row asks the reading-status API on its own; this spec pins the shelf's own
+// requests, and `LibraryScreen.reading-status.spec.tsx` covers the row on the shelf.
+jest.mock('@/features/reading-status/index.client', () => ({
+  ShelfReadingStatus: () => null,
+}))
+
 jest.mock('@/features/guest-loans/index.client', () => ({
   CreateGuestLoanForm: ({
     copyId,

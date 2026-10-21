@@ -1,8 +1,12 @@
 import {
+  READING_STATUS_BATCH_LIMITS,
+  parseWorkIdList,
   readingListItemSchema,
   readingListQueryRequestSchema,
   readingListResponseSchema,
   readingStatusResponseSchema,
+  readingStatusesQueryRequestSchema,
+  readingStatusesResponseSchema,
   setReadingStatusRequestSchema,
   setReadingStatusResponseSchema,
 } from './reading-status'
@@ -51,12 +55,38 @@ describe('відповіді', () => {
     ).toBe(false)
   })
 
-  it('GET-відповідь має wasBorrowed і не має зайвого', () => {
-    const ok = { workId: 'w', status: 'NOT_READ', wasBorrowed: false }
+  it('GET-відповідь має isSet і wasBorrowed і не має зайвого', () => {
+    const ok = { workId: 'w', status: 'NOT_READ', isSet: false, wasBorrowed: false }
 
     expect(readingStatusResponseSchema.safeParse(ok).success).toBe(true)
     expect(readingStatusResponseSchema.safeParse({ ...ok, userId: 'u' }).success).toBe(false)
+    expect(
+      readingStatusResponseSchema.safeParse({ workId: 'w', status: 'READ', wasBorrowed: false })
+        .success,
+    ).toBe(false)
     expect(readingStatusResponseSchema.safeParse({ workId: 'w', status: 'READ' }).success).toBe(
+      false,
+    )
+  })
+
+  it('пакетна відповідь: кожен елемент несе requestedWorkId і той самий стан, що й одиночний GET', () => {
+    const element = {
+      requestedWorkId: 'w-old',
+      workId: 'w',
+      status: 'READ',
+      isSet: true,
+      wasBorrowed: false,
+    }
+
+    expect(readingStatusesResponseSchema.safeParse({ items: [element] }).success).toBe(true)
+    expect(readingStatusesResponseSchema.safeParse({ items: [] }).success).toBe(true)
+    expect(
+      readingStatusesResponseSchema.safeParse({ items: [{ ...element, userId: 'u' }] }).success,
+    ).toBe(false)
+
+    const { requestedWorkId: _omitted, ...withoutRequested } = element
+
+    expect(readingStatusesResponseSchema.safeParse({ items: [withoutRequested] }).success).toBe(
       false,
     )
   })
@@ -89,5 +119,42 @@ describe('readingListQueryRequestSchema', () => {
     ['зайве поле', { userId: 'u' }, false],
   ])('%s', (_name, payload, valid) => {
     expect(readingListQueryRequestSchema.safeParse(payload).success).toBe(valid)
+  })
+})
+
+describe('parseWorkIdList / readingStatusesQueryRequestSchema', () => {
+  it('зливає повтори в порядку першої появи', () => {
+    expect(parseWorkIdList('b,a,b,c,a')).toEqual(['b', 'a', 'c'])
+    expect(readingStatusesQueryRequestSchema.parse({ workIds: 'b,a,b' })).toEqual({
+      workIds: ['b', 'a'],
+    })
+  })
+
+  it('рівно 100 унікальних ID приймає; 101 — ні, навіть якщо повтори дають довший рядок', () => {
+    const hundred = Array.from({ length: READING_STATUS_BATCH_LIMITS.idsMax }, (_, i) => `w${i}`)
+
+    expect(parseWorkIdList(hundred.join(','))).toHaveLength(100)
+    expect(parseWorkIdList([...hundred, 'w0', 'w1'].join(','))).toHaveLength(100)
+    expect(parseWorkIdList([...hundred, 'extra'].join(','))).toBeUndefined()
+  })
+
+  it.each([
+    ['порожній рядок', ''],
+    ['порожній елемент', 'a,,b'],
+    ['кома в кінці', 'a,'],
+    ['пробіл', 'a, b'],
+    ['задовгий ID', 'x'.repeat(65)],
+    ['задовгий сирий рядок', 'a,'.repeat(READING_STATUS_BATCH_LIMITS.queryMax)],
+  ])('відхиляє: %s', (_name, raw) => {
+    expect(parseWorkIdList(raw)).toBeUndefined()
+    expect(readingStatusesQueryRequestSchema.safeParse({ workIds: raw }).success).toBe(false)
+  })
+
+  it('інших параметрів і масиву замість рядка не приймає', () => {
+    expect(readingStatusesQueryRequestSchema.safeParse({ workIds: ['a', 'b'] }).success).toBe(false)
+    expect(readingStatusesQueryRequestSchema.safeParse({ workIds: 'a', userId: 'u' }).success).toBe(
+      false,
+    )
+    expect(readingStatusesQueryRequestSchema.safeParse({}).success).toBe(false)
   })
 })

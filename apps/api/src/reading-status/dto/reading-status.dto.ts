@@ -1,5 +1,12 @@
-import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
-import { READING_LIST_LIMITS, READING_LIST_STATUS, READING_STATUS } from '@bookswap/shared'
+import { Transform } from 'class-transformer'
+import { IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
+import {
+  READING_LIST_LIMITS,
+  READING_LIST_STATUS,
+  READING_STATUS,
+  READING_STATUS_BATCH_LIMITS,
+  parseWorkIdList,
+} from '@bookswap/shared'
 
 /** `PUT /me/reading-statuses/:workId { status }`. Правила збігаються з `setReadingStatusRequestSchema`. */
 export class SetReadingStatusDto {
@@ -29,4 +36,19 @@ export class ReadingListQueryDto {
     message: `limit не більший за ${READING_LIST_LIMITS.pageMax}`,
   })
   limit?: string
+}
+
+/**
+ * BS-140, `GET /me/reading-statuses?workIds=a,b,…`. Розбір — той самий `parseWorkIdList`, що й у
+ * `readingStatusesQueryRequestSchema`: повтори зливаються, 1…100 унікальних ID. Масивом стає лише
+ * правильний рядок: хибний рядок лишається рядком, а повторений параметр (він приходить масивом) чи
+ * відсутній — `null`, і обидва відхиляє `@IsArray`.
+ */
+export class ReadingStatusesQueryDto {
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? (parseWorkIdList(value) ?? value) : null,
+  )
+  @IsArray({ message: READING_STATUS_BATCH_LIMITS.invalidMessage })
+  @IsString({ each: true })
+  workIds!: string[]
 }

@@ -93,6 +93,8 @@ type GroupCardProps = {
   stretchedLink?: boolean
   /** A menu sits in the card's top-right corner: the header keeps clear of it. */
   cornerMenu?: boolean
+  /** What belongs to the whole card rather than to one copy, under the copies. */
+  footer?: ReactNode
   children: ReactNode
 }
 
@@ -106,6 +108,7 @@ export function GroupCard({
   href,
   stretchedLink = false,
   cornerMenu = false,
+  footer,
   children,
 }: GroupCardProps) {
   return (
@@ -117,6 +120,7 @@ export function GroupCard({
         cornerMenu={cornerMenu}
       />
       <ul className="copies">{children}</ul>
+      {footer}
     </li>
   )
 }

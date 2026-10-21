@@ -6,6 +6,7 @@ import {
   copyHistoryResponseSchema,
   readingListResponseSchema,
   readingStatusResponseSchema,
+  readingStatusesResponseSchema,
   setReadingStatusResponseSchema,
   workHistoryResponseSchema,
   type LoanStatus,
@@ -51,6 +52,11 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
   const getStatus = (account: Account, workId: string): request.Test =>
     request(app.getHttpServer())
       .get(url(`/me/reading-statuses/${workId}`))
+      .set('Cookie', account.cookie)
+
+  const getMany = (account: Account, workIds: string): request.Test =>
+    request(app.getHttpServer())
+      .get(url(`/me/reading-statuses?workIds=${workIds}`))
       .set('Cookie', account.cookie)
 
   const list = (account: Account, query = ''): request.Test =>
@@ -134,10 +140,20 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
   })
 
   describe('RS1: ручний статус', () => {
-    it('без рядка GET дає NOT_READ, а PUT NOT_READ рядка не створює і нічого не міняє', async () => {
+    // BS-140 (рішення 4): явний NOT_READ без рядка тепер створює запис. Раніше це був no-op.
+    it('без рядка GET дає NOT_READ з isSet: false; перший PUT NOT_READ створює рядок, повторний — no-op', async () => {
       const work = await newShelf()
+      const before = readingStatusResponseSchema.parse(
+        (await getStatus(reader, work.workId).expect(200)).body,
+      )
 
-      expect(await statusOf(reader, work.workId)).toBe('NOT_READ')
+      expect(before).toEqual({
+        workId: work.workId,
+        status: 'NOT_READ',
+        isSet: false,
+        wasBorrowed: false,
+      })
+      expect(await rowOf(reader.id, work.workId)).toBeNull()
 
       const res = await put(reader, work.workId, { status: 'NOT_READ' }).expect(200)
 
@@ -145,7 +161,59 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
         workId: work.workId,
         status: 'NOT_READ',
       })
-      expect(await rowOf(reader.id, work.workId)).toBeNull()
+
+      const created = await rowOf(reader.id, work.workId)
+
+      expect(created?.status).toBe('NOT_READ')
+      expect(
+        readingStatusResponseSchema.parse((await getStatus(reader, work.workId).expect(200)).body),
+      ).toEqual({ workId: work.workId, status: 'NOT_READ', isSet: true, wasBorrowed: false })
+
+      await sleep(20)
+      await put(reader, work.workId, { status: 'NOT_READ' }).expect(200)
+
+      expect(await rowOf(reader.id, work.workId)).toEqual(created)
+    })
+
+    it('усі переходи: зі «не встановлено» в кожен статус і між будь-якими двома; кожен змінює updatedAt', async () => {
+      for (const first of ['NOT_READ', 'READING', 'READ'] as const) {
+        for (const second of ['NOT_READ', 'READING', 'READ'] as const) {
+          if (first === second) continue
+
+          const work = await newShelf()
+
+          await put(reader, work.workId, { status: first }).expect(200)
+
+          const initial = await rowOf(reader.id, work.workId)
+
+          expect(initial?.status).toBe(first)
+          await sleep(5)
+          await put(reader, work.workId, { status: second }).expect(200)
+
+          const changed = await rowOf(reader.id, work.workId)
+
+          expect({ first, second, status: changed?.status }).toEqual({
+            first,
+            second,
+            status: second,
+          })
+          expect(changed!.updatedAt.getTime()).toBeGreaterThan(initial!.updatedAt.getTime())
+        }
+      }
+    })
+
+    it('паралельні перші PUT однієї пари (зокрема NOT_READ) дають рівно один рядок', async () => {
+      const work = await newShelf()
+      const statuses = ['NOT_READ', 'READ', 'NOT_READ', 'READING', 'NOT_READ'] as const
+
+      const responses = await Promise.all(
+        statuses.map((status) => put(reader, work.workId, { status })),
+      )
+
+      expect(responses.map((response) => response.status)).toEqual(statuses.map(() => 200))
+      expect(
+        await prisma.workReadingStatus.count({ where: { userId: reader.id, workId: work.workId } }),
+      ).toBe(1)
     })
 
     it('READING → READ → READING: довільні переходи, кожен змінює updatedAt', async () => {
@@ -227,6 +295,173 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
         .get(url(`/me/reading-statuses/${shelf.workId}`))
         .expect(401)
       await request(app.getHttpServer()).get(url('/me/reading-list')).expect(401)
+      await request(app.getHttpServer())
+        .get(url(`/me/reading-statuses?workIds=${shelf.workId}`))
+        .expect(401)
+    })
+  })
+
+  describe('BS-140: пакетне читання для полиці', () => {
+    it('стан кожного твору в порядку запиту: не встановлено, явний NOT_READ, READING, READ; тег; повтори злито; невідомий ID пропущено', async () => {
+      const [unset, explicit, reading, read] = await Promise.all([
+        newShelf(),
+        newShelf(),
+        newShelf(),
+        newShelf(),
+      ])
+
+      await put(reader, explicit.workId, { status: 'NOT_READ' }).expect(200)
+      await put(reader, reading.workId, { status: 'READING' }).expect(200)
+      await put(reader, read.workId, { status: 'READ' }).expect(200)
+      await seedLoan(read, { status: 'RETURNED', handedAt: new Date() })
+
+      const ids = [
+        read.workId,
+        unset.workId,
+        'no-such-work',
+        explicit.workId,
+        read.workId,
+        reading.workId,
+      ]
+      const body = readingStatusesResponseSchema.parse(
+        (await getMany(reader, ids.join(',')).expect(200)).body,
+      )
+
+      expect(body.items).toEqual([
+        {
+          requestedWorkId: read.workId,
+          workId: read.workId,
+          status: 'READ',
+          isSet: true,
+          wasBorrowed: true,
+        },
+        {
+          requestedWorkId: unset.workId,
+          workId: unset.workId,
+          status: 'NOT_READ',
+          isSet: false,
+          wasBorrowed: false,
+        },
+        {
+          requestedWorkId: explicit.workId,
+          workId: explicit.workId,
+          status: 'NOT_READ',
+          isSet: true,
+          wasBorrowed: false,
+        },
+        {
+          requestedWorkId: reading.workId,
+          workId: reading.workId,
+          status: 'READING',
+          isSet: true,
+          wasBorrowed: false,
+        },
+      ])
+
+      // Те саме, що й одиночний GET для кожного твору.
+      for (const item of body.items) {
+        const { requestedWorkId, ...single } = item
+
+        expect(
+          readingStatusResponseSchema.parse((await getStatus(reader, requestedWorkId)).body),
+        ).toEqual(single)
+      }
+    })
+
+    it('приватність: інший акаунт тим самим запитом бачить лише власний стан', async () => {
+      const work = await newShelf()
+
+      await put(reader, work.workId, { status: 'READ' }).expect(200)
+
+      for (const other of [owner, friend, stranger, blocked]) {
+        const body = readingStatusesResponseSchema.parse(
+          (await getMany(other, work.workId).expect(200)).body,
+        )
+
+        expect(body.items).toEqual([
+          {
+            requestedWorkId: work.workId,
+            workId: work.workId,
+            status: 'NOT_READ',
+            isSet: false,
+            wasBorrowed: false,
+          },
+        ])
+      }
+    })
+
+    it('кількість SQL-запитів не залежить від кількості ID у пакеті', async () => {
+      const works = await Promise.all(Array.from({ length: 12 }, () => newShelf()))
+
+      for (const [index, work] of works.entries()) {
+        if (index % 2 === 0) await put(reader, work.workId, { status: 'READ' }).expect(200)
+      }
+
+      const spies = [
+        jest.spyOn(prisma.work, 'findMany'),
+        jest.spyOn(prisma.workReadingStatus, 'findMany'),
+        jest.spyOn(prisma.loan, 'findMany'),
+      ]
+
+      try {
+        const callsFor = async (ids: string[]): Promise<number[]> => {
+          for (const spy of spies) spy.mockClear()
+          await getMany(reader, ids.join(',')).expect(200)
+
+          return spies.map((spy) => spy.mock.calls.length)
+        }
+
+        const one = await callsFor([works[0]!.workId])
+        const many = await callsFor(works.map((work) => work.workId))
+
+        expect(one).toEqual([1, 1, 1])
+        expect(many).toEqual(one)
+      } finally {
+        for (const spy of spies) spy.mockRestore()
+      }
+    })
+
+    it('100 унікальних ID (з повторами понад те) приймає; 101 — 400', async () => {
+      const ids = Array.from({ length: 100 }, (_, index) => `missing-${String(index)}`)
+
+      const ok = readingStatusesResponseSchema.parse(
+        (await getMany(reader, [shelf.workId, ...ids.slice(1), shelf.workId].join(',')).expect(200))
+          .body,
+      )
+
+      expect(ok.items.map((item) => item.requestedWorkId)).toEqual([shelf.workId])
+
+      const tooMany = await getMany(reader, [...ids, 'one-more'].join(',')).expect(400)
+
+      expect(apiErrorSchema.parse(tooMany.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
+    })
+
+    it.each([
+      ['без параметра', ''],
+      ['порожній', '?workIds='],
+      ['порожній елемент', '?workIds=a,,b'],
+      ['пробіл', '?workIds=a,%20b'],
+      ['повторений параметр', '?workIds=a&workIds=b'],
+      ['зайвий параметр', '?workIds=a&userId=b'],
+    ])('негатив: %s → 400 VALIDATION_ERROR', async (_name, query) => {
+      const res = await request(app.getHttpServer())
+        .get(url(`/me/reading-statuses${query}`))
+        .set('Cookie', reader.cookie)
+        .expect(400)
+
+      expect(apiErrorSchema.parse(res.body).code).toBe(API_ERROR_CODES.VALIDATION_ERROR)
+    })
+
+    it('статичний маршрут не перехоплює одиночний: GET і PUT /:workId працюють як раніше', async () => {
+      const work = await newShelf()
+
+      await put(reader, work.workId, { status: 'READING' }).expect(200)
+
+      expect(await statusOf(reader, work.workId)).toBe('READING')
+      expect(
+        readingStatusesResponseSchema.parse((await getMany(reader, work.workId).expect(200)).body)
+          .items[0]?.status,
+      ).toBe('READING')
     })
   })
 
@@ -459,7 +694,9 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
       await put(reader, work.workId, { status: 'READ' }).expect(200)
 
       for (const other of [owner, friend, stranger, blocked]) {
-        expect(await statusOf(other, work.workId)).toBe('NOT_READ')
+        expect(
+          readingStatusResponseSchema.parse((await getStatus(other, work.workId).expect(200)).body),
+        ).toMatchObject({ status: 'NOT_READ', isSet: false })
         const items = readingListResponseSchema.parse((await list(other)).body).items
 
         expect(items.map((entry) => entry.work.id)).not.toContain(work.workId)
@@ -689,6 +926,7 @@ describe('Stage 10 (10j.1): особисті статуси читання (e2e)
 
       setReadingStatusResponseSchema.parse(set.body)
       readingStatusResponseSchema.parse((await getStatus(reader, work.workId).expect(200)).body)
+      readingStatusesResponseSchema.parse((await getMany(reader, work.workId).expect(200)).body)
       readingListResponseSchema.parse((await list(reader).expect(200)).body)
     })
   })

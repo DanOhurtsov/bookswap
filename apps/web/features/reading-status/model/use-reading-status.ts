@@ -1,106 +1,142 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ReadingStatus, ReadingStatusResponse } from '@bookswap/shared'
-import { ApiRequestError, describeError } from '@/app/lib/api'
-import { fetchReadingStatus, saveReadingStatus } from '../api/reading-status-requests'
+import { loadReadingStatus } from '../api/reading-status-batch'
+import { saveReadingStatus } from '../api/reading-status-requests'
+import { asReadingStatus, toReadingStatusView, type ReadingStatusView } from './reading-status-view'
 
-export type ReadingStatusState =
-  | { status: 'loading' }
-  | { status: 'ready'; data: ReadingStatusResponse }
-  | { status: 'error'; message: string }
+/**
+ * BS-140: the one key of «this user's status of this work» (CONVENTIONS §3.9). Every control of the
+ * work — the cards of its editions on the shelf, the own-book page, the work page — reads it, and a
+ * save writes it, so they cannot disagree. The user is part of the key: another account in the same
+ * tab never reads this entry, even before `Providers` clears the cache.
+ */
+export const readingStatusQueryKey = (userId: string, workId: string) =>
+  ['reading-status', userId, workId] as const
+
+/**
+ * How long a status is trusted without asking again. Going from the shelf to a book and back would
+ * otherwise re-read every card; a save updates the entry directly whatever this is.
+ */
+const READING_STATUS_STALE_MS = 30_000
 
 export interface ReadingStatusController {
-  state: ReadingStatusState
-  reload: () => void
-  /** The status whose `PUT` is in flight; the control stays locked until it settles. */
-  saving: ReadingStatus | undefined
-  /** Last confirmed save — cleared by the next attempt. */
-  saved: ReadingStatus | undefined
-  saveError: unknown
-  /** What a retry re-sends: the status of the failed `PUT`. */
-  failed: ReadingStatus | undefined
-  save: (status: ReadingStatus) => Promise<void>
+  view: ReadingStatusView
+  retryLoad: () => void
+  save: (status: ReadingStatus) => void
+  retrySave: () => void
 }
 
 /**
- * Stage 10 (10j.2): the viewer's own status for one `Work`. Mount it keyed by the canonical work
- * id — a different work is a different resource, not a transition of this one.
+ * The viewer's own status of one `Work`. Mount it below the session guard, keyed by user and work:
+ * another account or another work is another resource, not a transition of this one — so this
+ * control's save state (pending, saved, failed) never carries over.
  *
- * A failed save keeps the last confirmed status on screen (nothing optimistic to roll back) and
- * remembers the attempted status for a retry.
+ * A merged work is read as its canonical one (the answer's `workId`). From the moment a read of
+ * `workId` names another work, this control reads, saves and locks by that canonical work's entry,
+ * like every control of it — so cards of the merged work and of the work it went into cannot
+ * disagree, nor save over each other. Until then a save goes to `workId`, and the server refuses it
+ * for a merged work (409 `WORK_MERGED`): that stays an error, never redirected or repeated.
+ *
+ * A confirmed save first cancels every read of the saved entry still in flight — whether it started
+ * before the `PUT` or during it, single or batched — and then writes the answer into the cache. A
+ * read that landed earlier is simply overwritten, so no old answer can put the previous status back.
+ * Nothing is optimistic: a failed save leaves the confirmed status on screen with nothing to roll
+ * back.
  */
-export function useReadingStatus(workId: string): ReadingStatusController {
-  const [state, setState] = useState<ReadingStatusState>({ status: 'loading' })
-  const [nonce, setNonce] = useState(0)
-  const [saving, setSaving] = useState<ReadingStatus>()
-  const [saved, setSaved] = useState<ReadingStatus>()
-  const [saveError, setSaveError] = useState<unknown>()
-  const [failed, setFailed] = useState<ReadingStatus>()
+export function useReadingStatus({
+  userId,
+  workId,
+}: {
+  userId: string
+  workId: string
+}): ReadingStatusController {
+  const queryClient = useQueryClient()
+  const requestedKey = readingStatusQueryKey(userId, workId)
 
-  // Synchronous guard against a second click landing before the disabled buttons re-render.
-  const inFlight = useRef(false)
-  const mounted = useRef(true)
+  // Which work `workId` is. Only the id is taken from this entry: for a merged work it holds the
+  // canonical work's answer from when it was read, and the status lives in the canonical entry.
+  const requested = useQuery({
+    ...statusQuery(requestedKey, workId),
+    select: (status) => status.workId,
+  })
+  const canonicalWorkId = requested.data ?? workId
+  const key = readingStatusQueryKey(userId, canonicalWorkId)
 
-  useEffect(() => {
-    mounted.current = true
+  const query = useQuery({
+    ...statusQuery(key, canonicalWorkId),
+    // The canonical entry starts from the answer that named it, if nothing read it yet — so a merged
+    // work's card does not ask again for what it has just been told. It never replaces an entry.
+    initialData: () => {
+      const named = queryClient.getQueryData<ReadingStatusResponse>(requestedKey)
 
-    return () => {
-      mounted.current = false
-    }
-  }, [])
+      return named?.workId === canonicalWorkId ? named : undefined
+    },
+    initialDataUpdatedAt: () => queryClient.getQueryState(requestedKey)?.dataUpdatedAt,
+  })
 
-  useEffect(() => {
-    const controller = new AbortController()
+  const saving = useMutationState({
+    filters: { mutationKey: key, exact: true, status: 'pending' },
+    select: (mutation) => asReadingStatus(mutation.state.variables),
+  }).filter((status) => status !== undefined)
 
-    fetchReadingStatus(workId, controller.signal)
-      .then((data) => {
-        if (!controller.signal.aborted) setState({ status: 'ready', data })
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setState({ status: 'error', message: describeError(error) })
-      })
+  const mutation = useMutation({
+    mutationKey: key,
+    mutationFn: (status: ReadingStatus) => saveReadingStatus(canonicalWorkId, status),
+    onSuccess: async (saved) => {
+      // The entry of the work the server saved — the key this save was started under.
+      const savedKey = readingStatusQueryKey(userId, saved.workId)
 
-    return () => {
-      controller.abort()
-    }
-  }, [workId, nonce])
-
-  const reload = useCallback(() => {
-    setState({ status: 'loading' })
-    setNonce((value) => value + 1)
-  }, [])
-
-  async function save(target: ReadingStatus): Promise<void> {
-    if (inFlight.current || state.status !== 'ready') return
-
-    inFlight.current = true
-    setSaving(target)
-    setSaved(undefined)
-    setSaveError(undefined)
-    setFailed(undefined)
-
-    try {
-      const result = await saveReadingStatus(workId, target)
-
-      if (!mounted.current) return
-
-      setState((previous) =>
-        previous.status === 'ready'
-          ? { status: 'ready', data: { ...previous.data, status: result.status } }
-          : previous,
+      await queryClient.cancelQueries({ queryKey: savedKey, exact: true })
+      // No entry means the cache was cleared meanwhile (another account signed in): `undefined` from
+      // the updater leaves it that way instead of inventing a status without `wasBorrowed`.
+      queryClient.setQueryData<ReadingStatusResponse>(
+        savedKey,
+        (current) => current && { ...current, status: saved.status, isSet: true },
       )
-      setSaved(result.status)
-    } catch (error) {
-      if (!mounted.current) return
+    },
+  })
 
-      setSaveError(error instanceof ApiRequestError ? error : new Error(describeError(error)))
-      setFailed(target)
-    } finally {
-      inFlight.current = false
-      if (mounted.current) setSaving(undefined)
-    }
+  const view = toReadingStatusView({
+    query,
+    saving,
+    own: {
+      status: mutation.status,
+      variables: mutation.variables,
+      data: mutation.data,
+      error: mutation.error,
+    },
+  })
+
+  function save(status: ReadingStatus): void {
+    // Synchronous, unlike the disabled control: a second choice can land before it re-renders. The
+    // mutation cache marks a started save pending at once, whichever control started it.
+    if (queryClient.isMutating({ mutationKey: key, exact: true }) > 0) return
+    if (view.kind !== 'ready' || view.current === status) return
+
+    mutation.mutate(status)
   }
 
-  return { state, reload, saving, saved, saveError, failed, save }
+  return {
+    view,
+    retryLoad: () => {
+      void query.refetch()
+    },
+    save,
+    retrySave: () => {
+      if (view.kind === 'ready' && view.failed !== undefined) save(view.failed)
+    },
+  }
+}
+
+/** The read of one entry: what both the requested and the canonical entry are filled with. */
+function statusQuery(key: ReturnType<typeof readingStatusQueryKey>, workId: string) {
+  return {
+    queryKey: key,
+    queryFn: () => loadReadingStatus(workId),
+    // A failed read shows its error with a retry button; repeating it on its own only delays that.
+    retry: false,
+    staleTime: READING_STATUS_STALE_MS,
+  }
 }

@@ -12,11 +12,16 @@ import {
 import type {
   ReadingListResponse,
   ReadingStatusResponse,
+  ReadingStatusesResponse,
   SetReadingStatusResponse,
 } from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
 import { SessionGuard } from '../auth/session.guard'
-import { ReadingListQueryDto, SetReadingStatusDto } from './dto/reading-status.dto'
+import {
+  ReadingListQueryDto,
+  ReadingStatusesQueryDto,
+  SetReadingStatusDto,
+} from './dto/reading-status.dto'
 import { ReadingStatusService } from './reading-status.service'
 import type { UserModel } from '../generated/prisma/models'
 
@@ -37,6 +42,15 @@ export class ReadingStatusController {
     @Body() dto: SetReadingStatusDto,
   ): Promise<SetReadingStatusResponse> {
     return this.readingStatus.set(user.id, workId, dto.status)
+  }
+
+  /** BS-140: статуси полиці одним запитом. Статичний шлях, тож з `:workId` нижче не перетинається. */
+  @Get('me/reading-statuses')
+  getMany(
+    @CurrentUser() user: UserModel,
+    @Query() query: ReadingStatusesQueryDto,
+  ): Promise<ReadingStatusesResponse> {
+    return this.readingStatus.getMany(user.id, query.workIds)
   }
 
   @Get('me/reading-statuses/:workId')
