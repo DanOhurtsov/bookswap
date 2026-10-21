@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common'
 import type {
   ReadingListResponse,
+  ReadingStatsResponse,
   ReadingStatusResponse,
   ReadingStatusesResponse,
   SetReadingStatusResponse,
@@ -59,6 +60,15 @@ export class ReadingStatusController {
     @Param('workId') workId: string,
   ): Promise<ReadingStatusResponse> {
     return this.readingStatus.get(user.id, workId)
+  }
+
+  /**
+   * BS-145: лічильники особистих статусів для головної. Входу немає — ні DTO, ні параметрів: користувач
+   * лише з сесії, тож запит про чужу статистику неможливо навіть сформулювати.
+   */
+  @Get('me/reading-stats')
+  stats(@CurrentUser() user: UserModel): Promise<ReadingStatsResponse> {
+    return this.readingStatus.stats(user.id)
   }
 
   @Get('me/reading-list')

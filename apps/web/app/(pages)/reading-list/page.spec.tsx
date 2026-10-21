@@ -1,141 +1,45 @@
-/** @jest-environment jsdom */
-
-import '@testing-library/jest-dom'
-import { act, render, screen, waitFor } from '@testing-library/react'
-import type { Me, ReadingListResponse } from '@bookswap/shared'
-import type { SessionState } from '@/app/lib/use-session'
-import { NAVBAR_PROFILE_LINKS } from '@/constants/navigation'
+import { readFileSync } from 'node:fs'
+import { NAVBAR_LINKS_AUTH, NAVBAR_PROFILE_LINKS } from '@/constants/navigation'
 import ReadingListPage from './page'
 
-/** RS14 (10j.2): the reading list is a signed-in, navigable page; a guest is sent to login. */
+/** BS-145: `/reading-list` is only a server redirect to the library, and nothing links to it. */
 
-jest.mock('@/app/lib/api', () => {
-  const actual = jest.requireActual<typeof import('@/app/lib/api')>('@/app/lib/api')
-
-  return { ...actual, apiRequest: jest.fn() }
+const redirect = jest.fn((path: string): never => {
+  throw new Error(`NEXT_REDIRECT ${path}`)
 })
-
-let session: SessionState = { status: 'loading' }
-
-jest.mock('@/app/lib/use-session', () => ({
-  useSession: () => ({ state: session, reload: jest.fn(), setUser: jest.fn() }),
-}))
-
-const replace = jest.fn()
 
 jest.mock('next/navigation', () => ({
-  useRouter: () => ({ push: jest.fn(), replace }),
+  redirect: (path: string) => redirect(path),
 }))
 
-const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
-
-function user(id: string): Me {
-  return {
-    id,
-    email: `${id}@example.com`,
-    emailVerified: true,
-    displayName: `Користувач ${id}`,
-    avatarUrl: null,
-    bio: null,
-    libraryVisibility: 'FRIENDS',
-    showHolderNames: false,
-    createdAt: '2026-01-01T00:00:00.000Z',
-  }
-}
-
-function listOf(title: string): ReadingListResponse {
-  return {
-    items: [
-      {
-        work: {
-          id: `w-${title}`,
-          title,
-          origLang: 'uk',
-          firstPubYear: null,
-          description: null,
-          createdAt: '2026-01-01T00:00:00.000Z',
-          revision: 1,
-        },
-        authors: [],
-        status: 'READ',
-        wasBorrowed: true,
-        updatedAt: '2026-09-30T10:00:00.000Z',
-      },
-    ],
-    nextCursor: null,
-  }
-}
+const source = readFileSync(__filename.replace('page.spec.tsx', 'page.tsx'), 'utf8')
 
 beforeEach(() => {
-  jest.clearAllMocks()
-  apiRequest.mockResolvedValue({ items: [], nextCursor: null })
+  redirect.mockClear()
 })
 
-describe('Reading list page', () => {
-  it('is linked from the profile navigation', () => {
-    expect(NAVBAR_PROFILE_LINKS).toContainEqual({ href: '/reading-list', label: 'Список читання' })
+describe('/reading-list', () => {
+  it('redirects to /library while rendering on the server, before anything else', () => {
+    expect(() => ReadingListPage()).toThrow('NEXT_REDIRECT /library')
+    expect(redirect).toHaveBeenCalledTimes(1)
+    expect(redirect).toHaveBeenCalledWith('/library')
   })
 
-  it('a guest is redirected to login and no list request is sent', async () => {
-    session = { status: 'guest' }
-
-    render(<ReadingListPage />)
-
-    await waitFor(() => {
-      expect(replace).toHaveBeenCalledWith('/login')
-    })
-    expect(apiRequest).not.toHaveBeenCalled()
+  it('is a server component that renders nothing of the old screen', () => {
+    expect(source).not.toContain("'use client'")
+    expect(source).not.toMatch(/ReadingListScreen|useSession|<main/)
   })
 
-  it('a signed-in viewer gets the list with its empty state', async () => {
-    session = { status: 'authenticated', user: user('me') }
-
-    render(<ReadingListPage />)
-
-    expect(screen.getByRole('heading', { name: 'Список читання' })).toBeInTheDocument()
-    expect(await screen.findByText(/Тут поки порожньо/)).toBeInTheDocument()
-    expect(apiRequest).toHaveBeenCalledWith('/me/reading-list', expect.anything())
+  it('takes no query parameters to carry over: the target is fixed', () => {
+    expect(source).not.toContain('searchParams')
   })
-  it('a session switch A → B on the mounted page drops A’s list at once and asks again for B', async () => {
-    session = { status: 'authenticated', user: user('a') }
 
-    // Each request is answered for the session that is current WHEN it is sent — like a cookie.
-    let settleB: (value: ReadingListResponse) => void = () => undefined
-    const requestedBy: string[] = []
+  it('is linked from no navigation', () => {
+    const hrefs = [...NAVBAR_LINKS_AUTH, ...NAVBAR_PROFILE_LINKS].map((link) => link.href)
 
-    apiRequest.mockImplementation(() => {
-      const viewer = session.status === 'authenticated' ? session.user.id : 'none'
-
-      requestedBy.push(viewer)
-
-      return viewer === 'a'
-        ? Promise.resolve(listOf('Книжка A'))
-        : new Promise((resolve) => {
-            settleB = resolve
-          })
-    })
-
-    const { rerender } = render(<ReadingListPage />)
-
-    expect(await screen.findByRole('link', { name: 'Книжка A' })).toBeInTheDocument()
-
-    session = { status: 'authenticated', user: user('b') }
-    rerender(<ReadingListPage />)
-
-    // Before B's answer: nothing of A's is left on screen.
-    expect(screen.queryByRole('link', { name: 'Книжка A' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Була позичена')).not.toBeInTheDocument()
-    expect(screen.getByText('Завантажую…')).toBeInTheDocument()
-    await waitFor(() => {
-      expect(requestedBy).toEqual(['a', 'b'])
-    })
-
-    await act(async () => {
-      settleB(listOf('Книжка B'))
-      await Promise.resolve()
-    })
-
-    expect(await screen.findByRole('link', { name: 'Книжка B' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Книжка A' })).not.toBeInTheDocument()
+    expect(hrefs).not.toContain('/reading-list')
+    expect([...NAVBAR_LINKS_AUTH, ...NAVBAR_PROFILE_LINKS].map((link) => link.label)).not.toContain(
+      'Список читання',
+    )
   })
 })

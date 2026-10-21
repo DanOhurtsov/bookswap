@@ -1,9 +1,8 @@
 import {
-  readingListResponseSchema,
+  readingStatsResponseSchema,
   readingStatusResponseSchema,
   readingStatusesResponseSchema,
   setReadingStatusResponseSchema,
-  type ReadingListStatus,
   type ReadingStatus,
 } from '@bookswap/shared'
 import { apiRequest } from '@/app/lib/api'
@@ -31,24 +30,6 @@ export const saveReadingStatus = (workId: string, status: ReadingStatus) =>
     schema: setReadingStatusResponseSchema,
   })
 
-export interface ReadingListPageQuery {
-  status: ReadingListStatus | undefined
-  cursor: string | undefined
-}
-
-export const fetchReadingList = (
-  { status, cursor }: ReadingListPageQuery,
-  signal?: AbortSignal,
-) => {
-  const params = new URLSearchParams()
-
-  if (status !== undefined) params.set('status', status)
-  if (cursor !== undefined) params.set('cursor', cursor)
-
-  const query = params.toString()
-
-  return apiRequest(`/me/reading-list${query === '' ? '' : `?${query}`}`, {
-    schema: readingListResponseSchema,
-    signal,
-  })
-}
+/** BS-145: the counts for the home page — the browser's half of `fetchReadingStatsSnapshot`. */
+export const fetchReadingStats = (signal?: AbortSignal) =>
+  apiRequest('/me/reading-stats', { schema: readingStatsResponseSchema, signal })

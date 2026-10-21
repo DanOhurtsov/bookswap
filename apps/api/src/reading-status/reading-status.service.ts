@@ -4,6 +4,7 @@ import {
   READING_LIST_LIMITS,
   type ReadingListQueryRequest,
   type ReadingListResponse,
+  type ReadingStatsResponse,
   type ReadingStatus,
   type ReadingStatusResponse,
   type ReadingStatusesResponse,
@@ -179,6 +180,25 @@ export class ReadingStatusService {
         ]
       }),
     }
+  }
+
+  /**
+   * BS-145: скільки творів має кожен явно встановлений статус. Один запит `GROUP BY` за всіма рядками
+   * користувача, незалежно від кількості творів. Рядок — це пара `userId + Work` (`@@unique`), тож видання й
+   * примірники лічильник не множать, а архів, видалений примірник чи повернена позика рядок не чіпають.
+   * Злитих творів серед рядків немає: `MergeService` переносить статуси на канонічний і прибирає дублі.
+   */
+  async stats(userId: string): Promise<ReadingStatsResponse> {
+    const groups = await this.prisma.workReadingStatus.groupBy({
+      by: ['status'],
+      where: { userId },
+      _count: { _all: true },
+    })
+    const counts: ReadingStatsResponse['counts'] = { NOT_READ: 0, READING: 0, READ: 0 }
+
+    for (const group of groups) counts[group.status] = group._count._all
+
+    return { counts }
   }
 
   /**

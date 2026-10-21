@@ -5,6 +5,7 @@ import type { ReadingStatus, ReadingStatusResponse } from '@bookswap/shared'
 import { loadReadingStatus } from '../api/reading-status-batch'
 import { saveReadingStatus } from '../api/reading-status-requests'
 import { asReadingStatus, toReadingStatusView, type ReadingStatusView } from './reading-status-view'
+import { refreshReadingStats } from './use-reading-stats'
 
 /**
  * BS-140: the one key of «this user's status of this work» (CONVENTIONS §3.9). Every control of the
@@ -43,7 +44,7 @@ export interface ReadingStatusController {
  * before the `PUT` or during it, single or batched — and then writes the answer into the cache. A
  * read that landed earlier is simply overwritten, so no old answer can put the previous status back.
  * Nothing is optimistic: a failed save leaves the confirmed status on screen with nothing to roll
- * back.
+ * back — and leaves the reading stats alone, which only a confirmed save marks out of date.
  */
 export function useReadingStatus({
   userId,
@@ -95,6 +96,8 @@ export function useReadingStatus({
         savedKey,
         (current) => current && { ...current, status: saved.status, isSet: true },
       )
+      // BS-145: the home page's counts follow every confirmed save, from whichever control.
+      void refreshReadingStats(queryClient, userId)
     },
   })
 

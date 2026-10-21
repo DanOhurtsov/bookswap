@@ -28,11 +28,13 @@ import { startWeb, stopWeb } from './web-server'
  * Реальні web (`next dev`) і API (`createTestApp` у цьому процесі) поверх тестової БД, справжній Chromium,
  * лише синтетичні акаунти з `uniqueEmail`; жодної пошти поза локальним `DevEmailSender` (browser-env.ts).
  *
- * Шлях: читач ставить «Прочитано» на сторінці твору → бачить твір (з тегом «Була позичена») в особистому
- * списку, відкритому з навігації → змінює статус на «Читаю» → список і фільтри показують оновлення. Окремо:
- * власник примірника на тій самій сторінці твору не бачить статусу читача (R-8).
+ * Шлях: читач ставить «Прочитано» на сторінці твору (тег «Була позичена») → головна, відкрита з навігації,
+ * рахує твір у «Прочитано» → змінює статус на «Читаю» → головна показує оновлення без перезавантаження.
+ * Окремо: власник примірника на тій самій сторінці твору не бачить статусу читача (R-8).
  *
  * BS-140: статус — один Select замість трьох кнопок; без запису він показує «Вказати статус читання».
+ * BS-145: окремого «Списку читання» немає — ні в навігації, ні за старою адресою (вона веде в бібліотеку);
+ * лічильники статусів — на головній.
  *
  * Запуск: `pnpm --filter @bookswap/api test:browser`. Без Chromium тест ПАДАЄ (не пропускається).
  */
@@ -123,33 +125,32 @@ async function expectShown(page: Page, label: string): Promise<void> {
     .waitFor()
 }
 
-function listRow(page: Page, title: string): Locator {
-  return page.locator('li.book').filter({ has: page.getByRole('link', { name: title }) })
+function statsSection(page: Page): Locator {
+  return page.getByRole('region', { name: 'Моє читання' })
 }
 
-async function chooseFilter(page: Page, label: 'Усі' | 'Читаю' | 'Прочитано'): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Фільтр списку читання' })
-    .getByRole('button', { name: label })
-    .click()
-  await page
-    .getByRole('navigation', { name: 'Фільтр списку читання' })
-    .getByRole('button', { name: label, pressed: true })
+/** The count beside a status label on the home page. */
+async function expectCount(page: Page, label: string, count: number): Promise<void> {
+  await statsSection(page)
+    .locator('div', { has: page.getByText(label, { exact: true }) })
+    .locator('dd', { hasText: new RegExp(`^${String(count)}$`) })
     .waitFor()
 }
 
+/** Client-side navigation through the header, so «without a reload» means what it says. */
+async function goHome(page: Page): Promise<void> {
+  await page.getByRole('link', { name: 'Головна', exact: true }).first().click()
+  await page.waitForURL(`${WEB_ORIGIN}/`)
+}
+
 describe('Stage 10 (10j.2): браузерний шлях особистого статусу читання', () => {
-  it('READ на сторінці твору → приватний список → зміна на READING → оновлений список', async () => {
+  it('READ на сторінці твору → головна з навігації → зміна на READING → оновлена головна', async () => {
     const owner = await registerAccount(app, 'br-owner')
     const reader = await registerReader()
 
     await befriend(app, owner, reader)
 
     const shelf = await createShelfCopy(app, owner)
-    const { title } = await prisma.work.findUniqueOrThrow({
-      where: { id: shelf.workId },
-      select: { title: true },
-    })
 
     // Фактична передача — підстава тега «Була позичена» (R-5); статус вона НЕ ставить (R-3).
     await handedOverLoan(app, owner, reader, shelf.copyId)
@@ -176,41 +177,42 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
     await statusControl(page).waitFor()
     await expectShown(page, 'Прочитано')
 
-    // Особистий список — з навігації (меню профілю).
+    // BS-145: окремого списку в навігації немає.
     await settle(page)
     await page.getByRole('button', { name: /Відкрити меню профілю/ }).click()
-    await page.getByRole('menuitem', { name: 'Список читання' }).click()
-    await page.waitForURL(`${WEB_ORIGIN}/reading-list`)
-    await page.getByRole('heading', { name: 'Список читання' }).waitFor()
-    await settle(page)
+    await page.getByRole('menuitem', { name: 'Друзі' }).waitFor()
+    expect(await page.getByRole('menuitem', { name: 'Список читання' }).count()).toBe(0)
+    await page.keyboard.press('Escape')
 
-    const row = listRow(page, title)
+    // Лічильники — на головній, відкритій з навігації.
+    await goHome(page)
+    await expectCount(page, 'Прочитано', 1)
+    await expectCount(page, 'Читаю', 0)
+    await expectCount(page, 'Не читав', 0)
 
-    await row.getByText('Прочитано', { exact: true }).waitFor()
-    await row.getByText('Була позичена').waitFor()
-
-    await chooseFilter(page, 'Читаю')
-    await page.getByText('Зараз ви нічого не читаєте.').waitFor()
-    await chooseFilter(page, 'Прочитано')
-    await listRow(page, title).waitFor()
-
-    // Зміна статусу: з рядка списку назад на сторінку твору.
-    await listRow(page, title).getByRole('link', { name: title }).click()
-    await page.waitForURL(`${WEB_ORIGIN}/works/${shelf.workId}`)
-    await statusControl(page).waitFor()
-    await settle(page)
+    // Зміна статусу на сторінці твору — і повернення на головну без перезавантаження: маркер у вікні
+    // переживає лише клієнтську навігацію.
+    await openWork(page, shelf.workId)
+    await page.getByText('Була позичена').waitFor()
+    await page.evaluate(() => {
+      ;(window as unknown as { bs145NoReload?: boolean }).bs145NoReload = true
+    })
     await setStatus(page, 'Читаю')
     await expectShown(page, 'Читаю')
 
-    await page.goto(`${WEB_ORIGIN}/reading-list`)
-    await settle(page)
-    await listRow(page, title).getByText('Читаю', { exact: true }).waitFor()
-    await listRow(page, title).getByText('Була позичена').waitFor()
+    await goHome(page)
+    await expectCount(page, 'Читаю', 1)
+    await expectCount(page, 'Прочитано', 0)
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { bs145NoReload?: boolean }).bs145NoReload === true,
+      ),
+    ).toBe(true)
 
-    await chooseFilter(page, 'Прочитано')
-    await page.getByText('Прочитаних творів поки немає.').waitFor()
-    await chooseFilter(page, 'Читаю')
-    await listRow(page, title).waitFor()
+    // Стара адреса веде в бібліотеку, без параметрів старого списку.
+    await page.goto(`${WEB_ORIGIN}/reading-list?status=READ`)
+    await page.waitForURL(`${WEB_ORIGIN}/library`)
+    expect(new URL(page.url()).search).toBe('')
 
     const stored = await prisma.workReadingStatus.findMany({
       where: { userId: reader.id },
@@ -236,5 +238,11 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
 
     await history.getByText(reader.displayName, { exact: false }).first().waitFor()
     expect(await history.getByText(/Читаю|Прочитано/).count()).toBe(0)
+
+    // BS-145: і на головній власник бачить лише свої лічильники — у нього статусів немає.
+    await goHome(ownerPage)
+    await statsSection(ownerPage)
+      .getByText(/Ви ще не позначили жодного твору/)
+      .waitFor()
   })
 })
