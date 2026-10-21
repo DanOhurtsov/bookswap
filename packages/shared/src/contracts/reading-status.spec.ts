@@ -4,6 +4,7 @@ import {
   readingListItemSchema,
   readingListQueryRequestSchema,
   readingListResponseSchema,
+  readingStatsResponseSchema,
   readingStatusResponseSchema,
   readingStatusesQueryRequestSchema,
   readingStatusesResponseSchema,
@@ -156,5 +157,33 @@ describe('parseWorkIdList / readingStatusesQueryRequestSchema', () => {
       false,
     )
     expect(readingStatusesQueryRequestSchema.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('readingStatsResponseSchema (BS-145)', () => {
+  it('accepts all three counts, zeros included', () => {
+    expect(
+      readingStatsResponseSchema.safeParse({ counts: { NOT_READ: 0, READING: 2, READ: 0 } })
+        .success,
+    ).toBe(true)
+  })
+
+  it.each([
+    ['a missing status', { NOT_READ: 0, READING: 1 }],
+    ['an unknown status', { NOT_READ: 0, READING: 1, READ: 2, ABANDONED: 1 }],
+    ['a negative count', { NOT_READ: -1, READING: 1, READ: 2 }],
+    ['a fractional count', { NOT_READ: 0.5, READING: 1, READ: 2 }],
+    ['a count as a string', { NOT_READ: '1', READING: 1, READ: 2 }],
+  ])('rejects %s', (_case, counts) => {
+    expect(readingStatsResponseSchema.safeParse({ counts }).success).toBe(false)
+  })
+
+  it('rejects anything beside the counts, such as a user id', () => {
+    expect(
+      readingStatsResponseSchema.safeParse({
+        counts: { NOT_READ: 0, READING: 0, READ: 0 },
+        userId: 'user-1',
+      }).success,
+    ).toBe(false)
   })
 })

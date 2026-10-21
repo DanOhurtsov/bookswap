@@ -50,14 +50,14 @@ beforeEach(() => {
 })
 
 describe('NavBarAvatar', () => {
-  it('lists Профіль, Друзі, Список читання, then the theme toggle and Вийти', async () => {
+  it('lists Профіль, Друзі, then the theme toggle and Вийти', async () => {
     const { menu } = await openMenu()
 
     expect(
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
-    ).toEqual(['Профіль', 'Друзі', 'Список читання', 'Темна тема', 'Вийти'])
+    ).toEqual(['Профіль', 'Друзі', 'Темна тема', 'Вийти'])
     expect(
       within(menu).queryByRole('menuitem', { name: /пошук|знайти|search/i }),
     ).not.toBeInTheDocument()
@@ -65,10 +65,8 @@ describe('NavBarAvatar', () => {
       'href',
       '/profile',
     )
-    expect(within(menu).getByRole('menuitem', { name: 'Список читання' })).toHaveAttribute(
-      'href',
-      '/reading-list',
-    )
+    // BS-145: the separate reading list is gone; the counts are on the home page.
+    expect(within(menu).queryByRole('menuitem', { name: 'Список читання' })).not.toBeInTheDocument()
   })
 
   it('offers exactly one «Друзі» entry, a link to /friends', async () => {

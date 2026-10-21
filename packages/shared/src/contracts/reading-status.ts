@@ -137,3 +137,19 @@ export const readingListResponseSchema = z.strictObject({
 })
 
 export type ReadingListResponse = z.infer<typeof readingListResponseSchema>
+
+const statusCountSchema = z.number().int().nonnegative()
+
+/**
+ * BS-145: `GET /me/reading-stats`. Скільки творів користувача має кожен явно встановлений статус. Усі три
+ * ключі присутні завжди, зокрема з нулем; твір без запису не входить у жоден лічильник.
+ */
+export const readingStatsResponseSchema = z.strictObject({
+  counts: z.strictObject({
+    NOT_READ: statusCountSchema,
+    READING: statusCountSchema,
+    READ: statusCountSchema,
+  }),
+})
+
+export type ReadingStatsResponse = z.infer<typeof readingStatsResponseSchema>
