@@ -16,10 +16,12 @@ import {
   createShelfCopy,
   handedOverLoan,
   registerAccount,
+  requestLoan,
   url,
   type Account,
   type Shelf,
 } from './loan.helpers'
+import { PrismaService } from '../src/prisma/prisma.service'
 import type { INestApplication } from '@nestjs/common'
 import type { App } from 'supertest/types'
 
@@ -333,6 +335,233 @@ describe('Історія (e2e)', () => {
 
       expect(item?.entry.names).toBe(true)
       expect(item === undefined ? undefined : named(item).owner.id).toBe(owner.id)
+    })
+
+    it('BS-142: completedAt — лише з достовірного джерела, для обох сторін однаковий', async () => {
+      const owner = await registerAccount(app, 'hist-done-own')
+      const borrower = await registerAccount(app, 'hist-done-bor')
+
+      await befriend(app, owner, borrower)
+
+      const copyIds: Record<string, string> = {}
+      const loanIds: Record<string, string> = {}
+      const shelf = async (label: string): Promise<string> => {
+        copyIds[label] = (await createShelfCopy(app, owner)).copyId
+
+        return copyIds[label]
+      }
+      const requested = async (label: string): Promise<string> => {
+        const created = await requestLoan(app, borrower, await shelf(label)).expect(201)
+
+        loanIds[label] = (created.body as { loan: { id: string } }).loan.id
+
+        return loanIds[label]
+      }
+      const recorded = async (label: string): Promise<string> => {
+        const created = await request(app.getHttpServer())
+          .post(url('/loans/recorded'))
+          .set('Cookie', owner.cookie)
+          .send({ copyId: await shelf(label), borrowerId: borrower.id, handedAt: '2026-01-05' })
+          .expect(201)
+
+        loanIds[label] = (created.body as { loan: { id: string } }).loan.id
+
+        return loanIds[label]
+      }
+
+      loanIds.returned = await handedOverLoan(app, owner, borrower, await shelf('returned'))
+      await actOnLoan(app, owner, loanIds.returned, { action: 'return' }).expect(200)
+      await actOnLoan(app, owner, await requested('rejected'), { action: 'reject' }).expect(200)
+      await actOnLoan(app, borrower, await requested('cancelled'), { action: 'cancel' }).expect(200)
+      loanIds.lost = await handedOverLoan(app, owner, borrower, await shelf('lost'))
+      await actOnLoan(app, owner, loanIds.lost, { action: 'mark_lost' }).expect(200)
+      await actOnLoan(app, owner, await recorded('withdrawn'), {
+        action: 'withdraw_record',
+      }).expect(200)
+      await actOnLoan(app, borrower, await recorded('declined'), {
+        action: 'decline_record',
+      }).expect(200)
+      await recorded('pending')
+      await requested('open')
+
+      const prisma = app.get(PrismaService)
+      const loan = (label: string) =>
+        prisma.loan.findUniqueOrThrow({
+          where: { id: loanIds[label] },
+          select: { returnedAt: true, respondedAt: true },
+        })
+      const eventAt = async (
+        label: string,
+        type: 'LOAN_LOST' | 'RECORD_WITHDRAWN' | 'RECORD_DECLINED',
+      ) =>
+        (
+          await prisma.loanEvent.findFirstOrThrow({
+            where: { loanId: loanIds[label], type },
+            select: { occurredAt: true },
+          })
+        ).occurredAt.toISOString()
+
+      const expected: Record<string, string | null> = {
+        returned: (await loan('returned')).returnedAt?.toISOString() ?? 'missing',
+        rejected: (await loan('rejected')).respondedAt?.toISOString() ?? 'missing',
+        lost: await eventAt('lost', 'LOAN_LOST'),
+        withdrawn: await eventAt('withdrawn', 'RECORD_WITHDRAWN'),
+        declined: await eventAt('declined', 'RECORD_DECLINED'),
+        // The `cancel` of a request stamps nothing: its ending stays unknown, not guessed.
+        cancelled: null,
+        pending: null,
+        open: null,
+      }
+
+      for (const [account, side] of [
+        [owner, 'lent'],
+        [borrower, 'borrowed'],
+      ] as const) {
+        const history = myHistoryResponseSchema.parse(
+          (
+            await request(app.getHttpServer())
+              .get(url('/me/history'))
+              .set('Cookie', account.cookie)
+              .expect(200)
+          ).body,
+        )
+        const byCopy = new Map(history[side].map((item) => [item.copy.id, item.completedAt]))
+
+        expect(
+          Object.fromEntries(
+            Object.keys(expected).map((label) => [label, byCopy.get(copyIds[label] ?? '')]),
+          ),
+        ).toEqual(expected)
+      }
+    })
+
+    it('BS-142: latestFactAt — остання достовірна дата; знахідка не є завершенням втрати', async () => {
+      const owner = await registerAccount(app, 'hist-fact-own')
+      const borrower = await registerAccount(app, 'hist-fact-bor')
+
+      await befriend(app, owner, borrower)
+
+      const prisma = app.get(PrismaService)
+      const lostCopy = (await createShelfCopy(app, owner)).copyId
+      const activeCopy = (await createShelfCopy(app, owner)).copyId
+      const endedCopy = (await createShelfCopy(app, owner)).copyId
+
+      // A loss from before Stage 10: handed over in January, no LOAN_LOST was ever written (REC5).
+      const lost = await handedOverLoan(app, owner, borrower, lostCopy)
+
+      await actOnLoan(app, owner, lost, { action: 'mark_lost' }).expect(200)
+      await prisma.loanEvent.deleteMany({ where: { loanId: lost } })
+      await prisma.loan.update({
+        where: { id: lost },
+        data: {
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          requestedAt: new Date('2026-01-01T00:00:00Z'),
+          respondedAt: new Date('2026-01-02T00:00:00Z'),
+          handedAt: new Date('2026-01-03T00:00:00Z'),
+        },
+      })
+
+      const active = await handedOverLoan(app, owner, borrower, activeCopy)
+
+      await prisma.loan.update({
+        where: { id: active },
+        data: {
+          createdAt: new Date('2026-02-01T00:00:00Z'),
+          requestedAt: new Date('2026-02-01T00:00:00Z'),
+          respondedAt: new Date('2026-02-02T00:00:00Z'),
+          handedAt: new Date('2026-06-01T00:00:00Z'),
+        },
+      })
+      // Found in September, recorded today: the actual date wins over the moment of writing.
+      await actOnLoan(app, owner, lost, { action: 'recover', effectiveAt: '2026-09-01' }).expect(
+        200,
+      )
+
+      // A loss with a known ending: a later recovery dates a fact, not the ending.
+      const ended = await handedOverLoan(app, owner, borrower, endedCopy)
+
+      await actOnLoan(app, owner, ended, { action: 'mark_lost' }).expect(200)
+      await prisma.loan.update({
+        where: { id: ended },
+        data: {
+          createdAt: new Date('2026-02-10T00:00:00Z'),
+          requestedAt: new Date('2026-02-10T00:00:00Z'),
+          respondedAt: new Date('2026-02-11T00:00:00Z'),
+          handedAt: new Date('2026-02-12T00:00:00Z'),
+        },
+      })
+      await prisma.loanEvent.updateMany({
+        where: { loanId: ended, type: 'LOAN_LOST' },
+        data: { effectiveAt: new Date('2026-03-01T00:00:00Z') },
+      })
+      await actOnLoan(app, owner, ended, { action: 'recover', effectiveAt: '2026-08-01' }).expect(
+        200,
+      )
+
+      const recovery = await prisma.loanEvent.findFirstOrThrow({
+        where: { loanId: lost, type: 'RECOVERED' },
+        select: { occurredAt: true },
+      })
+
+      expect(recovery.occurredAt.getTime()).toBeGreaterThan(Date.parse('2026-09-01T00:00:00Z'))
+
+      for (const [account, side] of [
+        [owner, 'lent'],
+        [borrower, 'borrowed'],
+      ] as const) {
+        const body = (
+          await request(app.getHttpServer())
+            .get(url('/me/history'))
+            .set('Cookie', account.cookie)
+            .expect(200)
+        ).body as Record<typeof side, Record<string, unknown>[]>
+        const dates = new Map(
+          myHistoryResponseSchema
+            .parse(body)
+            [side].map((item, index) => [item.copy.id, { ...item, raw: body[side][index] }]),
+        )
+        const of = (copyId: string) => {
+          const item = dates.get(copyId)
+
+          return { completedAt: item?.completedAt, latestFactAt: item?.raw?.latestFactAt }
+        }
+
+        expect(of(lostCopy)).toEqual({
+          completedAt: null,
+          latestFactAt: '2026-09-01T00:00:00.000Z',
+        })
+        expect(of(activeCopy)).toEqual({
+          completedAt: null,
+          latestFactAt: '2026-06-01T00:00:00.000Z',
+        })
+        expect(of(endedCopy)).toEqual({
+          completedAt: '2026-03-01T00:00:00.000Z',
+          latestFactAt: '2026-08-01T00:00:00.000Z',
+        })
+
+        // Only the derived date: no event, payload, actor or contact reaches the response.
+        for (const item of body[side]) {
+          expect(Object.keys(item).sort()).toEqual(['completedAt', 'copy', 'entry', 'latestFactAt'])
+        }
+        for (const key of [
+          'events',
+          'payload',
+          'actorId',
+          'effectiveAt',
+          'occurredAt',
+          'RECOVERED',
+        ]) {
+          expect(JSON.stringify(body)).not.toContain(`"${key}"`)
+        }
+      }
+
+      // The status and the stored dates of the loan stay as they were.
+      expect(
+        await prisma.loan.findUniqueOrThrow({
+          where: { id: lost },
+          select: { status: true, handedAt: true, returnedAt: true },
+        }),
+      ).toEqual({ status: 'LOST', handedAt: new Date('2026-01-03T00:00:00Z'), returnedAt: null })
     })
 
     it('чужих лоанів у власній історії немає', async () => {

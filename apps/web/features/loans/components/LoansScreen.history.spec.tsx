@@ -3,7 +3,7 @@
 import '@testing-library/jest-dom'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { MyHistoryEntry, MyHistoryResponse } from '@bookswap/shared'
+import type { MyHistoryEntry, MyHistoryResponse, NamedHistoryEntry } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import type { SessionState } from '@/app/lib/use-session'
 import { LoansScreen } from './LoansScreen'
@@ -77,43 +77,91 @@ function copyOf(id: string, title: string): MyHistoryEntry['copy'] {
   }
 }
 
+const BORROWED_ENTRY: NamedHistoryEntry = {
+  names: true,
+  loanId: 'loan-1',
+  owner: { id: 'user-marta', displayName: 'Марта', avatarUrl: null },
+  borrower: { id: 'user-me', displayName: 'Я', avatarUrl: null },
+  status: 'RETURNED',
+  isOverdue: false,
+  origin: 'REQUESTED',
+  guestEvidence: null,
+  requestedAt: '2026-01-01T00:00:00.000Z',
+  respondedAt: null,
+  handedAt: '2026-01-05T00:00:00.000Z',
+  returnedAt: '2026-02-01T00:00:00.000Z',
+  dueAt: null,
+}
+
 const BORROWED: MyHistoryEntry = {
+  entry: BORROWED_ENTRY,
+  copy: copyOf('1', 'Позичена книга'),
+  completedAt: '2026-02-01T00:00:00.000Z',
+  latestFactAt: '2026-02-01T00:00:00.000Z',
+}
+
+/** My book Oles returned later, though he asked for it earlier than I asked Marta. */
+const LENT: MyHistoryEntry = {
   entry: {
     names: true,
-    loanId: 'loan-1',
-    owner: { id: 'user-marta', displayName: 'Марта', avatarUrl: null },
-    borrower: { id: 'user-me', displayName: 'Я', avatarUrl: null },
+    loanId: 'loan-2',
+    owner: { id: 'user-me', displayName: 'Я', avatarUrl: null },
+    borrower: { id: 'user-oles', displayName: 'Олесь', avatarUrl: null },
     status: 'RETURNED',
     isOverdue: false,
     origin: 'REQUESTED',
     guestEvidence: null,
-    requestedAt: '2026-01-01T00:00:00.000Z',
-    respondedAt: null,
-    handedAt: '2026-01-05T00:00:00.000Z',
-    returnedAt: '2026-02-01T00:00:00.000Z',
+    requestedAt: '2025-12-01T00:00:00.000Z',
+    respondedAt: '2025-12-02T00:00:00.000Z',
+    handedAt: '2025-12-03T00:00:00.000Z',
+    returnedAt: '2026-03-01T00:00:00.000Z',
     dueAt: null,
   },
-  copy: copyOf('1', 'Позичена книга'),
+  copy: copyOf('2', 'Віддана книга'),
+  completedAt: '2026-03-01T00:00:00.000Z',
+  latestFactAt: '2026-03-01T00:00:00.000Z',
+}
+
+/** A request I cancelled: closed, but its ending was never recorded. */
+const CANCELLED: MyHistoryEntry = {
+  entry: {
+    ...BORROWED_ENTRY,
+    loanId: 'loan-3',
+    status: 'CANCELLED',
+    requestedAt: '2026-04-01T00:00:00.000Z',
+    handedAt: null,
+    returnedAt: null,
+  },
+  copy: copyOf('3', 'Скасований запит'),
+  completedAt: null,
+  latestFactAt: '2026-04-01T00:00:00.000Z',
 }
 
 /** A fact the owner recorded for a guest: the API sends it without names, contact or loan id. */
-const LENT_TO_GUEST: MyHistoryEntry = {
-  entry: {
-    names: false,
-    status: 'HANDED_OVER',
-    isOverdue: false,
-    origin: 'RECORDED_GUEST',
-    guestEvidence: 'OWNER_STATEMENT',
-    requestedAt: null,
-    respondedAt: null,
-    handedAt: '2026-03-01T00:00:00.000Z',
-    returnedAt: null,
-    dueAt: null,
-  },
-  copy: copyOf('2', 'Книга в гостя'),
+function toGuest(id: string, title: string): MyHistoryEntry {
+  return {
+    entry: {
+      names: false,
+      status: 'HANDED_OVER',
+      isOverdue: false,
+      origin: 'RECORDED_GUEST',
+      guestEvidence: 'OWNER_STATEMENT',
+      requestedAt: null,
+      respondedAt: null,
+      handedAt: '2026-03-01T00:00:00.000Z',
+      returnedAt: null,
+      dueAt: '2026-04-01',
+    },
+    copy: copyOf(id, title),
+    completedAt: null,
+    latestFactAt: '2026-03-01T00:00:00.000Z',
+  }
 }
 
-const HISTORY: MyHistoryResponse = { borrowed: [BORROWED], lent: [] }
+const HISTORY: MyHistoryResponse = {
+  borrowed: [CANCELLED, BORROWED],
+  lent: [LENT, toGuest('4', 'Книга в гостя')],
+}
 
 beforeEach(() => {
   apiRequest.mockReset()
@@ -122,142 +170,154 @@ beforeEach(() => {
   mockParameters = new URLSearchParams('tab=history')
 })
 
-const historyTablist = () => screen.getByRole('tablist', { name: 'Вигляд історії' })
+const historyList = () => screen.findByRole('list', { name: 'Історія позичань' })
 
-describe('LoansScreen ?tab=history: «Що я брав» / «Що в мене брали» (BS-88, BS-143)', () => {
-  it('відкривається на «Історії» → «Що я брав», і вкладка керує панеллю зі списком', async () => {
+const titles = async () =>
+  within(await historyList())
+    .getAllByRole('listitem')
+    .map((item) => within(item).getAllByRole('link')[0]?.textContent)
+
+const cardOf = async (title: string) =>
+  (await screen.findByRole('link', { name: title })).closest('li') as HTMLElement
+
+describe('LoansScreen ?tab=history: один спільний список (BS-142, BS-143)', () => {
+  it('«Історія» показує один список без підвкладок і читає лише /me/history', async () => {
     render(<LoansScreen />)
-
-    const borrowed = screen.getByRole('tab', { name: 'Що я брав' })
 
     expect(screen.getByRole('tab', { name: 'Історія' })).toHaveAttribute('aria-selected', 'true')
-    expect(
-      within(historyTablist())
-        .getAllByRole('tab')
-        .map((tab) => tab.textContent),
-    ).toEqual(['Що я брав', 'Що в мене брали'])
-    expect(borrowed).toHaveAttribute('aria-selected', 'true')
-    expect(document.getElementById(borrowed.getAttribute('aria-controls') ?? '')).toHaveAttribute(
-      'role',
-      'tabpanel',
-    )
-    expect(await screen.findByRole('link', { name: 'Позичена книга' })).toBeVisible()
-    expect(requestedPaths()).toEqual(['/me/history'])
-  })
-
-  it('зовнішній і вкладений список вкладок мають різні назви', async () => {
-    render(<LoansScreen />)
-    await screen.findByRole('link', { name: 'Позичена книга' })
-
+    expect(await titles()).toHaveLength(4)
     expect(screen.getAllByRole('tablist').map((list) => list.getAttribute('aria-label'))).toEqual([
       'Вкладки позичань',
-      'Вигляд історії',
+    ])
+    expect(screen.queryByRole('tab', { name: 'Що я брав' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Що в мене брали' })).not.toBeInTheDocument()
+    expect(requestedPaths()).toEqual(['/me/history'])
+    expect(screen.queryByLabelText('Статус')).not.toBeInTheDocument()
+  })
+
+  it('напрямки перемішані за датою завершення; записи без неї — нижче, за останньою датою', async () => {
+    render(<LoansScreen />)
+
+    expect(await titles()).toEqual([
+      'Віддана книга',
+      'Позичена книга',
+      'Скасований запит',
+      'Книга в гостя',
     ])
   })
 
-  it('картка зберігає дати, імена сторін, посилання на твір і на історію примірника', async () => {
+  it('картка: напрямок, інший учасник, фактичні дати, статус, посилання на твір і історію примірника', async () => {
     render(<LoansScreen />)
 
-    const card = (await screen.findByRole('link', { name: 'Позичена книга' })).closest('li')
+    const borrowed = await cardOf('Позичена книга')
 
-    expect(card).not.toBeNull()
-    const inCard = within(card as HTMLElement)
-
-    expect(inCard.getByRole('link', { name: 'Позичена книга' })).toHaveAttribute(
+    expect(borrowed).toHaveTextContent('Ви позичили · Власник: Марта')
+    expect(borrowed).toHaveTextContent('Статус: Повернено')
+    expect(borrowed).toHaveTextContent(/Передано: 5 січня 2026 р\. · Повернено: 1 лютого 2026 р\./)
+    expect(borrowed).toHaveTextContent('Попросили 1 січня 2026 р.')
+    expect(borrowed).not.toHaveTextContent('Завершено')
+    expect(within(borrowed).getByRole('link', { name: 'Позичена книга' })).toHaveAttribute(
       'href',
       '/works/work-1',
     )
-    expect(inCard.getByRole('link', { name: 'Уся історія примірника' })).toHaveAttribute(
+    expect(within(borrowed).getByRole('link', { name: 'Уся історія примірника' })).toHaveAttribute(
       'href',
       '/copies/copy-1/history',
     )
-    expect(card).toHaveTextContent('Я у Марта')
-    expect(card).toHaveTextContent(/Попросили .*передали .*повернули/)
+
+    expect(await cardOf('Віддана книга')).toHaveTextContent('Ви дали почитати · Позичальник: Олесь')
   })
 
-  it('«Що в мене брали» пишеться в адресу через replace і зберігає решту параметрів', async () => {
-    mockParameters = new URLSearchParams('tab=history&role=borrower')
-
+  it('відсутні дати — «не вказано», дата запиту не підміняє ні передачу, ні завершення', async () => {
     render(<LoansScreen />)
-    await screen.findByRole('link', { name: 'Позичена книга' })
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Що в мене брали' }))
+    const cancelled = await cardOf('Скасований запит')
 
-    expect(mockReplace).toHaveBeenCalledWith('/loans?tab=history&role=borrower&historyView=lent')
-  })
-
-  it('нова адреса показує «Що в мене брали» з порожнім станом без нового запиту', async () => {
-    const { rerender } = render(<LoansScreen />)
-    await screen.findByRole('link', { name: 'Позичена книга' })
-
-    mockParameters = new URLSearchParams('tab=history&historyView=lent')
-    rerender(<LoansScreen />)
-
-    expect(screen.getByRole('tab', { name: 'Що в мене брали' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    expect(cancelled).toHaveTextContent('Статус: Скасовано')
+    expect(cancelled).toHaveTextContent(
+      'Передано: не вказано · Повернено: не вказано · Завершено: не вказано',
     )
-    expect(screen.getByText('У вас поки нічого не брали.')).toBeVisible()
-    expect(screen.queryByRole('link', { name: 'Позичена книга' })).not.toBeInTheDocument()
-    expect(apiRequest).toHaveBeenCalledTimes(1)
+    expect(cancelled).toHaveTextContent('Попросили 1 квітня 2026 р.')
   })
 
-  it('пряме відкриття / перезавантаження ?tab=history&historyView=lent одразу на «Що в мене брали»', async () => {
-    mockParameters = new URLSearchParams('tab=history&historyView=lent')
-    apiRequest.mockResolvedValue({ borrowed: [BORROWED], lent: [LENT_TO_GUEST] })
-
+  it('гостьовий запис лишається анонімним: без імен, alias чи контакту; строк — не дата повернення', async () => {
     render(<LoansScreen />)
 
-    expect(screen.getByRole('tab', { name: 'Історія' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tab', { name: 'Що в мене брали' })).toHaveAttribute(
-      'aria-selected',
-      'true',
+    const guest = await cardOf('Книга в гостя')
+
+    expect(guest).toHaveTextContent('Ви дали почитати · Позичальник: гість, ім’я не показується')
+    expect(guest).toHaveTextContent('Записано власником · джерело: зі слів власника')
+    expect(guest).toHaveTextContent('строк повернення до 1 квітня 2026 р.')
+    expect(guest).toHaveTextContent('Повернено: не вказано')
+    expect(guest).not.toHaveTextContent(/Я у|гість:|контакт/i)
+    expect(within(guest).getByRole('link', { name: 'Уся історія примірника' })).toHaveAttribute(
+      'href',
+      '/copies/copy-4/history',
     )
-    expect(await screen.findByRole('link', { name: 'Книга в гостя' })).toBeVisible()
   })
 
-  it('гостьовий запис лишається анонімним: «у когось», без імен, alias чи контакту', async () => {
-    mockParameters = new URLSearchParams('tab=history&historyView=lent')
-    apiRequest.mockResolvedValue({ borrowed: [], lent: [LENT_TO_GUEST] })
+  it('схожі анонімні записи й повторні позичання — окремі рядки', async () => {
+    apiRequest.mockResolvedValue({
+      borrowed: [BORROWED, { ...BORROWED, entry: { ...BORROWED_ENTRY, loanId: 'loan-1-again' } }],
+      lent: [toGuest('4', 'Книга в гостя'), toGuest('4', 'Книга в гостя')],
+    })
 
     render(<LoansScreen />)
 
-    const card = (await screen.findByRole('link', { name: 'Книга в гостя' })).closest('li')
-
-    expect(card).toHaveTextContent('у когось')
-    expect(card).toHaveTextContent('Записано власником')
-    expect(card).not.toHaveTextContent(/Я у|гість:|контакт/i)
-    expect(
-      within(card as HTMLElement).getByRole('link', { name: 'Уся історія примірника' }),
-    ).toHaveAttribute('href', '/copies/copy-2/history')
+    expect(await titles()).toEqual([
+      'Позичена книга',
+      'Позичена книга',
+      'Книга в гостя',
+      'Книга в гостя',
+    ])
   })
 
-  it.each([
-    ['borrowed', 'Ви поки нічого не брали.'],
-    ['lent', 'У вас поки нічого не брали.'],
-  ])('порожня історія: «%s» має свій зрозумілий текст', async (view, text) => {
-    mockParameters = new URLSearchParams(`tab=history&historyView=${view}`)
+  it.each(['borrowed', 'lent', 'other'])(
+    'стара адреса ?tab=history&historyView=%s відкриває спільну історію й адресу не переписує',
+    async (view) => {
+      mockParameters = new URLSearchParams(`tab=history&historyView=${view}`)
+
+      render(<LoansScreen />)
+
+      expect(screen.getByRole('tab', { name: 'Історія' })).toHaveAttribute('aria-selected', 'true')
+      expect(await titles()).toHaveLength(4)
+      expect(mockReplace).not.toHaveBeenCalled()
+    },
+  )
+
+  it('порожні обидва напрямки — спільний порожній стан', async () => {
     apiRequest.mockResolvedValue({ borrowed: [], lent: [] })
 
     render(<LoansScreen />)
 
-    expect(await screen.findByText(text)).toBeVisible()
+    expect(await screen.findByText('Історія позичань поки порожня.')).toBeVisible()
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument()
   })
 
-  it.each(['borrowed', 'lent'])('«%s»: поки історія вантажиться — стан завантаження', (view) => {
-    mockParameters = new URLSearchParams(`tab=history&historyView=${view}`)
+  it.each([
+    ['borrowed', { borrowed: [BORROWED], lent: [] }, 'Позичена книга'],
+    ['lent', { borrowed: [], lent: [LENT] }, 'Віддана книга'],
+  ])(
+    'порожній один напрямок не робить історію порожньою (є лише %s)',
+    async (_, history, title) => {
+      apiRequest.mockResolvedValue(history)
+
+      render(<LoansScreen />)
+
+      expect(await titles()).toEqual([title])
+      expect(screen.queryByText('Історія позичань поки порожня.')).not.toBeInTheDocument()
+    },
+  )
+
+  it('поки історія вантажиться — стан завантаження', () => {
     apiRequest.mockReturnValue(new Promise(() => undefined))
 
     render(<LoansScreen />)
 
-    expect(
-      within(screen.getAllByRole('tabpanel').at(-1) as HTMLElement).getByText('Завантажую…'),
-    ).toBeVisible()
+    expect(within(screen.getByRole('tabpanel')).getByText('Завантажую…')).toBeVisible()
   })
 
-  it.each(['borrowed', 'lent'])('«%s»: помилка завантаження показується в панелі', async (view) => {
-    mockParameters = new URLSearchParams(`tab=history&historyView=${view}`)
+  it('помилка завантаження показується в панелі, без порожнього стану', async () => {
     apiRequest.mockRejectedValue(
       new ApiRequestError(500, { code: 'INTERNAL_ERROR', message: 'Сервер недоступний' }),
     )
@@ -265,22 +325,14 @@ describe('LoansScreen ?tab=history: «Що я брав» / «Що в мене б
     render(<LoansScreen />)
 
     expect(await screen.findByText(/Сервер недоступний/)).toBeVisible()
-    expect(screen.queryByText(/поки нічого не брали/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Історія позичань поки порожня.')).not.toBeInTheDocument()
   })
 
-  it('історія не читає списку поточних позичань, а списки позичань — історії', async () => {
-    render(<LoansScreen />)
-    await screen.findByRole('link', { name: 'Позичена книга' })
-
-    expect(requestedPaths()).toEqual(['/me/history'])
-    expect(screen.queryByLabelText('Статус')).not.toBeInTheDocument()
-  })
-
-  it('перемикається з клавіатури: навігація розділу → «Історія» → «Що я брав» → стрілка → Enter', async () => {
+  it('клавіатура: навігація розділу → «Історія» → панель → перша книжка; стрілка й Enter ведуть на іншу вкладку', async () => {
     const user = userEvent.setup()
 
     render(<LoansScreen />)
-    await screen.findByRole('link', { name: 'Позичена книга' })
+    await historyList()
 
     // The section navigation stands above the tabs: three links, each its own Tab stop.
     for (const name of ['Книжки', 'Позичання', 'Вішлист']) {
@@ -291,15 +343,18 @@ describe('LoansScreen ?tab=history: «Що я брав» / «Що в мене б
     await user.tab()
     expect(screen.getByRole('tab', { name: 'Історія' })).toHaveFocus()
 
-    // The open outer panel is its own Tab stop; the nested tablist comes right inside it.
+    // The open panel is its own Tab stop; the first card's title comes right inside it.
     await user.tab()
+    expect(screen.getByRole('tabpanel')).toHaveFocus()
     await user.tab()
-    expect(screen.getByRole('tab', { name: 'Що я брав' })).toHaveFocus()
+    expect(screen.getByRole('link', { name: 'Віддана книга' })).toHaveFocus()
 
-    await user.keyboard('{ArrowRight}')
-    expect(screen.getByRole('tab', { name: 'Що в мене брали' })).toHaveFocus()
+    await user.tab({ shift: true })
+    await user.tab({ shift: true })
+    await user.keyboard('{ArrowLeft}')
+    expect(screen.getByRole('tab', { name: 'Я позичаю' })).toHaveFocus()
 
     await user.keyboard('{Enter}')
-    expect(mockReplace).toHaveBeenCalledWith('/loans?tab=history&historyView=lent')
+    expect(mockReplace).toHaveBeenCalledWith('/loans?role=borrower')
   })
 })

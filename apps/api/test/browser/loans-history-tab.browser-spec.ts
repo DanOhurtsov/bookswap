@@ -27,13 +27,15 @@ import {
 import { startWeb, stopWeb } from './web-server'
 
 /**
- * BS-143: AUTOMATED browser e2e of the personal history as the third tab of «Позичання» — not manual
- * QA. Real web (`next dev`) and API (`createTestApp` in this process) over the test database, real
- * Chromium, synthetic accounts only. Nothing is substituted: no API, no router, no data source.
+ * BS-143 + BS-142: AUTOMATED browser e2e of the personal history — the third tab of «Позичання» and,
+ * since BS-142, one shared list of both directions. Not manual QA. Real web (`next dev`) and API
+ * (`createTestApp` in this process) over the test database, real Chromium, synthetic accounts only.
+ * Nothing is substituted: no API, no router, no data source.
  *
- * Path: header → «Моя бібліотека» → «Позичання» → «Історія» → both sides → reload, all with the URL
- * as the state; a direct open of the new address; the old `/history` address (server 307, signed
- * in and as a guest); an old `?loanId=` link; mobile width with the keyboard in light and dark.
+ * Path: header → «Моя бібліотека» → «Позичання» → «Історія» → one list ordered by ending → reload, all
+ * with the URL as the state; a direct open of the new address and of an old `historyView` one; the old
+ * `/history` address (server 307, signed in and as a guest); an old `?loanId=` link; desktop and mobile
+ * width with the keyboard in light and dark, with a long title and a long name.
  *
  * `BROWSER_SCREENSHOT_DIR` (optional) — where to put screenshots for a manual look.
  *
@@ -62,15 +64,24 @@ interface World {
   me: Person
   friend: Person
   alias: string
-  /** My book the friend borrowed and returned: «Що в мене брали». */
+  /** My book the friend borrowed and returned — twice: two separate «Ви дали почитати» rows. */
   lent: Book & { loanId: string }
-  /** The friend's book I borrowed and returned: «Що я брав». */
+  /** The friend's book (a long title) I borrowed and returned between those two loans. */
   borrowed: Book
-  /** My book handed to a guest: an anonymous «Що в мене брали» entry. */
+  /** My book handed to a guest: an anonymous row without an ending. */
   guest: Book
-  /** A request still open on my book: the current loans list, not history. */
+  /** A request still open on my book: in history too, below everything that ended. */
   requested: Book
 }
+
+/** BS-142: the order the shared list must show — endings first (newest first), then the rest. */
+const expectedTitles = (): string[] => [
+  world.lent.title,
+  world.borrowed.title,
+  world.lent.title,
+  world.requested.title,
+  world.guest.title,
+]
 
 let world: World
 
@@ -97,7 +108,7 @@ afterAll(async () => {
 
 async function register(prefix: string, name: string): Promise<Person> {
   const email = uniqueEmail(prefix)
-  const displayName = `${name} ${String(process.pid)}`
+  const displayName = `${name} ${String(process.pid)}`.slice(0, 80)
   const response = await request(app.getHttpServer())
     .post(url('/auth/register'))
     .send({ email, password: VALID_PASSWORD, displayName })
@@ -121,21 +132,42 @@ async function book(owner: Account): Promise<Book> {
   return { title, shelf }
 }
 
+async function lendAndReturn(owner: Person, borrower: Person, copyId: string): Promise<string> {
+  const loanId = await handedOverLoan(app, owner, borrower, copyId)
+
+  await actOnLoan(app, owner, loanId, { action: 'return' }).expect(200)
+
+  return loanId
+}
+
+/** A long title with ordinary words: it must wrap inside the card, never widen the page. */
+const LONG_TITLE =
+  'Надзвичайно довга назва твору про бібліотеку, позичання й повернення книжок між друзями, ' +
+  'яка не вміщується в один рядок навіть на широкому екрані'
+
 async function seedWorld(): Promise<World> {
   const me = await register('bs143-me', 'Читачка')
-  const friend = await register('bs143-friend', 'Друг')
+  const friend = await register(
+    'bs143-friend',
+    'Друг Із Дуже Довгим Імʼям Костянтин-Олександр Вишневецький-Подільський',
+  )
 
   await befriend(app, me, friend)
 
   const lent = await book(me)
-  const lentLoanId = await handedOverLoan(app, me, friend, lent.shelf.copyId)
-
-  await actOnLoan(app, me, lentLoanId, { action: 'return' }).expect(200)
+  const lentLoanId = await lendAndReturn(me, friend, lent.shelf.copyId)
 
   const borrowed = await book(friend)
-  const borrowedLoanId = await handedOverLoan(app, friend, me, borrowed.shelf.copyId)
 
-  await actOnLoan(app, friend, borrowedLoanId, { action: 'return' }).expect(200)
+  await prisma.work.update({
+    where: { id: borrowed.shelf.workId },
+    data: { title: `${LONG_TITLE} ${String(process.pid)}` },
+  })
+  borrowed.title = `${LONG_TITLE} ${String(process.pid)}`
+  await lendAndReturn(friend, me, borrowed.shelf.copyId)
+
+  // The same copy again: a repeated loan is its own row, never merged with the first one.
+  await lendAndReturn(me, friend, lent.shelf.copyId)
 
   const alias = `Аліас bs143 ${String(Date.now())}`
   const contact = await request(app.getHttpServer())
@@ -242,8 +274,9 @@ function watchReads(page: Page): string[] {
 
 const loansTabs = (page: Page): Locator =>
   page.getByRole('tablist', { name: 'Вкладки позичань' }).getByRole('tab')
-const historyTabs = (page: Page): Locator =>
-  page.getByRole('tablist', { name: 'Вигляд історії' }).getByRole('tab')
+/** The rows of the one shared history list. */
+const historyRows = (page: Page): Locator =>
+  page.getByRole('list', { name: 'Історія позичань' }).getByRole('listitem')
 const sectionNav = (page: Page): Locator =>
   page.getByRole('navigation', { name: 'Розділи бібліотеки' })
 
@@ -252,13 +285,20 @@ async function expectSelected(tab: Locator): Promise<void> {
   await tab.and(tab.page().locator('[aria-selected="true"]')).waitFor()
 }
 
-/** The card of a title inside the innermost open panel — the history side on screen. */
+/** The rows of a title in the history list, in list order (a repeated loan gives several). */
 function card(where: Page, title: string): Locator {
-  return where
-    .getByRole('tabpanel')
-    .last()
-    .getByRole('listitem')
-    .filter({ has: where.getByRole('link', { name: title, exact: true }) })
+  return historyRows(where).filter({
+    has: where.getByRole('link', { name: title, exact: true }),
+  })
+}
+
+/** Each row's title — the first link of the row — in list order. */
+async function rowTitles(where: Page): Promise<string[]> {
+  await historyRows(where).first().waitFor()
+
+  return historyRows(where).evaluateAll((items) =>
+    items.map((item) => item.querySelector('a')?.textContent ?? ''),
+  )
 }
 
 /** A marker on `window` survives only client-side navigation: proof that nothing reloaded. */
@@ -290,8 +330,8 @@ async function tabTo(where: Page, target: Locator): Promise<void> {
   throw new Error('Фокус так і не дійшов до потрібного елемента')
 }
 
-describe('BS-143: особиста історія — третя вкладка «Позичань» (браузер)', () => {
-  it('хедер → «Позичання» → «Історія» → обидві підвкладки → reload: стан в адресі, рамка одна', async () => {
+describe('BS-143/BS-142: особиста історія — третя вкладка «Позичань», один список (браузер)', () => {
+  it('хедер → «Позичання» → «Історія» → спільний список за датою завершення → reload: стан в адресі, рамка одна', async () => {
     const tab = await newPage()
     const reads = watchReads(tab)
 
@@ -324,14 +364,29 @@ describe('BS-143: особиста історія — третя вкладка 
     await loansTabs(tab).filter({ hasText: 'Історія' }).click()
     await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history`)
     await expectSelected(loansTabs(tab).filter({ hasText: 'Історія' }))
-    await expectSelected(historyTabs(tab).filter({ hasText: 'Що я брав' }))
+
+    // One list, no inner tabs; both directions mixed by ending, the rest below.
+    expect(await rowTitles(tab)).toEqual(expectedTitles())
+    expect(await tab.getByRole('tablist').count()).toBe(1)
+
+    const [lentAgain, lentFirst] = [
+      card(tab, world.lent.title).nth(0),
+      card(tab, world.lent.title).nth(1),
+    ]
+
+    for (const row of [lentAgain, lentFirst]) {
+      expect(await row.innerText()).toContain(
+        `Ви дали почитати · Позичальник: ${world.friend.displayName}`,
+      )
+      expect(await row.innerText()).toContain('Статус: Повернено')
+    }
 
     const borrowedCard = card(tab, world.borrowed.title)
 
-    await borrowedCard.waitFor()
     expect(await borrowedCard.innerText()).toContain(
-      `${world.me.displayName} у ${world.friend.displayName}`,
+      `Ви позичили · Власник: ${world.friend.displayName}`,
     )
+    expect(await borrowedCard.innerText()).toMatch(/Передано: .+ · Повернено: .+/)
     expect(
       await borrowedCard
         .getByRole('link', { name: world.borrowed.title, exact: true })
@@ -340,7 +395,13 @@ describe('BS-143: особиста історія — третя вкладка 
     expect(
       await borrowedCard.getByRole('link', { name: 'Уся історія примірника' }).getAttribute('href'),
     ).toBe(`/copies/${world.borrowed.shelf.copyId}/history`)
-    expect(await card(tab, world.lent.title).count()).toBe(0)
+
+    expect(await card(tab, world.requested.title).innerText()).toContain(
+      'Статус: Чекає на відповідь',
+    )
+    expect(await card(tab, world.requested.title).innerText()).toContain(
+      'Передано: не вказано · Повернено: не вказано',
+    )
 
     // One frame: «Моя бібліотека» stays current in the header, «Позичання» in the section.
     expect(await tab.getByRole('heading', { level: 1 }).allTextContents()).toEqual([
@@ -357,41 +418,29 @@ describe('BS-143: особиста історія — третя вкладка 
         .getAttribute('aria-current'),
     ).toBe('page')
 
-    await historyTabs(tab).filter({ hasText: 'Що в мене брали' }).click()
-    await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history&historyView=lent`)
-    await expectSelected(historyTabs(tab).filter({ hasText: 'Що в мене брали' }))
-
-    const lentCard = card(tab, world.lent.title)
-
-    await lentCard.waitFor()
-    expect(await lentCard.innerText()).toContain(
-      `${world.friend.displayName} у ${world.me.displayName}`,
-    )
-
     // The guest entry stays anonymous: no alias anywhere on the page, not even in the markup.
     const guestCard = card(tab, world.guest.title)
 
-    await guestCard.waitFor()
-    expect(await guestCard.innerText()).toContain('у когось')
+    expect(await guestCard.innerText()).toContain('Позичальник: гість, ім’я не показується')
+    expect(await guestCard.innerText()).toContain('Записано власником · джерело: зі слів власника')
     expect(await tab.content()).not.toContain(world.alias)
 
     // History reads only `/me/history` — never the current loans list — and nothing reloaded.
     await tab.waitForLoadState('networkidle')
     expect(new Set(reads.slice(beforeHistory))).toEqual(new Set(['/api/v1/me/history']))
     expect(await isSameWindow(tab)).toBe(true)
-    await screenshot(tab, 'bs143-history-lent-1280-light')
+    await screenshot(tab, 'bs142-history-1280-light')
 
-    // Reload: the address keeps the tab and the side.
+    // Reload: the address keeps the tab and the list.
     await tab.reload()
-    await card(tab, world.lent.title).waitFor()
-    expect(tab.url()).toBe(`${WEB_ORIGIN}/loans?tab=history&historyView=lent`)
+    expect(await rowTitles(tab)).toEqual(expectedTitles())
+    expect(tab.url()).toBe(`${WEB_ORIGIN}/loans?tab=history`)
     await expectSelected(loansTabs(tab).filter({ hasText: 'Історія' }))
-    await expectSelected(historyTabs(tab).filter({ hasText: 'Що в мене брали' }))
     expect(await isSameWindow(tab)).toBe(false)
 
-    // Back to a list tab: `tab` goes, `role` comes, the rest of the address stays.
+    // Back to a list tab: `tab` goes, `role` comes.
     await loansTabs(tab).filter({ hasText: 'Я позичаю' }).click()
-    await tab.waitForURL(`${WEB_ORIGIN}/loans?historyView=lent&role=borrower`)
+    await tab.waitForURL(`${WEB_ORIGIN}/loans?role=borrower`)
     await expectSelected(loansTabs(tab).filter({ hasText: 'Я позичаю' }))
     // The returned loan is still on my borrower side — now as a current-loans card with its status.
     await tab
@@ -401,17 +450,19 @@ describe('BS-143: особиста історія — третя вкладка 
     await tab.getByRole('combobox', { name: 'Статус' }).waitFor()
   })
 
-  it('пряме відкриття нової адреси показує відповідну вкладку й підвкладку', async () => {
-    const lent = await openSignedIn(world.me, '/loans?tab=history&historyView=lent')
+  it('пряме відкриття: нова адреса й стара з historyView відкривають той самий спільний список', async () => {
+    for (const query of [
+      'tab=history',
+      'tab=history&historyView=lent',
+      'tab=history&historyView=borrowed',
+    ]) {
+      const opened = await openSignedIn(world.me, `/loans?${query}`)
 
-    await card(lent, world.lent.title).waitFor()
-    await expectSelected(loansTabs(lent).filter({ hasText: 'Історія' }))
-    await expectSelected(historyTabs(lent).filter({ hasText: 'Що в мене брали' }))
-
-    const borrowed = await openSignedIn(world.me, '/loans?tab=history')
-
-    await card(borrowed, world.borrowed.title).waitFor()
-    await expectSelected(historyTabs(borrowed).filter({ hasText: 'Що я брав' }))
+      expect(await rowTitles(opened)).toEqual(expectedTitles())
+      await expectSelected(loansTabs(opened).filter({ hasText: 'Історія' }))
+      // The old parameter is neither applied nor rewritten.
+      expect(opened.url()).toBe(`${WEB_ORIGIN}/loans?${query}`)
+    }
 
     // An old link to one loan still opens that loan, even with `tab=history` beside it.
     const single = await openSignedIn(world.me, `/loans?loanId=${world.lent.loanId}&tab=history`)
@@ -443,8 +494,7 @@ describe('BS-143: особиста історія — третя вкладка 
 
     await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history`)
     expect(opened?.request().redirectedFrom()?.url()).toBe(`${WEB_ORIGIN}/history?historyView=lent`)
-    await card(tab, world.borrowed.title).waitFor()
-    await expectSelected(historyTabs(tab).filter({ hasText: 'Що я брав' }))
+    expect(await rowTitles(tab)).toEqual(expectedTitles())
 
     // A guest: first the loans page, then its usual guard.
     const guest = await newPage()
@@ -453,72 +503,142 @@ describe('BS-143: особиста історія — третя вкладка 
     await guest.waitForURL((address) => address.pathname === '/login')
   })
 
-  for (const theme of THEMES) {
-    it(`мобільна ширина 375 px, ${theme} тема: клавіатурою до історії, видимий фокус, без горизонтального скролу`, async () => {
-      const tab = await newPage({ width: 375, theme })
+  it('стара втрата без дати завершення, знайдена у вересні, стоїть вище червневої передачі', async () => {
+    const me = await register('bs142-lost-me', 'Власниця')
+    const friend = await register('bs142-lost-friend', 'Позичальник')
 
-      await login(tab, world.me.email)
-      await tab.goto(`${WEB_ORIGIN}/loans`)
-      await tab.getByRole('link', { name: world.requested.title, exact: true }).waitFor()
-      await tab.waitForLoadState('networkidle')
+    await befriend(app, me, friend)
 
-      // The selected tab is the tablist's one Tab stop; arrows move, Enter chooses.
-      const owner = loansTabs(tab).filter({ hasText: 'Мої книжки' })
+    const lost = await book(me)
+    const active = await book(me)
 
-      await tab.locator('body').focus()
-      await tabTo(tab, owner)
-      expect(
-        await owner.evaluate((element) => {
-          const style = getComputedStyle(element)
+    // A loss from before Stage 10: no LOAN_LOST was ever written (the REC5 fixture).
+    const lostId = await handedOverLoan(app, me, friend, lost.shelf.copyId)
 
-          return style.outlineStyle !== 'none' || style.boxShadow !== 'none'
-        }),
-      ).toBe(true)
-
-      await tab.keyboard.press('ArrowRight')
-      await tab.keyboard.press('ArrowRight')
-      await tab.keyboard.press('Enter')
-      await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history`)
-      await card(tab, world.borrowed.title).waitFor()
-
-      const borrowedSide = historyTabs(tab).filter({ hasText: 'Що я брав' })
-
-      await tabTo(tab, borrowedSide)
-      await tab.keyboard.press('ArrowRight')
-      await tab.keyboard.press('Enter')
-      await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history&historyView=lent`)
-      await card(tab, world.lent.title).waitFor()
-      // The underline fades in: measure it once the transition has finished.
-      await tab.waitForFunction(() => document.getAnimations().length === 0)
-      await screenshot(tab, `bs143-history-375-${theme}`)
-
-      const layout = await tab.evaluate(() => {
-        const viewport = document.documentElement.clientWidth
-        const tabs = [...document.querySelectorAll('[role="tab"]')]
-        const selected = tabs.filter((element) => element.getAttribute('aria-selected') === 'true')
-        const underline = (element: Element): string => getComputedStyle(element, '::after').opacity
-
-        return {
-          theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
-          pageOverflow: document.documentElement.scrollWidth - viewport,
-          tabsOutside: tabs.filter((element) => {
-            const box = element.getBoundingClientRect()
-
-            return box.left < 0 || box.right > viewport
-          }).length,
-          selected: selected.map((element) => element.textContent),
-          selectedUnderlines: selected.map(underline),
-          otherUnderlines: tabs.filter((element) => !selected.includes(element)).map(underline),
-        }
-      })
-
-      expect(layout.theme).toBe(theme)
-      expect(layout.pageOverflow).toBeLessThanOrEqual(0)
-      expect(layout.tabsOutside).toBe(0)
-      // The active state is both programmatic (`aria-selected`) and visible (the underline).
-      expect(layout.selected).toEqual(['Історія', 'Що в мене брали'])
-      expect(layout.selectedUnderlines).toEqual(['1', '1'])
-      expect(new Set(layout.otherUnderlines)).toEqual(new Set(['0']))
+    await actOnLoan(app, me, lostId, { action: 'mark_lost' }).expect(200)
+    await prisma.loanEvent.deleteMany({ where: { loanId: lostId } })
+    await prisma.loan.update({
+      where: { id: lostId },
+      data: {
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        requestedAt: new Date('2026-01-01T00:00:00Z'),
+        respondedAt: new Date('2026-01-02T00:00:00Z'),
+        handedAt: new Date('2026-01-03T00:00:00Z'),
+      },
     })
+
+    const activeId = await handedOverLoan(app, me, friend, active.shelf.copyId)
+
+    await prisma.loan.update({
+      where: { id: activeId },
+      data: {
+        createdAt: new Date('2026-02-01T00:00:00Z'),
+        requestedAt: new Date('2026-02-01T00:00:00Z'),
+        respondedAt: new Date('2026-02-02T00:00:00Z'),
+        handedAt: new Date('2026-06-01T00:00:00Z'),
+      },
+    })
+    await actOnLoan(app, me, lostId, { action: 'recover', effectiveAt: '2026-09-01' }).expect(200)
+
+    for (const person of [me, friend]) {
+      const tab = await openSignedIn(person, '/loans?tab=history')
+
+      expect(await rowTitles(tab)).toEqual([lost.title, active.title])
+
+      // Ordered by the recovery, yet the loss keeps its unknown ending; no event data in the page.
+      expect(await card(tab, lost.title).innerText()).toContain('Статус: Втрачено')
+      expect(await card(tab, lost.title).innerText()).toContain('Завершено: не вказано')
+      expect(await tab.content()).not.toMatch(/RECOVERED|effectiveAt|latestFactAt|payload/)
+      await screenshot(tab, `bs142-history-recovered-${person === me ? 'owner' : 'borrower'}`)
+    }
+  })
+
+  for (const width of [375, 1280]) {
+    for (const theme of THEMES) {
+      it(`${String(width)} px, ${theme} тема: клавіатурою до історії, видимий фокус, довгі назва й імʼя без горизонтального скролу`, async () => {
+        const tab = await newPage({ width, theme })
+
+        await login(tab, world.me.email)
+        await tab.goto(`${WEB_ORIGIN}/loans`)
+        await tab.getByRole('link', { name: world.requested.title, exact: true }).waitFor()
+        await tab.waitForLoadState('networkidle')
+
+        // The selected tab is the tablist's one Tab stop; arrows move, Enter chooses.
+        const owner = loansTabs(tab).filter({ hasText: 'Мої книжки' })
+
+        await tab.locator('body').focus()
+        await tabTo(tab, owner)
+        expect(
+          await owner.evaluate((element) => {
+            const style = getComputedStyle(element)
+
+            return style.outlineStyle !== 'none' || style.boxShadow !== 'none'
+          }),
+        ).toBe(true)
+
+        await tab.keyboard.press('ArrowRight')
+        await tab.keyboard.press('ArrowRight')
+        await tab.keyboard.press('Enter')
+        await tab.waitForURL(`${WEB_ORIGIN}/loans?tab=history`)
+        expect(await rowTitles(tab)).toEqual(expectedTitles())
+
+        // From the tab into the list: the first row's title is reachable by keyboard and visibly focused.
+        const firstTitle = historyRows(tab).first().getByRole('link').first()
+
+        await tabTo(tab, firstTitle)
+        expect(
+          await firstTitle.evaluate((element) => {
+            const style = getComputedStyle(element)
+
+            return style.outlineStyle !== 'none' || style.boxShadow !== 'none'
+          }),
+        ).toBe(true)
+
+        // The underline fades in: measure it once the transition has finished.
+        await tab.waitForFunction(() => document.getAnimations().length === 0)
+        await screenshot(tab, `bs142-history-${String(width)}-${theme}`)
+
+        const layout = await tab.evaluate(() => {
+          const viewport = document.documentElement.clientWidth
+          const tabs = [...document.querySelectorAll('[role="tab"]')]
+          const selected = tabs.filter(
+            (element) => element.getAttribute('aria-selected') === 'true',
+          )
+          const underline = (element: Element): string =>
+            getComputedStyle(element, '::after').opacity
+          const rows = [...document.querySelectorAll('[aria-label="Історія позичань"] > li')]
+
+          return {
+            theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+            pageOverflow: document.documentElement.scrollWidth - viewport,
+            tabsOutside: tabs.filter((element) => {
+              const box = element.getBoundingClientRect()
+
+              return box.left < 0 || box.right > viewport
+            }).length,
+            rowsOutside: rows.filter((element) => {
+              const box = element.getBoundingClientRect()
+
+              return box.left < 0 || box.right > viewport
+            }).length,
+            rowsOverflowing: rows.filter((element) => element.scrollWidth > element.clientWidth)
+              .length,
+            selected: selected.map((element) => element.textContent),
+            selectedUnderlines: selected.map(underline),
+            otherUnderlines: tabs.filter((element) => !selected.includes(element)).map(underline),
+          }
+        })
+
+        expect(layout.theme).toBe(theme)
+        expect(layout.pageOverflow).toBeLessThanOrEqual(0)
+        expect(layout.tabsOutside).toBe(0)
+        expect(layout.rowsOutside).toBe(0)
+        expect(layout.rowsOverflowing).toBe(0)
+        // The active state is both programmatic (`aria-selected`) and visible (the underline).
+        expect(layout.selected).toEqual(['Історія'])
+        expect(layout.selectedUnderlines).toEqual(['1'])
+        expect(new Set(layout.otherUnderlines)).toEqual(new Set(['0']))
+      })
+    }
   }
 })
