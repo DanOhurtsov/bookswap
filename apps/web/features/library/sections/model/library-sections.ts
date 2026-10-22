@@ -1,7 +1,8 @@
 /**
- * «Моя бібліотека» is one section of the app spread over four routes. This list is the one place that
+ * «Моя бібліотека» is one section of the app spread over three routes. This list is the one place that
  * says which routes they are and in what order; the section's own navigation and the header entry
- * both read the current section from here.
+ * both read the current section from here. The personal history is a tab inside «Позичання»
+ * (`/loans?tab=history`, BS-143), not a section of its own.
  */
 export type LibrarySection = {
   href: string
@@ -11,7 +12,6 @@ export type LibrarySection = {
 export const LIBRARY_SECTIONS = [
   { href: '/library', label: 'Книжки' },
   { href: '/loans', label: 'Позичання' },
-  { href: '/history', label: 'Історія' },
   { href: '/wishlist', label: 'Вішлист' },
 ] as const satisfies readonly LibrarySection[]
 

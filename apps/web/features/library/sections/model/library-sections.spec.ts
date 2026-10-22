@@ -1,11 +1,10 @@
 import { LIBRARY_SECTIONS, currentLibrarySection } from './library-sections'
 
 describe('розділи «Моєї бібліотеки»', () => {
-  it('чотири розділи йдуть у погодженому порядку й ведуть на наявні маршрути', () => {
+  it('три розділи йдуть у погодженому порядку й ведуть на наявні маршрути', () => {
     expect(LIBRARY_SECTIONS).toEqual([
       { href: '/library', label: 'Книжки' },
       { href: '/loans', label: 'Позичання' },
-      { href: '/history', label: 'Історія' },
       { href: '/wishlist', label: 'Вішлист' },
     ])
   })
@@ -17,7 +16,6 @@ describe('розділи «Моєї бібліотеки»', () => {
     ['/library/imports/import-1', 'Книжки'],
     ['/loans', 'Позичання'],
     ['/loans/guest', 'Позичання'],
-    ['/history', 'Історія'],
     ['/wishlist', 'Вішлист'],
   ])('%s належить до розділу «%s»', (pathname, label) => {
     expect(currentLibrarySection(pathname)?.label).toBe(label)
@@ -29,6 +27,7 @@ describe('розділи «Моєї бібліотеки»', () => {
     '/friends',
     '/users/user-2/library',
     '/copies/copy-1/history',
+    '/history',
     '/reading-list',
     '/libraryish',
     '/loansharks',

@@ -157,7 +157,6 @@ describe('NavContent', () => {
     '/library/imports',
     '/loans',
     '/loans/guest',
-    '/history',
     '/wishlist',
   ])('on %s «Моя бібліотека» is the current page, in the row and in the menu', async (pathname) => {
     mockPathname = pathname

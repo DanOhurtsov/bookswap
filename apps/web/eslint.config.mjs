@@ -13,6 +13,7 @@ const KNOWN_FEATURES = [
   'features/library/own-library',
   'features/library/own-book',
   'features/library/sections',
+  'features/loans',
   'features/network',
   'features/contacts',
   'features/guest-loans',
