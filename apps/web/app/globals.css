@@ -53,6 +53,15 @@
   box-sizing: border-box;
 }
 
+/* Shared by `body` and the field rules below: the library filter lines its submit button up with
+   a text field (its height, and its row in a grid built on the field's gap) from these numbers
+   instead of copying them. */
+:root {
+  --body-line-height: 1.55;
+  --field-padding-block: 0.6rem;
+  --field-gap: 0.35rem;
+}
+
 body {
   margin: 0;
   color: var(--fg);
@@ -62,7 +71,7 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
-  line-height: 1.55;
+  line-height: var(--body-line-height);
 }
 
 /*
@@ -143,7 +152,7 @@ h1 {
 
 .field {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--field-gap);
 }
 
 .field label {
@@ -158,7 +167,7 @@ h1 {
 [data-slot='select-trigger'],
 [data-slot='combobox-trigger'] {
   width: 100%;
-  padding: 0.6rem 0.7rem;
+  padding: var(--field-padding-block) 0.7rem;
   font: inherit;
   color: inherit;
   background: var(--field-bg);
