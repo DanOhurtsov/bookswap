@@ -23,7 +23,7 @@ function renderSection(pathname: string): void {
 const sectionNav = () => screen.getByRole('navigation', { name: 'Розділи бібліотеки' })
 
 describe('LibrarySectionPage', () => {
-  it('веде на чотири розділи в погодженому порядку звичайними посиланнями, а не вкладками', () => {
+  it('веде на три розділи в погодженому порядку звичайними посиланнями, а не вкладками', () => {
     renderSection('/library')
 
     const links = within(sectionNav()).getAllByRole('link')
@@ -31,7 +31,6 @@ describe('LibrarySectionPage', () => {
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Книжки', '/library'],
       ['Позичання', '/loans'],
-      ['Історія', '/history'],
       ['Вішлист', '/wishlist'],
     ])
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
@@ -41,7 +40,6 @@ describe('LibrarySectionPage', () => {
   it.each([
     ['/library', 'Книжки'],
     ['/loans', 'Позичання'],
-    ['/history', 'Історія'],
     ['/wishlist', 'Вішлист'],
   ])('на %s поточним позначено лише «%s», і розділ має свій підзаголовок', (pathname, label) => {
     renderSection(pathname)
@@ -72,9 +70,9 @@ describe('LibrarySectionPage', () => {
   it('кожне посилання — окрема зупинка Tab', async () => {
     const user = userEvent.setup()
 
-    renderSection('/history')
+    renderSection('/wishlist')
 
-    for (const name of ['Книжки', 'Позичання', 'Історія', 'Вішлист']) {
+    for (const name of ['Книжки', 'Позичання', 'Вішлист']) {
       await user.tab()
       expect(within(sectionNav()).getByRole('link', { name })).toHaveFocus()
     }
