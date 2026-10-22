@@ -9,7 +9,13 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 pnpm format:check
 pnpm turbo run lint typecheck --force
-pnpm turbo run test build --force
+# Tests run one package at a time and before the build, never alongside it. Each package's Jest
+# starts (cores - 1) workers; together with `next build`, the Nest build and the dev servers that
+# oversubscribed the CPU enough for jsdom tests that take ~1s to pass 5s and time out. A timed-out
+# test is not cancelled: its remaining clicks and typing land in the next test's DOM, so one timeout
+# also fails the test after it. Timeouts stay as they are — the load is what was wrong.
+pnpm turbo run test --force --concurrency=1
+pnpm turbo run build --force
 # Deliberately not chained with `&&`: under `set -e`, a failure in any command
 # but the *last* one of an AND-OR list is invisible — POSIX exempts every
 # non-final member of such a list from errexit. `db:up && db:deploy && ...`
