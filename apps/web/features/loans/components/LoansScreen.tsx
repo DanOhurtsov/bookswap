@@ -10,7 +10,6 @@ import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { useSession } from '@/app/lib/use-session'
 import {
   LOANS_TABS,
-  historyViewHref,
   loansTabHref,
   readLoansAddress,
   tabOf,
@@ -99,9 +98,9 @@ type LoansTabsProps = {
 }
 
 /**
- * The tab and the history side live in the URL, not in `useState`.
+ * The tab lives in the URL, not in `useState`.
  *
- * Otherwise they drift from the address two ways: changing the query on the same route does
+ * Otherwise it drifts from the address two ways: changing the query on the same route does
  * nothing, and a reload opens a different tab than the address bar names. The URL is the state.
  *
  * Switching goes through `router.replace`, i.e. it **creates no history entry**: "back" returns to
@@ -135,12 +134,7 @@ function LoansTabs({ user, address }: LoansTabsProps) {
 
         <TabsContent value={tab}>
           {address.mode === 'history' ? (
-            <LoansHistoryPanel
-              view={address.view}
-              onViewChange={(view) => {
-                router.replace(historyViewHref(parameters, view))
-              }}
-            />
+            <LoansHistoryPanel />
           ) : (
             <LoanListPanel user={user} role={address.role} />
           )}

@@ -130,7 +130,8 @@ export const workHistoryResponseSchema = z.object({
 export type WorkHistoryResponse = z.infer<typeof workHistoryResponseSchema>
 
 /**
- * §8: `GET /me/history` — «що я брав і що в мене брали».
+ * §8: `GET /me/history` — «що я брав і що в мене брали». The two directions stay separate arrays;
+ * the web merges them into one list (BS-142).
  *
  * `borrowed` завжди іменований: viewer сам бере участь як зареєстрований позичальник, а гість
  * ніколи не може бути «я». `lent` (Stage 10, 10f.3) може містити й анонімний гостьовий факт
@@ -141,6 +142,21 @@ export type WorkHistoryResponse = z.infer<typeof workHistoryResponseSchema>
 export const myHistoryEntrySchema = z.object({
   entry: historyEntrySchema,
   copy: historyCopySchema,
+  /**
+   * BS-142: when the loan reliably ended, derived from facts already stored — the stamp or the
+   * `LoanEvent` of the closing transition (docs/plan/bs-142-unified-loan-history.md). `null` both
+   * for an open loan and for a closed one whose ending was never recorded (e.g. a cancelled request
+   * or a `LOST` loan from before Stage 10): never substituted with the request date, `dueAt` or now.
+   * Only in the personal history — copy and work histories do not carry it.
+   */
+  completedAt: z.iso.datetime().nullable(),
+  /**
+   * BS-142: the latest reliably dated fact of the loan — the stored dates shown in the entry (the
+   * request only for `origin = REQUESTED`), the ending, and a recovery after a loss (`RECOVERED`,
+   * its actual date). Orders the loans whose `completedAt` is unknown; it is never their ending.
+   * Derived on the server: no event, payload or actor is sent. `null` only when no fact is dated.
+   */
+  latestFactAt: z.iso.datetime().nullable(),
 })
 
 export type MyHistoryEntry = z.infer<typeof myHistoryEntrySchema>

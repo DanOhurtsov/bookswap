@@ -1,8 +1,14 @@
+import type { LoanStatus } from '@bookswap/shared'
 import {
+  COMPLETION_EVENT_TYPES,
+  HISTORY_DATE_EVENT_TYPES,
   byRequestedAt,
+  completedAtOf,
+  latestFactAtOf,
   toAnonymousEntry,
   toHistoryEntry,
   toNamedEntry,
+  type DatedEventRow,
   type HistoryLoanRow,
   type NamedHistoryLoanRow,
 } from './history.mapper'
@@ -207,5 +213,193 @@ describe('guestEvidence (10i.1): джерело доказу виводитьс�
     const raw = JSON.stringify(toAnonymousEntry(guestRow('RECEIVED'), NOW))
 
     for (const key of IDENTIFYING_KEYS) expect(raw).not.toContain(`"${key}"`)
+  })
+})
+
+describe('completedAtOf (BS-142): дата завершення лише з достовірного джерела', () => {
+  const AT = (iso: string) => new Date(iso)
+  const event = (type: DatedEventRow['type'], occurredAt: string, effectiveAt?: string) => ({
+    type,
+    occurredAt: AT(occurredAt),
+    effectiveAt: effectiveAt === undefined ? null : AT(effectiveAt),
+  })
+  const loan = (
+    status: LoanStatus,
+    events: DatedEventRow[] = [],
+    columns: { returnedAt?: Date | null; respondedAt?: Date | null } = {},
+  ) => ({
+    status,
+    returnedAt: columns.returnedAt ?? null,
+    respondedAt: columns.respondedAt ?? null,
+    events,
+  })
+
+  it('RETURNED — returnedAt, REJECTED — respondedAt', () => {
+    expect(completedAtOf(loan('RETURNED', [], { returnedAt: AT('2026-06-10T10:00:00Z') }))).toEqual(
+      AT('2026-06-10T10:00:00Z'),
+    )
+    expect(
+      completedAtOf(loan('REJECTED', [], { respondedAt: AT('2026-06-02T10:00:00Z') })),
+    ).toEqual(AT('2026-06-02T10:00:00Z'))
+  })
+
+  it('без збереженої колонки дата лишається невідомою', () => {
+    expect(completedAtOf(loan('RETURNED'))).toBeNull()
+    expect(completedAtOf(loan('REJECTED'))).toBeNull()
+  })
+
+  it.each([
+    ['CANCELLED', 'RECORD_WITHDRAWN'],
+    ['CANCELLED', 'GUEST_HANDOVER_CANCELLED'],
+    ['DECLINED', 'RECORD_DECLINED'],
+    ['LOST', 'LOAN_LOST'],
+  ] as const)('%s — з події %s', (status, type) => {
+    expect(completedAtOf(loan(status, [event(type, '2026-06-05T09:00:00Z')]))).toEqual(
+      AT('2026-06-05T09:00:00Z'),
+    )
+  })
+
+  it('фактична дата події (effectiveAt) важливіша за момент запису', () => {
+    expect(
+      completedAtOf(
+        loan('LOST', [event('LOAN_LOST', '2026-06-05T09:00:00Z', '2026-06-01T00:00:00Z')]),
+      ),
+    ).toEqual(AT('2026-06-01T00:00:00Z'))
+  })
+
+  it('скасований запит і старий LOST без події — дата невідома, не вигадується', () => {
+    expect(completedAtOf(loan('CANCELLED'))).toBeNull()
+    expect(completedAtOf(loan('LOST'))).toBeNull()
+  })
+
+  it('подія іншого статусу дату не дає: RECOVERED не є завершенням LOST', () => {
+    expect(completedAtOf(loan('LOST', [event('RECOVERED', '2026-06-20T00:00:00Z')]))).toBeNull()
+    expect(
+      completedAtOf(loan('DECLINED', [event('RECORD_WITHDRAWN', '2026-06-20T00:00:00Z')])),
+    ).toBeNull()
+  })
+
+  it.each(['REQUESTED', 'APPROVED', 'HANDED_OVER', 'PENDING_CONFIRMATION'] as const)(
+    '%s не завершена — null навіть із датами в колонках',
+    (status) => {
+      expect(
+        completedAtOf(
+          loan(status, [], {
+            returnedAt: AT('2026-06-10T10:00:00Z'),
+            respondedAt: AT('2026-06-02T10:00:00Z'),
+          }),
+        ),
+      ).toBeNull()
+    },
+  )
+
+  it('запит подій читає рівно ті типи, з яких береться дата', () => {
+    expect([...COMPLETION_EVENT_TYPES].sort()).toEqual(
+      ['GUEST_HANDOVER_CANCELLED', 'LOAN_LOST', 'RECORD_DECLINED', 'RECORD_WITHDRAWN'].sort(),
+    )
+  })
+})
+
+describe('latestFactAtOf (BS-142): остання достовірна дата запису', () => {
+  const AT = (iso: string) => new Date(iso)
+  const event = (type: DatedEventRow['type'], occurredAt: string, effectiveAt?: string) => ({
+    type,
+    occurredAt: AT(occurredAt),
+    effectiveAt: effectiveAt === undefined ? null : AT(effectiveAt),
+  })
+  const loan = (
+    facts: Partial<Parameters<typeof latestFactAtOf>[0]> = {},
+  ): Parameters<typeof latestFactAtOf>[0] => ({
+    status: 'HANDED_OVER',
+    origin: 'REQUESTED',
+    requestedAt: null,
+    respondedAt: null,
+    handedAt: null,
+    returnedAt: null,
+    events: [],
+    ...facts,
+  })
+
+  it('найпізніша з дат запиту, відповіді, передачі й повернення', () => {
+    expect(
+      latestFactAtOf(
+        loan({
+          status: 'RETURNED',
+          requestedAt: AT('2026-01-01T00:00:00Z'),
+          respondedAt: AT('2026-01-02T00:00:00Z'),
+          handedAt: AT('2026-01-03T00:00:00Z'),
+          returnedAt: AT('2026-02-01T00:00:00Z'),
+        }),
+      ),
+    ).toEqual(AT('2026-02-01T00:00:00Z'))
+  })
+
+  it('стара LOST без LOAN_LOST: знахідка — остання дата, але не завершення', () => {
+    const legacy = loan({
+      status: 'LOST',
+      requestedAt: AT('2026-01-01T00:00:00Z'),
+      handedAt: AT('2026-01-03T00:00:00Z'),
+      events: [event('RECOVERED', '2026-09-01T00:00:00Z')],
+    })
+
+    expect(latestFactAtOf(legacy)).toEqual(AT('2026-09-01T00:00:00Z'))
+    expect(completedAtOf(legacy)).toBeNull()
+  })
+
+  it('фактична дата знахідки (effectiveAt) важливіша за пізніший момент запису', () => {
+    expect(
+      latestFactAtOf(
+        loan({
+          status: 'LOST',
+          handedAt: AT('2026-01-03T00:00:00Z'),
+          events: [event('RECOVERED', '2026-10-20T12:00:00Z', '2026-09-01T00:00:00Z')],
+        }),
+      ),
+    ).toEqual(AT('2026-09-01T00:00:00Z'))
+  })
+
+  it('дата завершення з події теж факт: відкликаний запис датується відкликанням', () => {
+    expect(
+      latestFactAtOf(
+        loan({
+          status: 'CANCELLED',
+          origin: 'RECORDED_EXISTING',
+          handedAt: AT('2026-01-05T00:00:00Z'),
+          events: [event('RECORD_WITHDRAWN', '2026-03-01T00:00:00Z')],
+        }),
+      ),
+    ).toEqual(AT('2026-03-01T00:00:00Z'))
+  })
+
+  it('дата запиту записаної позики (дефолт БД) не є фактом', () => {
+    expect(
+      latestFactAtOf(
+        loan({
+          status: 'PENDING_CONFIRMATION',
+          origin: 'RECORDED_EXISTING',
+          requestedAt: AT('2026-09-01T00:00:00Z'),
+          handedAt: AT('2026-03-01T00:00:00Z'),
+        }),
+      ),
+    ).toEqual(AT('2026-03-01T00:00:00Z'))
+  })
+
+  it('подія, що не датує факт запису, ігнорується; без дат — null', () => {
+    expect(
+      latestFactAtOf(
+        loan({
+          status: 'HANDED_OVER',
+          handedAt: AT('2026-03-01T00:00:00Z'),
+          events: [event('LOAN_LOST', '2026-06-01T00:00:00Z')],
+        }),
+      ),
+    ).toEqual(AT('2026-03-01T00:00:00Z'))
+    expect(latestFactAtOf(loan({ status: 'CANCELLED', origin: 'RECORDED_EXISTING' }))).toBeNull()
+  })
+
+  it('історія читає події завершення й знахідки — і лише їх', () => {
+    expect([...HISTORY_DATE_EVENT_TYPES].sort()).toEqual(
+      [...COMPLETION_EVENT_TYPES, 'RECOVERED'].sort(),
+    )
   })
 })

@@ -165,7 +165,7 @@ describe('LoansScreen: вкладки «Мої книжки» / «Я позич�
     apiRequest.mockResolvedValue({ borrowed: [], lent: [] })
 
     render(<LoansScreen />)
-    await screen.findByText('У вас поки нічого не брали.')
+    await screen.findByText('Історія позичань поки порожня.')
 
     await userEvent.click(screen.getByRole('tab', { name: 'Мої книжки' }))
 
@@ -181,7 +181,7 @@ describe('LoansScreen: вкладки «Мої книжки» / «Я позич�
     rerender(<LoansScreen />)
 
     expect(screen.getByRole('tab', { name: 'Історія' })).toHaveAttribute('aria-selected', 'true')
-    expect(await screen.findByText('Ви поки нічого не брали.')).toBeVisible()
+    expect(await screen.findByText('Історія позичань поки порожня.')).toBeVisible()
     expect(screen.queryByLabelText('Статус')).not.toBeInTheDocument()
 
     apiRequest.mockResolvedValue({ loans: [] })
@@ -230,7 +230,9 @@ describe('LoansScreen: розділ «Позичання» у «Моїй біб�
       apiRequest.mockResolvedValue({ loans: [], borrowed: [], lent: [] })
 
       render(<LoansScreen />)
-      await screen.findByText(/Вашими книжками поки ніхто не цікавився|Ви поки нічого не брали/)
+      await screen.findByText(
+        /Вашими книжками поки ніхто не цікавився|Історія позичань поки порожня/,
+      )
 
       expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([
         'Моя бібліотека',

@@ -1,7 +1,6 @@
 import {
   LOANS_HISTORY_HREF,
   LOANS_TABS,
-  historyViewHref,
   loansTabHref,
   readLoansAddress,
   tabOf,
@@ -23,11 +22,12 @@ describe('адреса розділу «Позичання» (BS-143)', () => {
     ['tab=unknown&role=borrower', { mode: 'list', role: 'borrower' }],
     ['tab=HISTORY', { mode: 'list', role: 'owner' }],
     ['historyView=lent', { mode: 'list', role: 'owner' }],
-    ['tab=history', { mode: 'history', view: 'borrowed' }],
-    ['tab=history&role=borrower', { mode: 'history', view: 'borrowed' }],
-    ['tab=history&historyView=borrowed', { mode: 'history', view: 'borrowed' }],
-    ['tab=history&historyView=lent', { mode: 'history', view: 'lent' }],
-    ['tab=history&historyView=other', { mode: 'history', view: 'borrowed' }],
+    ['tab=history', { mode: 'history' }],
+    ['tab=history&role=borrower', { mode: 'history' }],
+    // BS-142: an old `historyView` opens the one shared history — it no longer picks a side.
+    ['tab=history&historyView=borrowed', { mode: 'history' }],
+    ['tab=history&historyView=lent', { mode: 'history' }],
+    ['tab=history&historyView=other', { mode: 'history' }],
   ])('?%s → %j', (query, address) => {
     expect(read(query)).toEqual(address)
   })
@@ -41,7 +41,7 @@ describe('адреса розділу «Позичання» (BS-143)', () => {
 
   it('вкладка адреси: роль для списку, history для історії', () => {
     expect(tabOf({ mode: 'list', role: 'borrower' })).toBe('borrower')
-    expect(tabOf({ mode: 'history', view: 'lent' })).toBe('history')
+    expect(tabOf({ mode: 'history' })).toBe('history')
   })
 
   describe('loansTabHref', () => {
@@ -74,25 +74,6 @@ describe('адреса розділу «Позичання» (BS-143)', () => {
 
         expect(address.mode === 'loan' ? undefined : tabOf(address)).toBe(tab)
       }
-    })
-  })
-
-  describe('historyViewHref', () => {
-    it.each(['borrowed', 'lent'] as const)(
-      'ставить historyView=%s, лишає tab=history і решту параметрів',
-      (view) => {
-        expect(
-          historyViewHref(new URLSearchParams('tab=history&role=owner&historyView=x'), view),
-        ).toBe(`/loans?tab=history&role=owner&historyView=${view}`)
-      },
-    )
-
-    it('читається назад у ту саму підвкладку', () => {
-      expect(
-        readLoansAddress(
-          new URL(historyViewHref(new URLSearchParams(), 'lent'), 'http://local').searchParams,
-        ),
-      ).toEqual({ mode: 'history', view: 'lent' })
     })
   })
 })

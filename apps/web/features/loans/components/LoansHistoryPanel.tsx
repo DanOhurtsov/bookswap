@@ -1,97 +1,103 @@
 'use client'
 
 import Link from 'next/link'
-import type { MyHistoryEntry } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { HistoryEntryLine } from '@/components/HistoryEntryLine'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { formatDate, GUEST_EVIDENCE_LABELS, LOAN_STATUS_LABELS } from '@/app/lib/labels'
 import { useMyHistory } from '@/app/lib/use-history'
-import { HISTORY_VIEWS, type HistoryView } from '../model/loans-address'
+import { toLoanHistory, type HistoryDirection, type LoanHistoryRow } from '../model/loan-history'
 
-const VIEW_LABELS: Readonly<Record<HistoryView, string>> = {
-  borrowed: 'Що я брав',
-  lent: 'Що в мене брали',
+const DIRECTION_LABELS: Readonly<Record<HistoryDirection, string>> = {
+  borrowed: 'Ви позичили',
+  lent: 'Ви дали почитати',
 }
 
-type LoansHistoryPanelProps = {
-  view: HistoryView
-  onViewChange: (view: HistoryView) => void
+const COUNTERPART_LABELS: Readonly<Record<LoanHistoryRow['counterpart']['side'], string>> = {
+  owner: 'Власник',
+  borrower: 'Позичальник',
 }
+
+const UNKNOWN_DATE = 'не вказано'
 
 /**
- * §6.6, personal history: what I borrowed and what was borrowed from me. Mounted only on the
+ * §6.6, personal history: one list of what I borrowed and what I lent (BS-142). Mounted only on the
  * «Історія» tab, and it reads `GET /me/history` — never the current loans list.
  *
- * Both lists always carry names: the viewer is a side of every loan here, not a bystander, so the
- * §6.6 anonymisation does not apply to them.
- *
- * One request serves both sides, so switching between them sends nothing new.
+ * Names come only from the API: a registered side of my own loan is always named, a guest record
+ * carries none, and nothing here fills that gap.
  */
-export function LoansHistoryPanel({ view, onViewChange }: LoansHistoryPanelProps) {
+export function LoansHistoryPanel() {
   const { state } = useMyHistory()
 
+  if (state.status === 'loading') return <p className="status status--pending">Завантажую…</p>
+  if (state.status === 'error') return <FormStatus error={new Error(state.message)} />
+
+  const rows = toLoanHistory(state.data)
+
+  if (rows.length === 0) return <p className="empty">Історія позичань поки порожня.</p>
+
   return (
-    <Tabs
-      className="gap-8"
-      value={view}
-      onValueChange={(next) => {
-        const selected = HISTORY_VIEWS.find((value) => value === next)
-        if (selected !== undefined) onViewChange(selected)
-      }}
-    >
-      <TabsList variant="line" aria-label="Вигляд історії">
-        {HISTORY_VIEWS.map((value) => (
-          <TabsTrigger key={value} value={value}>
-            {VIEW_LABELS[value]}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-
-      <TabsContent value={view}>
-        {state.status === 'loading' && <p className="status status--pending">Завантажую…</p>}
-        {state.status === 'error' && <FormStatus error={new Error(state.message)} />}
-
-        {state.status === 'ready' && state.data[view].length === 0 && (
-          <p className="empty">
-            {view === 'borrowed' ? 'Ви поки нічого не брали.' : 'У вас поки нічого не брали.'}
-          </p>
-        )}
-
-        {state.status === 'ready' && (
-          <ul className="books">
-            {state.data[view].map((item, index) => (
-              // Stage 10 (10f.3): a guest fact (`entry.names === false`) has no `loanId` — an
-              // anonymous entry carries no identifier that could correlate two different slices
-              // of history (the same rule as for someone else's history, §6.6).
-              <HistoryCard
-                key={item.entry.names ? item.entry.loanId : `guest-${String(index)}`}
-                item={item}
-              />
-            ))}
-          </ul>
-        )}
-      </TabsContent>
-    </Tabs>
+    <ul className="books" aria-label="Історія позичань">
+      {rows.map((row) => (
+        <HistoryRow key={row.key} row={row} />
+      ))}
+    </ul>
   )
 }
 
-function HistoryCard({ item }: { item: MyHistoryEntry }) {
+function HistoryRow({ row }: { row: LoanHistoryRow }) {
+  const { entry, copy, counterpart } = row
+
   return (
     <li className="book">
-      <Link className="book__title" href={`/works/${item.copy.work.id}`}>
-        {item.copy.work.title}
+      <Link className="book__title" href={`/works/${copy.work.id}`}>
+        {copy.work.title}
       </Link>
-      <AuthorLine authors={item.copy.authors} />
-      <EditionLine edition={item.copy.edition} />
-
-      <ul className="copies">
-        <HistoryEntryLine entry={item.entry} />
-      </ul>
+      <AuthorLine authors={copy.authors} />
+      <EditionLine edition={copy.edition} />
 
       <span className="book__meta">
-        <Link href={`/copies/${item.copy.id}/history`}>Уся історія примірника</Link>
+        {DIRECTION_LABELS[row.direction]} · {COUNTERPART_LABELS[counterpart.side]}:{' '}
+        {counterpart.name ?? 'гість, ім’я не показується'}
+      </span>
+      <span className="book__meta">
+        Статус: {LOAN_STATUS_LABELS[entry.status]}
+        {/* `dueAt` is the agreed term, not a return: it is labelled as such. */}
+        {entry.dueAt !== null && ` · строк повернення до ${formatDate(entry.dueAt)}`}
+        {entry.isOverdue && ' · прострочено'}
+      </span>
+      <span className="book__meta">
+        Передано: {dateOrUnknown(entry.handedAt)} · Повернено: {dateOrUnknown(entry.returnedAt)}
+        {row.showsCompletedAt && ` · Завершено: ${dateOrUnknown(row.completedAt)}`}
+      </span>
+      <span className="book__meta">{originLine(row)}</span>
+
+      <span className="book__meta">
+        <Link href={`/copies/${copy.id}/history`}>Уся історія примірника</Link>
       </span>
     </li>
   )
+}
+
+function dateOrUnknown(iso: string | null): string {
+  return iso === null ? UNKNOWN_DATE : formatDate(iso)
+}
+
+/**
+ * Whether there was a request comes from `origin`, not `requestedAt`: the DB defaults it to now(),
+ * so a loan the owner recorded may carry a `requestedAt` nobody sent.
+ */
+function originLine({ entry }: LoanHistoryRow): string {
+  const parts = [
+    entry.origin !== 'REQUESTED'
+      ? 'Записано власником'
+      : `Попросили ${dateOrUnknown(entry.requestedAt)}`,
+  ]
+
+  // Stage 10 (10i.3): where a guest handover's evidence comes from — no private data of the guest.
+  if (entry.guestEvidence !== null) {
+    parts.push(`джерело: ${GUEST_EVIDENCE_LABELS[entry.guestEvidence]}`)
+  }
+
+  return parts.join(' · ')
 }

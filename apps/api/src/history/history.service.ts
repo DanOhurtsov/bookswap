@@ -13,8 +13,11 @@ import { PrismaService } from '../prisma/prisma.service'
 import { ACTUAL_HANDOVER } from './actual-handover'
 import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
 import {
+  HISTORY_DATE_EVENT_TYPES,
   byRequestedAt,
+  completedAtOf,
   hasRegisteredBorrower,
+  latestFactAtOf,
   toAnonymousEntry,
   toHistoryCopy,
   toHistoryEntry,
@@ -191,6 +194,10 @@ export class HistoryService {
    * тут немає й не буде — власник отримує їх лише через окремий owner-only `GET /loans/guest[/:id]`
    * (§6.9/§6.10 execution plan). Раніше `hasRegisteredBorrower`-фільтр застосовувався до **всього**
    * набору, тож гостьові факти власника губилися ще до сортування — цю прогалину закрито тут.
+   *
+   * BS-142: each item also carries `completedAt` and `latestFactAt`; the web merges both
+   * directions and orders them by those. The order inside each array stays by request date — it is
+   * only the tie-break there.
    */
   async myHistory(userId: string): Promise<MyHistoryResponse> {
     const loans = await this.prisma.loan.findMany({
@@ -198,6 +205,12 @@ export class HistoryService {
       include: {
         ...WITH_SIDES,
         copy: { select: { id: true, status: true, condition: true, ...COPY_CATALOG } },
+        // BS-142: only the events that date an ending or a later fact, and only the fields that
+        // date them. They are read here and never leave the server.
+        events: {
+          where: { type: { in: [...HISTORY_DATE_EVENT_TYPES] } },
+          select: { type: true, occurredAt: true, effectiveAt: true },
+        },
       },
     })
 
@@ -206,6 +219,8 @@ export class HistoryService {
     const project = (loan: (typeof sorted)[number]): MyHistoryResponse['borrowed'][number] => ({
       entry: hasRegisteredBorrower(loan) ? toNamedEntry(loan, now) : toAnonymousEntry(loan, now),
       copy: toHistoryCopy(loan.copy),
+      completedAt: completedAtOf(loan)?.toISOString() ?? null,
+      latestFactAt: latestFactAtOf(loan)?.toISOString() ?? null,
     })
 
     return {
