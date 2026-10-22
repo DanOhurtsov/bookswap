@@ -364,7 +364,7 @@ describe('в’ю й фільтр', () => {
     expect(sent()).toEqual(['GET /me/library'])
   })
 
-  it('«Застосувати» шле запит з q, а порожній запит — без параметрів', async () => {
+  it('«Пошук» шле запит з q, а порожній запит — без параметрів', async () => {
     const filtered = `GET /me/library?${new URLSearchParams({ q: 'Шантарам' }).toString()}`
 
     serve({
@@ -374,18 +374,50 @@ describe('в’ю й фільтр', () => {
 
     renderShelf()
     await userEvent.type(await screen.findByLabelText('Назва або автор'), 'Шантарам')
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
 
     await waitFor(() => {
       expect(sent()).toContain(filtered)
     })
 
     await userEvent.clear(screen.getByLabelText('Назва або автор'))
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
 
     await waitFor(() => {
       expect(sent().filter((request) => request === 'GET /me/library')).toHaveLength(2)
     })
+  })
+
+  it('Enter у полі шле той самий запит, що й «Пошук»', async () => {
+    const filtered = `GET /me/library?${new URLSearchParams({ q: 'Шантарам' }).toString()}`
+
+    serve({
+      'GET /me/library': () => EMPTY,
+      [filtered]: () => EMPTY,
+    })
+
+    renderShelf()
+    await userEvent.type(await screen.findByLabelText('Назва або автор'), 'Шантарам{Enter}')
+
+    await waitFor(() => {
+      expect(sent()).toContain(filtered)
+    })
+    expect(window.location.search).toBe(`?q=${encodeURIComponent('Шантарам')}`)
+  })
+
+  it('один символ: «Пошук» нічого не шле, а помилка звʼязана з полем', async () => {
+    serve({ 'GET /me/library': () => EMPTY })
+
+    renderShelf()
+    const field = await screen.findByLabelText('Назва або автор')
+    await userEvent.type(field, 'а')
+    await userEvent.click(button('Пошук'))
+
+    const error = await screen.findByRole('alert')
+    expect(field).toHaveAttribute('aria-invalid', 'true')
+    expect(field).toHaveAccessibleDescription(error.textContent ?? '')
+    expect(sent()).toEqual(['GET /me/library'])
+    expect(window.location.search).toBe('')
   })
 
   it('«Мої не вдома» читає /me/library/out без форми фільтра; «Архів» теж без неї', async () => {
@@ -491,13 +523,13 @@ describe('адреса бібліотеки', () => {
     })
   })
 
-  it('«Застосувати» пише фільтр в адресу й додає запис в історії; повторне застосування нічого не додає', async () => {
+  it('«Пошук» пише фільтр в адресу й додає запис в історії; повторне застосування нічого не додає', async () => {
     serve(ROUTES)
     const entries = window.history.length
 
     renderShelf()
     await userEvent.type(await screen.findByLabelText('Назва або автор'), 'абв')
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
 
     await waitFor(() => {
       expect(sent()).toContain(FILTERED)
@@ -505,17 +537,17 @@ describe('адреса бібліотеки', () => {
     expect(window.location.search).toBe(`?q=${encodeURIComponent('абв')}`)
     expect(window.history.length).toBe(entries + 1)
 
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
 
     expect(window.history.length).toBe(entries + 1)
   })
 
-  it('поле обрізає те, що застосовано: після «Застосувати» в ньому те, що в адресі', async () => {
+  it('поле обрізає те, що застосовано: після «Пошук» в ньому те, що в адресі', async () => {
     serve(ROUTES)
 
     renderShelf()
     await userEvent.type(await screen.findByLabelText('Назва або автор'), '  абв  ')
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
 
     await waitFor(() => {
       expect(screen.getByLabelText('Назва або автор')).toHaveValue('абв')
@@ -527,7 +559,7 @@ describe('адреса бібліотеки', () => {
 
     renderShelf()
     await userEvent.type(await screen.findByLabelText('Назва або автор'), 'абв')
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
     await waitFor(() => {
       expect(sent()).toContain(FILTERED)
     })
@@ -549,7 +581,7 @@ describe('адреса бібліотеки', () => {
 
     renderShelf()
     await userEvent.type(await screen.findByLabelText('Назва або автор'), 'абв')
-    await userEvent.click(button('Застосувати'))
+    await userEvent.click(button('Пошук'))
     await waitFor(() => {
       expect(sent()).toContain(FILTERED)
     })
