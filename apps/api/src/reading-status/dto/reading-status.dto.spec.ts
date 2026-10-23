@@ -1,12 +1,14 @@
 import { plainToInstance } from 'class-transformer'
 import { validateSync } from 'class-validator'
 import {
+  friendsReadingQueryRequestSchema,
   readingListQueryRequestSchema,
   readingStatusesQueryRequestSchema,
   setReadingStatusRequestSchema,
 } from '@bookswap/shared'
 import type { ZodType } from 'zod'
 import {
+  FriendsReadingQueryDto,
   ReadingListQueryDto,
   ReadingStatusesQueryDto,
   SetReadingStatusDto,
@@ -99,5 +101,27 @@ describe('ReadingStatusesQueryDto ↔ readingStatusesQueryRequestSchema (BS-140)
     const dto = plainToInstance(ReadingStatusesQueryDto, { workIds: 'b,a,b' })
 
     expect(dto.workIds).toEqual(['b', 'a'])
+  })
+})
+
+describe('FriendsReadingQueryDto ↔ friendsReadingQueryRequestSchema (BS-137)', () => {
+  it('вироки збігаються', () => {
+    expectAgreement(FriendsReadingQueryDto, friendsReadingQueryRequestSchema, [
+      { name: 'порожній', payload: {}, valid: true },
+      { name: 'limit 1', payload: { limit: '1' }, valid: true },
+      { name: 'limit 12', payload: { limit: '12' }, valid: true },
+      { name: 'limit 39', payload: { limit: '39' }, valid: true },
+      { name: 'limit 48', payload: { limit: '48' }, valid: true },
+      { name: 'limit 49', payload: { limit: '49' }, valid: false },
+      { name: 'limit 50', payload: { limit: '50' }, valid: false },
+      { name: 'limit 0', payload: { limit: '0' }, valid: false },
+      { name: 'limit 012', payload: { limit: '012' }, valid: false },
+      { name: 'limit текст', payload: { limit: 'ten' }, valid: false },
+      { name: 'cursor', payload: { cursor: 'abc' }, valid: true },
+      { name: 'порожній cursor', payload: { cursor: '' }, valid: false },
+      { name: 'довгий cursor', payload: { cursor: 'a'.repeat(257) }, valid: false },
+      { name: 'чужий userId', payload: { userId: 'u' }, valid: false },
+      { name: 'статус', payload: { status: 'READ' }, valid: false },
+    ])
   })
 })

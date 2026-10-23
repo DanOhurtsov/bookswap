@@ -732,8 +732,12 @@ export {
   type VerifyGuestCodeResponse,
 } from './contracts/guest-loan-response'
 export {
+  FRIENDS_READING_LIMITS,
   READING_LIST_LIMITS,
   READING_STATUS_BATCH_LIMITS,
+  friendsReadingItemSchema,
+  friendsReadingQueryRequestSchema,
+  friendsReadingResponseSchema,
   parseWorkIdList,
   readingListItemSchema,
   readingListQueryRequestSchema,
@@ -744,6 +748,9 @@ export {
   readingStatusesResponseSchema,
   setReadingStatusRequestSchema,
   setReadingStatusResponseSchema,
+  type FriendsReadingItem,
+  type FriendsReadingQueryRequest,
+  type FriendsReadingResponse,
   type ReadingListItem,
   type ReadingListQueryRequest,
   type ReadingListResponse,

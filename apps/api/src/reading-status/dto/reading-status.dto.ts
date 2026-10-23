@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer'
 import { IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
 import {
+  FRIENDS_READING_LIMITS,
   READING_LIST_LIMITS,
   READING_LIST_STATUS,
   READING_STATUS,
@@ -51,4 +52,24 @@ export class ReadingStatusesQueryDto {
   @IsArray({ message: READING_STATUS_BATCH_LIMITS.invalidMessage })
   @IsString({ each: true })
   workIds!: string[]
+}
+
+/**
+ * BS-137, `GET /me/friends/reading`. Ті самі правила, що й у `friendsReadingQueryRequestSchema`: `limit` —
+ * рядок цілого 1…48, `cursor` — непорожній непрозорий рядок. Чий список — лише з сесії.
+ */
+export class FriendsReadingQueryDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(FRIENDS_READING_LIMITS.cursorMax)
+  cursor?: string
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[1-9]\d{0,2}$/, { message: 'limit — ціле число' })
+  @Matches(/^([1-9]|[1-3]\d|4[0-8])$/, {
+    message: `limit не більший за ${String(FRIENDS_READING_LIMITS.pageMax)}`,
+  })
+  limit?: string
 }

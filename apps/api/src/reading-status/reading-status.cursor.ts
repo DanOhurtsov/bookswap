@@ -3,7 +3,7 @@ import { API_ERROR_CODES } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
 
 /**
- * Курсор списку читання — позиція в порядку `(updatedAt DESC, id DESC)`. Непрозорий для клієнта:
+ * Курсор списку читання й стрічки друзів (BS-137) — позиція в порядку `(updatedAt DESC, id DESC)`. Непрозорий для клієнта:
  * base64url від `[updatedAtISO, id]`. Пара, а не лише час, бо кілька рядків можуть мати однаковий
  * `updatedAt`, і без `id` сторінка гублювала б або дублювала їх.
  */

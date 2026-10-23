@@ -1,5 +1,7 @@
 import {
   READING_STATUS_BATCH_LIMITS,
+  friendsReadingQueryRequestSchema,
+  friendsReadingResponseSchema,
   parseWorkIdList,
   readingListItemSchema,
   readingListQueryRequestSchema,
@@ -185,5 +187,89 @@ describe('readingStatsResponseSchema (BS-145)', () => {
         userId: 'user-1',
       }).success,
     ).toBe(false)
+  })
+})
+
+describe('friendsReadingResponseSchema (BS-137)', () => {
+  const friendItem = {
+    friend: { id: 'user-2', displayName: 'Марта', avatarUrl: null },
+    work: { id: 'work-1', title: 'Шантарам' },
+    authors: [{ id: 'a-1', name: 'Ґреґорі Робертс', nameLatin: null, role: 'AUTHOR', position: 0 }],
+    coverUrl: 'https://covers.example/1.jpg',
+    updatedAt: '2026-03-01T10:00:00.000Z',
+  }
+  const page = { hasFriends: true, items: [friendItem], nextCursor: 'abc' }
+
+  it('приймає сторінку з записами, без обкладинки й обидва порожні стани', () => {
+    expect(friendsReadingResponseSchema.safeParse(page).success).toBe(true)
+    expect(
+      friendsReadingResponseSchema.safeParse({
+        ...page,
+        items: [{ ...friendItem, coverUrl: null }],
+        nextCursor: null,
+      }).success,
+    ).toBe(true)
+    expect(
+      friendsReadingResponseSchema.safeParse({ hasFriends: true, items: [], nextCursor: null })
+        .success,
+    ).toBe(true)
+    expect(
+      friendsReadingResponseSchema.safeParse({ hasFriends: false, items: [], nextCursor: null })
+        .success,
+    ).toBe(true)
+  })
+
+  it.each([
+    ['зайве поле сторінки', { ...page, total: 1 }],
+    [
+      'email друга',
+      { ...page, items: [{ ...friendItem, friend: { ...friendItem.friend, email: 'm@x.ua' } }] },
+    ],
+    [
+      'налаштування друга',
+      {
+        ...page,
+        items: [{ ...friendItem, friend: { ...friendItem.friend, libraryVisibility: 'FRIENDS' } }],
+      },
+    ],
+    [
+      'опис твору',
+      { ...page, items: [{ ...friendItem, work: { ...friendItem.work, description: 'd' } }] },
+    ],
+    ['статус у записі', { ...page, items: [{ ...friendItem, status: 'READING' }] }],
+    [
+      'зайве поле автора',
+      { ...page, items: [{ ...friendItem, authors: [{ ...friendItem.authors[0], bio: 'b' }] }] },
+    ],
+    ['без hasFriends', { items: [], nextCursor: null }],
+    ['hasFriends не булеве', { ...page, hasFriends: 'yes' }],
+    ['без обкладинки взагалі', { ...page, items: [{ ...friendItem, coverUrl: undefined }] }],
+    ['дата не ISO', { ...page, items: [{ ...friendItem, updatedAt: 'вчора' }] }],
+    ['без друга', { ...page, items: [{ ...friendItem, friend: undefined }] }],
+    ['записи без друзів', { hasFriends: false, items: [friendItem], nextCursor: null }],
+    ['курсор без друзів', { hasFriends: false, items: [], nextCursor: 'abc' }],
+  ])('відхиляє: %s', (_name, payload) => {
+    expect(friendsReadingResponseSchema.safeParse(payload).success).toBe(false)
+  })
+})
+
+describe('friendsReadingQueryRequestSchema (BS-137)', () => {
+  it.each([{}, { limit: '1' }, { limit: '12' }, { limit: '48' }, { cursor: 'abc' }])(
+    'приймає %j',
+    (query) => {
+      expect(friendsReadingQueryRequestSchema.safeParse(query).success).toBe(true)
+    },
+  )
+
+  it.each([
+    { limit: '0' },
+    { limit: '49' },
+    { limit: '012' },
+    { limit: 'ten' },
+    { cursor: '' },
+    { cursor: 'a'.repeat(257) },
+    { userId: 'user-2' },
+  ])('відхиляє %j', (query) => {
+    expect(friendsReadingQueryRequestSchema.safeParse(query).success).toBe(false)
   })
 })
