@@ -177,12 +177,23 @@ describe('Stage 10 (10j.2): браузерний шлях особистого �
     await statusControl(page).waitFor()
     await expectShown(page, 'Прочитано')
 
-    // BS-145: окремого списку в навігації немає.
+    // BS-145: no separate reading list in the navigation. BS-136: «Друзі» is in the header's main
+    // navigation, not in the profile menu.
     await settle(page)
     await page.getByRole('button', { name: /Відкрити меню профілю/ }).click()
-    await page.getByRole('menuitem', { name: 'Друзі' }).waitFor()
-    expect(await page.getByRole('menuitem', { name: 'Список читання' }).count()).toBe(0)
+    const profileMenu = page.getByRole('menu')
+    await profileMenu.waitFor()
+    await profileMenu.getByRole('menuitem', { name: 'Профіль' }).waitFor()
+    expect(await profileMenu.getByRole('menuitem', { name: 'Список читання' }).count()).toBe(0)
+    expect(await profileMenu.getByRole('menuitem', { name: 'Друзі' }).count()).toBe(0)
     await page.keyboard.press('Escape')
+    await profileMenu.waitFor({ state: 'hidden' })
+
+    const headerFriends = page
+      .locator('[aria-label="Основні дії"] nav')
+      .getByRole('link', { name: 'Друзі', exact: true })
+    await headerFriends.waitFor()
+    expect(await headerFriends.getAttribute('href')).toBe('/friends')
 
     // Лічильники — на головній, відкритій з навігації.
     await goHome(page)
