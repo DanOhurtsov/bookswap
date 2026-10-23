@@ -50,14 +50,14 @@ beforeEach(() => {
 })
 
 describe('NavBarAvatar', () => {
-  it('lists Профіль, Друзі, then the theme toggle and Вийти', async () => {
+  it('lists Профіль, then the theme toggle and Вийти', async () => {
     const { menu } = await openMenu()
 
     expect(
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
-    ).toEqual(['Профіль', 'Друзі', 'Темна тема', 'Вийти'])
+    ).toEqual(['Профіль', 'Темна тема', 'Вийти'])
     expect(
       within(menu).queryByRole('menuitem', { name: /пошук|знайти|search/i }),
     ).not.toBeInTheDocument()
@@ -69,40 +69,39 @@ describe('NavBarAvatar', () => {
     expect(within(menu).queryByRole('menuitem', { name: 'Список читання' })).not.toBeInTheDocument()
   })
 
-  it('offers exactly one «Друзі» entry, a link to /friends', async () => {
+  it('offers no «Друзі» entry: it is in the header navigation now (BS-136)', async () => {
     const { menu } = await openMenu()
 
-    const friends = within(menu).getAllByRole('menuitem', { name: 'Друзі' })
-
-    expect(friends).toHaveLength(1)
-    expect(friends[0]).toHaveAttribute('href', '/friends')
-    expect(friends[0]?.tagName).toBe('A')
+    expect(within(menu).queryByRole('menuitem', { name: 'Друзі' })).not.toBeInTheDocument()
+    expect(menu.querySelector('a[href="/friends"]')).toBeNull()
   })
 
-  it('choosing «Друзі» closes the menu', async () => {
+  it('choosing «Профіль» closes the menu', async () => {
     const { events, menu } = await openMenu()
 
-    await events.click(keepPage(within(menu).getByRole('menuitem', { name: 'Друзі' })))
+    await events.click(keepPage(within(menu).getByRole('menuitem', { name: 'Профіль' })))
 
     await waitFor(() => {
       expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
   })
 
-  it('reaches «Друзі» with the arrow keys and chooses it with Enter', async () => {
+  it('moves through the items with the arrow keys and chooses «Профіль» with Enter', async () => {
     const events = userEvent.setup()
     render(<NavBarAvatar user={user} />)
 
     trigger().focus()
     await events.keyboard('{Enter}')
     const menu = await screen.findByRole('menu')
-    const friends = keepPage(within(menu).getByRole('menuitem', { name: 'Друзі' }))
+    const profile = keepPage(within(menu).getByRole('menuitem', { name: 'Профіль' }))
 
     await waitFor(() => {
-      expect(within(menu).getByRole('menuitem', { name: 'Профіль' })).toHaveFocus()
+      expect(profile).toHaveFocus()
     })
     await events.keyboard('{ArrowDown}')
-    expect(friends).toHaveFocus()
+    expect(within(menu).getByRole('menuitem', { name: 'Темна тема' })).toHaveFocus()
+    await events.keyboard('{ArrowUp}')
+    expect(profile).toHaveFocus()
 
     await events.keyboard('{Enter}')
 

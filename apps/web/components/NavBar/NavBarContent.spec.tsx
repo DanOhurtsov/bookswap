@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { Me } from '@bookswap/shared'
@@ -41,6 +41,14 @@ const user: Me = {
 
 function renderState(state: SessionState) {
   return render(<NavContent state={state} />)
+}
+
+const menuTrigger = () => screen.getByRole('button', { name: 'Відкрити меню навігації' })
+
+/** jsdom does not navigate; the menu reacts to the click itself. */
+function keepPage(item: HTMLElement): HTMLElement {
+  item.addEventListener('click', (event) => event.preventDefault())
+  return item
 }
 
 const SEARCH_NAME = /пошук|знайти|шукати|search/i
@@ -92,8 +100,9 @@ describe('NavContent', () => {
     expect(screen.getByRole('link', { name: 'Головна' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Каталог' })).toHaveAttribute('href', '/catalog')
     expect(screen.getByRole('link', { name: 'Моя бібліотека' })).toHaveAttribute('href', '/library')
-    // Reached through the profile menu now (NavBarAvatar.spec.tsx).
-    expect(screen.queryByRole('link', { name: 'Друзі' })).not.toBeInTheDocument()
+    // BS-136: moved here from the profile menu (NavBarAvatar.spec.tsx).
+    expect(screen.getAllByRole('link', { name: 'Друзі' })).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'Друзі' })).toHaveAttribute('href', '/friends')
     // Sections of «Моя бібліотека» now, reached through its own navigation.
     expect(screen.queryByRole('link', { name: 'Вішлист' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Позичання' })).not.toBeInTheDocument()
@@ -128,8 +137,12 @@ describe('NavContent', () => {
   })
 
   it.each([
-    ['guestLoans=true', { guestLoans: true }, ['Головна', 'Каталог', 'Моя бібліотека', 'Контакти']],
-    ['features unknown', undefined, ['Головна', 'Каталог', 'Моя бібліотека']],
+    [
+      'guestLoans=true',
+      { guestLoans: true },
+      ['Головна', 'Каталог', 'Моя бібліотека', 'Друзі', 'Контакти'],
+    ],
+    ['features unknown', undefined, ['Головна', 'Каталог', 'Моя бібліотека', 'Друзі']],
   ])(
     'the compact menu (%s) offers the same links as the inline row',
     async (_name, features, labels) => {
@@ -139,6 +152,12 @@ describe('NavContent', () => {
         ...(features === undefined ? {} : { features }),
       })
 
+      expect(
+        within(screen.getByRole('navigation'))
+          .getAllByRole('link')
+          .map((link) => link.textContent),
+      ).toEqual(labels)
+
       await userEvent.click(screen.getByRole('button', { name: 'Відкрити меню навігації' }))
 
       const items = await screen.findAllByRole('menuitem')
@@ -147,6 +166,9 @@ describe('NavContent', () => {
       expect(
         within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Моя бібліотека' }),
       ).toHaveAttribute('href', '/library')
+      expect(
+        within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Друзі' }),
+      ).toHaveAttribute('href', '/friends')
       expectNoSearch()
     },
   )
@@ -181,24 +203,110 @@ describe('NavContent', () => {
     ).toHaveLength(1)
   })
 
-  it.each(['/', '/catalog', '/friends', '/users/user-2/library', '/copies/copy-1/history'])(
-    'on %s no header entry is marked current',
+  it.each(['/friends', '/friends/search'])(
+    'on %s «Друзі» is the current page, in the row and in the menu',
     async (pathname) => {
       mockPathname = pathname
       renderState({ status: 'authenticated', user, features: { guestLoans: true } })
 
-      expect(screen.getByRole('link', { name: 'Моя бібліотека' })).not.toHaveAttribute(
-        'aria-current',
-      )
+      const friends = screen.getByRole('link', { name: 'Друзі' })
+
+      expect(friends).toHaveAttribute('aria-current', 'page')
+      // The visible mark of the current page is the `link-underline` rule for `aria-current`.
+      expect(friends).toHaveClass('link-underline')
       expect(
         screen.getAllByRole('link').filter((link) => link.hasAttribute('aria-current')),
-      ).toHaveLength(0)
+      ).toHaveLength(1)
 
       await userEvent.click(screen.getByRole('button', { name: 'Відкрити меню навігації' }))
 
-      expect(await screen.findByRole('menuitem', { name: 'Моя бібліотека' })).not.toHaveAttribute(
+      expect(await screen.findByRole('menuitem', { name: 'Друзі' })).toHaveAttribute(
         'aria-current',
+        'page',
       )
+      expect(
+        screen.getAllByRole('menuitem').filter((item) => item.hasAttribute('aria-current')),
+      ).toHaveLength(1)
     },
   )
+
+  it.each([
+    '/',
+    '/catalog',
+    '/friends-other',
+    '/friendship',
+    '/users/user-2/library',
+    '/users/user-2/friends',
+    '/copies/copy-1/history',
+  ])('on %s no header entry is marked current', async (pathname) => {
+    mockPathname = pathname
+    renderState({ status: 'authenticated', user, features: { guestLoans: true } })
+
+    expect(screen.getByRole('link', { name: 'Моя бібліотека' })).not.toHaveAttribute('aria-current')
+    expect(
+      screen.getAllByRole('link').filter((link) => link.hasAttribute('aria-current')),
+    ).toHaveLength(0)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Відкрити меню навігації' }))
+
+    expect(await screen.findByRole('menuitem', { name: 'Моя бібліотека' })).not.toHaveAttribute(
+      'aria-current',
+    )
+    expect(
+      screen.getAllByRole('menuitem').filter((item) => item.hasAttribute('aria-current')),
+    ).toHaveLength(0)
+  })
+
+  it('the compact menu is reachable with Tab and lets the arrow keys and Enter choose «Друзі»', async () => {
+    const events = userEvent.setup()
+    renderState({ status: 'authenticated', user })
+
+    await events.tab()
+    expect(menuTrigger()).toHaveFocus()
+
+    await events.keyboard('{Enter}')
+    const menu = await screen.findByRole('menu')
+    const friends = keepPage(within(menu).getByRole('menuitem', { name: 'Друзі' }))
+
+    await waitFor(() => {
+      expect(within(menu).getByRole('menuitem', { name: 'Головна' })).toHaveFocus()
+    })
+    await events.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}')
+    expect(friends).toHaveFocus()
+
+    await events.keyboard('{Enter}')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    })
+  })
+
+  it('choosing a link in the compact menu closes it', async () => {
+    const events = userEvent.setup()
+    renderState({ status: 'authenticated', user })
+
+    await events.click(menuTrigger())
+    const menu = await screen.findByRole('menu')
+
+    await events.click(keepPage(within(menu).getByRole('menuitem', { name: 'Друзі' })))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    })
+  })
+
+  it('Escape closes the compact menu and returns focus to its button', async () => {
+    const events = userEvent.setup()
+    renderState({ status: 'authenticated', user })
+
+    await events.click(menuTrigger())
+    await screen.findByRole('menu')
+
+    await events.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    })
+    expect(menuTrigger()).toHaveFocus()
+  })
 })
