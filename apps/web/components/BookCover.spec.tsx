@@ -98,6 +98,18 @@ describe('BookCover', () => {
     expect(placeholder(container)).toHaveClass('h-48', 'w-32', 'rounded-[0.25rem]')
   })
 
+  it('loads lazily unless the caller asks otherwise', () => {
+    render(<BookCover url={COVER} alt={ALT} />)
+
+    expect(screen.getByAltText(ALT)).toHaveAttribute('loading', 'lazy')
+  })
+
+  it('loads eagerly a cover the caller marks as above the fold', () => {
+    render(<BookCover url={COVER} alt={ALT} variant="card" loading="eager" />)
+
+    expect(screen.getByAltText(ALT)).toHaveAttribute('loading', 'eager')
+  })
+
   it('does not ask for a failed URL again', () => {
     render(<BookCover url={COVER} alt={ALT} />)
     const image = screen.getByAltText(ALT)

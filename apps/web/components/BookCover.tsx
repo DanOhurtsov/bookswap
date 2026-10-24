@@ -46,6 +46,11 @@ type BookCoverProps = {
   /** Describes the book, e.g. `Обкладинка «Кобзар»`. */
   alt: string
   variant?: BookCoverVariant
+  /**
+   * Left out, the cover loads lazily — `next/image`'s default. `eager` is for a cover the caller
+   * knows to be above the fold, where a lazy one is late as the Largest Contentful Paint.
+   */
+  loading?: 'lazy' | 'eager'
 }
 
 /**
@@ -93,7 +98,7 @@ function usableSrc(url: string | null | undefined): string | undefined {
  * it does not already carry, and labelling it "cover" would announce a cover
  * that does not exist.
  */
-export function BookCover({ url, alt, variant = 'inline' }: BookCoverProps) {
+export function BookCover({ url, alt, variant = 'inline', loading }: BookCoverProps) {
   const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined)
   const src = usableSrc(url)
 
@@ -120,6 +125,7 @@ export function BookCover({ url, alt, variant = 'inline' }: BookCoverProps) {
       alt={alt}
       width={COVER_SIZE[variant].width}
       height={COVER_SIZE[variant].height}
+      loading={loading}
       unoptimized
       onError={() => {
         setFailedSrc(src)

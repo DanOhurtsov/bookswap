@@ -88,8 +88,14 @@ function FriendsReadingContent({
         // The grid of the catalog (BS-134): `.result-grid` alone owns the 1–4 column thresholds.
         <div className="result-grid">
           <ul>
-            {view.cards.map((card) => (
-              <FriendReadingCard key={card.key} card={card} />
+            {/* The section sits right below the stats, so the first cover is above the fold at every
+                width and is the likely LCP; the rest stay lazy, so a long feed does not load at once. */}
+            {view.cards.map((card, index) => (
+              <FriendReadingCard
+                key={card.key}
+                card={card}
+                coverLoading={index === 0 ? 'eager' : 'lazy'}
+              />
             ))}
           </ul>
         </div>
@@ -105,11 +111,17 @@ function FriendsReadingContent({
  * the title opens the work, the friend opens their library. The cover is not a link — the title beside
  * it is the one way to the work, so a keyboard meets each target once.
  */
-function FriendReadingCard({ card }: { card: FriendsReadingCard }) {
+function FriendReadingCard({
+  card,
+  coverLoading,
+}: {
+  card: FriendsReadingCard
+  coverLoading: 'lazy' | 'eager'
+}) {
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-md border border-(--line) px-4 py-[0.9rem]">
       <div className="flex justify-center">
-        <BookCover url={card.coverUrl} alt={card.coverAlt} variant="card" />
+        <BookCover url={card.coverUrl} alt={card.coverAlt} variant="card" loading={coverLoading} />
       </div>
 
       {/* In a grid column a title or an author with no spaces must break, not widen the card. */}

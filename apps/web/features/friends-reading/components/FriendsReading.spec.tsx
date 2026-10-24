@@ -212,4 +212,37 @@ describe('FriendsReading (BS-137)', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
   })
+
+  it('loads only the first cover eagerly — it is above the fold — and the rest lazily', async () => {
+    apiRequest.mockResolvedValue(
+      feed(true, [
+        item(
+          { id: 'f-1', displayName: 'Марта' },
+          { id: 'w-1', title: 'Маруся Чурай' },
+          'https://covers.example/1.jpg',
+        ),
+        item(
+          { id: 'f-2', displayName: 'Олесь' },
+          { id: 'w-2', title: 'Сад нетанучих скульптур' },
+          'https://covers.example/2.jpg',
+        ),
+        item(
+          { id: 'f-3', displayName: 'Ірина' },
+          { id: 'w-3', title: 'Берестечко' },
+          'https://covers.example/3.jpg',
+        ),
+      ]),
+    )
+
+    renderFeed()
+
+    const cards = await within(section()).findAllByRole('listitem')
+    const loading = cards.map((card) =>
+      within(card)
+        .getByRole('img', { name: /Обкладинка/ })
+        .getAttribute('loading'),
+    )
+
+    expect(loading).toEqual(['eager', 'lazy', 'lazy'])
+  })
 })
