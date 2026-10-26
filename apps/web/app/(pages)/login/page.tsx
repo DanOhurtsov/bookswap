@@ -29,8 +29,10 @@ function LoginPageForm() {
   const [pending, setPending] = useState(false)
   const authenticated = session.state.status === 'authenticated'
 
-  // Someone who is already signed in has no business here — this also covers the
-  // moment right after a successful submit, when `setUser` flips the session.
+  // The only navigation away from this page (BS-146): someone already signed in has no business
+  // here, and right after a successful submit `setUser` makes them exactly that. `submit` itself does
+  // not navigate: a second navigation would race this one — the target was fetched twice, and which
+  // of the two Next finished last decided whether this page stayed in the history.
   useEffect(() => {
     if (authenticated) router.replace(safeReturnTo(returnTo))
   }, [authenticated, returnTo, router])
@@ -60,7 +62,6 @@ function LoginPageForm() {
       // state: `NavBar` and every other mounted consumer must see the new
       // identity too, without waiting for a fetch of their own.
       session.setUser(user, features)
-      router.push(safeReturnTo(returnTo))
     } catch (error) {
       // INVALID_CREDENTIALS показується як помилка форми, а не поля: сервер
       // навмисно не каже, що саме не так, і підсвічувати email було б домислом.

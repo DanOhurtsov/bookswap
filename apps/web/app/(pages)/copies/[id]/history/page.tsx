@@ -1,11 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
-import { useEffect, type ReactNode } from 'react'
+import { useParams } from 'next/navigation'
+import type { ReactNode } from 'react'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { useCopyHistory } from '@/app/lib/use-history'
 import { useSession } from '@/app/lib/use-session'
+import { LoginLink, useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { CONDITION_LABELS, COPY_STATUS_LABELS } from '@/app/lib/labels'
 import { HistoryEntryLine } from '@/components/HistoryEntryLine'
@@ -19,13 +20,10 @@ import { HistoryEntryLine } from '@/components/HistoryEntryLine'
  */
 export default function CopyHistoryPage() {
   const parameters = useParams<{ id: string }>()
-  const router = useRouter()
   const { state: session, reload: reloadSession } = useSession()
   const { state } = useCopyHistory(parameters.id)
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading' || state.status === 'loading') {
     return (
@@ -46,7 +44,7 @@ export default function CopyHistoryPage() {
           <button type="button" onClick={reloadSession}>
             Спробувати ще раз
           </button>{' '}
-          · <Link href="/login">Увійти</Link>
+          · <LoginLink>Увійти</LoginLink>
         </p>
       </Shell>
     )

@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useEffect } from 'react'
+import { Suspense } from 'react'
 import type { Me } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import {
   LOANS_TABS,
   loansTabHref,
@@ -25,12 +26,9 @@ import { SingleLoanView } from './SingleLoanView'
  * sides, one loan by link, and the personal history (BS-143).
  */
 export function LoansScreen() {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

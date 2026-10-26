@@ -1,11 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { FormStatus } from '@/components/Form/FormStatus'
 import type { LibraryView } from '@/app/lib/use-library'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { isLibraryView } from '../model/library-address'
 import { useLibraryAddress } from '../model/use-library-address'
@@ -29,12 +29,9 @@ type LibraryScreenProps = {
  * signed-in user; the view tabs then pick which shelf to show.
  */
 export function LibraryScreen({ checklist }: LibraryScreenProps) {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

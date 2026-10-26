@@ -118,9 +118,13 @@ afterEach(() => {
 
 describe('/friends/search — the page', () => {
   it('is for signed-in people only: a guest is sent to /login and nothing is searched', async () => {
+    // The browser's own address: the guard reads it there, fragment included.
+    window.history.replaceState(null, '', '/friends/search?query=%D0%9E%D0%BB')
     await openPage('/friends/search?query=Ол', { session: null })
 
-    expect(mockHistory.replace).toHaveBeenCalledWith('/login')
+    expect(mockHistory.replace).toHaveBeenCalledWith(
+      `/login?returnTo=${encodeURIComponent('/friends/search?query=%D0%9E%D0%BB')}`,
+    )
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
     expect(searches()).toEqual([])
   })
@@ -153,7 +157,7 @@ describe('/friends/search — the page', () => {
     expect(pageField()).toHaveValue('Олена')
     expect(within(results()).getByText('Олена Коваль')).toBeInTheDocument()
     expect(searches()).toEqual([searchFor('Олена')])
-    expect(mockHistory.replace).not.toHaveBeenCalledWith('/login')
+    expect(mockHistory.replace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/login/))
   })
 
   it('starts with one empty field, no request, and a way back to the friends', async () => {

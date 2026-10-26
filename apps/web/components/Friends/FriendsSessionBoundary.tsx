@@ -1,10 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import type { SessionState } from '@/app/lib/use-session'
 import { useSession } from '@/app/lib/use-session'
+import { LoginLink, useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { assertNever } from '@/app/lib/assert-never'
 import { FriendsPageContent } from '@/components/Friends/FriendsPageContent'
 import { Shell } from '@/components/Shell'
@@ -14,22 +13,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { USER_SEARCH_PATH } from '@/features/user-search/index.client'
 
 function FriendsSessionBoundary() {
-  const router = useRouter()
   const session = useSession()
 
-  useEffect(() => {
-    switch (session.state.status) {
-      case 'guest':
-        router.replace('/login')
-        break
-      case 'loading':
-      case 'authenticated':
-      case 'error':
-        break
-      default:
-        assertNever(session.state)
-    }
-  }, [session.state, router])
+  useGuestRedirect(session.state.status)
 
   return <SessionStateView state={session.state} onRetry={session.reload} />
 }
@@ -103,7 +89,7 @@ function GuestRedirectView() {
   return (
     <Shell title="Друзі">
       <p className="text-sm text-muted-foreground">
-        Переадресовую до входу. <Link href="/login">Увійти зараз</Link>
+        Переадресовую до входу. <LoginLink>Увійти зараз</LoginLink>
       </p>
     </Shell>
   )

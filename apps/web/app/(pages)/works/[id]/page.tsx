@@ -42,6 +42,7 @@ import { ReadingStatusPanel } from '@/features/reading-status/index.client'
 import { useWork, type WorkReloadOutcome } from '../../../lib/use-catalog'
 import { useWorkHistory } from '../../../lib/use-history'
 import { useSession } from '../../../lib/use-session'
+import { LoginLink, useGuestRedirect } from '../../../lib/use-login-redirect'
 import { useWishlist } from '../../../lib/use-wishlist'
 import { validate, type FieldErrors } from '../../../lib/validation'
 
@@ -78,9 +79,7 @@ export default function WorkPage() {
     entityId: knownWorkId,
   })
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   /**
    * §6.3: reading a merged work answers 301 on the canonical one, and `fetch`
@@ -114,7 +113,7 @@ export default function WorkPage() {
           <button type="button" onClick={reloadSession}>
             Спробувати ще раз
           </button>{' '}
-          · <Link href="/login">Увійти</Link>
+          · <LoginLink>Увійти</LoginLink>
         </p>
       </Shell>
     )

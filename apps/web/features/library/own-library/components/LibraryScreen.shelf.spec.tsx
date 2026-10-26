@@ -328,11 +328,12 @@ describe('охоронець сесії', () => {
 
   it('гостя переадресовує на /login і нічого не вантажить', () => {
     mockSession = { status: 'guest' }
+    setAddress('?view=archive')
 
     renderShelf()
 
     expect(screen.getByText('Потрібен вхід. Переадресовую…')).toBeInTheDocument()
-    expect(mockReplace).toHaveBeenCalledWith('/login')
+    expect(mockReplace).toHaveBeenCalledWith('/login?returnTo=%2Flibrary%3Fview%3Darchive')
     expect(mockApiRequest).not.toHaveBeenCalled()
   })
 
