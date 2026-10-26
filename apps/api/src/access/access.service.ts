@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common'
 import { API_ERROR_CODES, type FriendRelation } from '@bookswap/shared'
 import { ApiException } from '../common/api.exception'
 import { PrismaService } from '../prisma/prisma.service'
-import { normalizePair, relationOf, type FriendshipRecord } from './friendship.pair'
+import { normalizePair, otherIdOf, relationOf, type FriendshipRecord } from './friendship.pair'
 import type { ViewerRole } from './visibility'
 import type { FriendshipModel } from '../generated/prisma/models'
 
@@ -101,6 +101,19 @@ export class AccessService {
     client: FriendshipReader = this.prisma,
   ): Promise<void> {
     if (await this.isBlocked(viewerId, otherId, client)) throw blocked()
+  }
+
+  /**
+   * BS-137: id поточних друзів — лише `ACCEPTED`. `PENDING`, `DECLINED` і `BLOCKED` друзями не є (як і в
+   * `roleOf`), а видалена дружба чи видалений акаунт рядка не мають зовсім. Один запит на всіх друзів.
+   */
+  async acceptedFriendIds(userId: string): Promise<string[]> {
+    const friendships = await this.prisma.friendship.findMany({
+      where: { status: 'ACCEPTED', OR: [{ userAId: userId }, { userBId: userId }] },
+      select: { userAId: true, userBId: true },
+    })
+
+    return friendships.map((friendship) => otherIdOf(friendship, userId))
   }
 
   /**

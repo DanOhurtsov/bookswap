@@ -19,6 +19,10 @@ jest.mock('@/features/reading-status/index.client', () => ({
   ),
 }))
 
+jest.mock('@/features/friends-reading/index.client', () => ({
+  FriendsReading: () => <p>Friends reading</p>,
+}))
+
 jest.mock('@/components/DEV/HealthStatus', () => ({
   HealthStatus: () => <p>Health boundary</p>,
 }))
@@ -59,4 +63,16 @@ describe('page composition', () => {
       expect(screen.getByText('Health boundary')).toBeInTheDocument()
     },
   )
+
+  it('places «what my friends are reading» right after the reading stats and before HealthStatus (BS-137)', async () => {
+    mockFetch.mockResolvedValue({ status: 'ready' })
+
+    render(await HomePage())
+
+    const stats = screen.getByText('Stats seed: ready')
+    const friends = screen.getByText('Friends reading')
+
+    expect(stats.nextElementSibling).toBe(friends)
+    expect(friends.nextElementSibling).toBe(screen.getByText('Health boundary'))
+  })
 })

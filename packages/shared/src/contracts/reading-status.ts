@@ -1,10 +1,12 @@
 import { z } from 'zod'
 import { readingListStatusSchema, readingStatusSchema } from '../domain/reading-status'
 import { workAuthorSchema, workSchema } from './catalog'
+import { publicUserSchema } from './user'
 
 /**
  * Stage 10 (10j.1, §6.15 T13): особисті статуси читання. Усі маршрути — `/me/*`, користувач лише з
  * сесії; жодне з цих полів не з'являється у спільних відповідях історії, каталогу, позик чи друзів (R-8).
+ * Єдиний виняток — BS-137: `READING` поточних друзів у стрічці `GET /me/friends/reading` (кінець файла).
  */
 
 export const READING_LIST_LIMITS = {
@@ -153,3 +155,58 @@ export const readingStatsResponseSchema = z.strictObject({
 })
 
 export type ReadingStatsResponse = z.infer<typeof readingStatsResponseSchema>
+
+/**
+ * BS-137: межі стрічки «Що читають мої друзі». 12 — повні ряди сітки за будь-якої кількості колонок
+ * (1–4, як `DEFAULT_SEARCH_PAGE_SIZE`); 48 — найбільший розмір сторінки пошуку.
+ */
+export const FRIENDS_READING_LIMITS = {
+  cursorMax: 256,
+  pageDefault: 12,
+  pageMax: 48,
+} as const
+
+/**
+ * `GET /me/friends/reading`. Query-параметри приходять рядками, тому `limit` — рядок цілого 1…48; DTO
+ * приймає рівно ті самі значення. Чужого `userId` немає: чиї друзі — лише з сесії.
+ */
+export const friendsReadingQueryRequestSchema = z.strictObject({
+  cursor: z.string().min(1).max(FRIENDS_READING_LIMITS.cursorMax).optional(),
+  limit: z
+    .string()
+    .regex(/^[1-9]\d{0,2}$/)
+    .refine((value) => Number(value) <= FRIENDS_READING_LIMITS.pageMax)
+    .optional(),
+})
+
+export type FriendsReadingQueryRequest = z.infer<typeof friendsReadingQueryRequestSchema>
+
+/**
+ * Один друг, що читає один твір. Лише потрібна картці проєкція: друг — §9 «Інший» (ім'я й аватар),
+ * твір — `id` і назва. `coverUrl` — перше видання з обкладинкою (`createdAt`, потім `id`), інакше `null`.
+ */
+export const friendsReadingItemSchema = z.strictObject({
+  friend: z.strictObject(publicUserSchema.shape),
+  work: z.strictObject({ id: z.string(), title: z.string() }),
+  authors: z.array(z.strictObject(workAuthorSchema.shape)),
+  coverUrl: z.string().nullable(),
+  updatedAt: z.iso.datetime(),
+})
+
+export type FriendsReadingItem = z.infer<typeof friendsReadingItemSchema>
+
+/**
+ * `hasFriends` відрізняє «друзів немає» від «друзі є, але зараз ніхто нічого не читає» — обидва мають
+ * порожні `items`. Без друзів записів і наступної сторінки бути не може.
+ */
+export const friendsReadingResponseSchema = z
+  .strictObject({
+    hasFriends: z.boolean(),
+    items: z.array(friendsReadingItemSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .refine((page) => page.hasFriends || (page.items.length === 0 && page.nextCursor === null), {
+    message: 'Без друзів стрічка порожня',
+  })
+
+export type FriendsReadingResponse = z.infer<typeof friendsReadingResponseSchema>

@@ -1218,6 +1218,18 @@ a:focus-visible > .link-underline {
   text-decoration: none;
 }
 
+/* --- «Що читають мої друзі» на головній (BS-137) --------------------------- */
+/* No frame of its own: the cards are framed, and the grid keeps the full width of the page for its
+   columns (`.result-grid`, BS-134). */
+.friends-reading {
+  margin: 0 0 2rem;
+}
+
+.friends-reading__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+
 /* --- Статистика читання на головній (BS-145) ------------------------------ */
 .reading-stats {
   margin: 0 0 2rem;

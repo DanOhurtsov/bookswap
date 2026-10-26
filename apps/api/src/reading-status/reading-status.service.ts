@@ -1,7 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common'
 import {
   API_ERROR_CODES,
+  FRIENDS_READING_LIMITS,
   READING_LIST_LIMITS,
+  type FriendsReadingQueryRequest,
+  type FriendsReadingResponse,
   type ReadingListQueryRequest,
   type ReadingListResponse,
   type ReadingStatsResponse,
@@ -14,11 +17,17 @@ import {
   CanonicalWorkService,
   workMergedConflict,
 } from '../catalog/canonical/canonical-work.service'
+import { AccessService } from '../access/access.service'
 import { ApiException } from '../common/api.exception'
 import { ACTUAL_HANDOVER } from '../history/actual-handover'
 import { PrismaService } from '../prisma/prisma.service'
-import { decodeCursor, encodeCursor } from './reading-status.cursor'
-import { toReadingListItem, type ReadingListRow } from './reading-status.mapper'
+import { PUBLIC_USER_FIELDS } from '../users/user.mapper'
+import { decodeCursor, encodeCursor, type ReadingListCursor } from './reading-status.cursor'
+import {
+  toFriendsReadingItem,
+  toReadingListItem,
+  type ReadingListRow,
+} from './reading-status.mapper'
 
 /** Проєкція, яку читає `reading-status.mapper` — той самий набір, що й у вішлисті. */
 const WITH_WORK = {
@@ -29,13 +38,15 @@ const WITH_WORK = {
  * Stage 10 (10j.1, §6.15). Особистий статус читання зареєстрованого користувача щодо `Work` (R-2).
  *
  * Модуль читає `Loan` лише для тега `wasBorrowed` і ніколи його не змінює; жоден перехід `Loan` не
- * пише сюди (R-3). Користувач — завжди з сесії: жоден метод не приймає чужий `userId`.
+ * пише сюди (R-3). Користувач — завжди з сесії: жоден метод не приймає чужий `userId`. Чужі статуси
+ * читає лише `friendsReading` (BS-137): `READING` друзів того, хто питає.
  */
 @Injectable()
 export class ReadingStatusService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly canonical: CanonicalWorkService,
+    private readonly access: AccessService,
   ) {}
 
   /**
@@ -213,14 +224,7 @@ export class ReadingStatusService {
       where: {
         userId,
         status: query.status ?? { in: ['READING', 'READ'] },
-        ...(cursor === undefined
-          ? {}
-          : {
-              OR: [
-                { updatedAt: { lt: cursor.updatedAt } },
-                { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
-              ],
-            }),
+        ...after(cursor),
       },
       include: WITH_WORK,
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
@@ -241,6 +245,76 @@ export class ReadingStatusService {
           borrowed.has(row.workId),
         ),
       ),
+      nextCursor:
+        rows.length > limit && last !== undefined
+          ? encodeCursor({ updatedAt: last.updatedAt, id: last.id })
+          : null,
+    }
+  }
+
+  /**
+   * BS-137: що зараз читають друзі. Один запис — пара «друг + твір» зі статусом `READING`, тож один твір у
+   * кількох друзів дає кілька записів. Друзі — лише `ACCEPTED` (`AccessService`); примірники й їхня
+   * видимість ролі не грають: статус належить `Work`, а не `Copy`. Злитий твір не показується —
+   * `MergeService` і так переносить статуси на канонічний, фільтр тримає це й тут.
+   *
+   * Два звернення до Prisma незалежно від кількості друзів і записів: друзі, потім сторінка з усім
+   * потрібним картці (друг, назва, автори, перша обкладинка) одним `select`; вкладені зв'язки Prisma
+   * читає пакетно, тож кількість SQL-операторів теж стала (перевіряє e2e). Без друзів другого звернення
+   * немає.
+   */
+  async friendsReading(
+    userId: string,
+    query: FriendsReadingQueryRequest,
+  ): Promise<FriendsReadingResponse> {
+    const limit =
+      query.limit === undefined ? FRIENDS_READING_LIMITS.pageDefault : Number(query.limit)
+    const cursor = query.cursor === undefined ? undefined : decodeCursor(query.cursor)
+    const friendIds = await this.access.acceptedFriendIds(userId)
+
+    if (friendIds.length === 0) return { hasFriends: false, items: [], nextCursor: null }
+
+    const rows = await this.prisma.workReadingStatus.findMany({
+      where: {
+        userId: { in: friendIds },
+        status: 'READING',
+        work: { mergedIntoId: null },
+        ...after(cursor),
+      },
+      select: {
+        id: true,
+        updatedAt: true,
+        user: { select: PUBLIC_USER_FIELDS },
+        work: {
+          select: {
+            id: true,
+            title: true,
+            authors: {
+              select: {
+                role: true,
+                position: true,
+                author: { select: { id: true, name: true, nameLatin: true } },
+              },
+            },
+            editions: {
+              where: { coverUrl: { not: null } },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              take: 1,
+              select: { coverUrl: true },
+            },
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    })
+
+    const page = rows.slice(0, limit)
+    const last = page.at(-1)
+
+    return {
+      hasFriends: true,
+      items: page.map(toFriendsReadingItem),
       nextCursor:
         rows.length > limit && last !== undefined
           ? encodeCursor({ updatedAt: last.updatedAt, id: last.id })
@@ -276,6 +350,18 @@ function toStatusResponse(
   wasBorrowed: boolean,
 ): ReadingStatusResponse {
   return { workId, status: status ?? 'NOT_READ', isSet: status !== undefined, wasBorrowed }
+}
+
+/** Рядки після позиції курсора в порядку `updatedAt DESC, id DESC`; без курсора — усі. */
+function after(cursor: ReadingListCursor | undefined) {
+  return cursor === undefined
+    ? {}
+    : {
+        OR: [
+          { updatedAt: { lt: cursor.updatedAt } },
+          { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
+        ],
+      }
 }
 
 type WriteClient = Pick<PrismaService, 'workReadingStatus' | '$queryRaw' | '$executeRaw'>
