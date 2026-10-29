@@ -88,8 +88,8 @@ const edition: Edition = {
   revision: 1,
 }
 
-const friend = { id: 'f-1', displayName: 'Олена', avatarUrl: null }
-const owner = { id: 'o-1', displayName: 'Тарас', avatarUrl: null }
+const friend = { id: 'f-1', displayName: 'Олена', handle: 'f-1', avatarUrl: null }
+const owner = { id: 'o-1', displayName: 'Тарас', handle: 'taras', avatarUrl: null }
 
 function entry(loanId: string, status: 'HANDED_OVER' | 'RETURNED'): HistoryEntry {
   return {
@@ -188,10 +188,7 @@ describe('Work page: own reading status and «Хто брав цю книжку�
     expect(await within(historySection).findByText(/На руках · Олена у Тарас/)).toBeInTheDocument()
     expect(within(historySection).getByText(/Повернено · Олена у Тарас/)).toBeInTheDocument()
 
-    expect(await screen.findByRole('link', { name: 'Тарас' })).toHaveAttribute(
-      'href',
-      '/users/o-1/library',
-    )
+    expect(await screen.findByRole('link', { name: 'Тарас' })).toHaveAttribute('href', '/u/taras')
     expect(section('Хто має цю книжку?')).toBeInTheDocument()
 
     // The history API is untouched: same path, no reading fields on it (R-8).

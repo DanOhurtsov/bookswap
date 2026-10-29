@@ -235,3 +235,28 @@ describe('NavBarNotifications: один список без фільтрів (BS
     expect(within(panel).getByRole('button', { name: 'Прочитати всі' })).toBeDisabled()
   })
 })
+
+describe('NavBarNotifications: нагадування власнику (BS-148)', () => {
+  const ownerReminder = (id: string, payload: Notification['payload']): Notification => ({
+    id,
+    type: 'LOAN_DUE_SOON_OWNER',
+    payload,
+    readAt: null,
+    createdAt: '2026-10-03T09:00:00.000Z',
+  })
+
+  it('гостьова позика веде на екран гостьових позик, позика другові — на /loans', async () => {
+    serve([
+      ownerReminder('n-owner-guest', { loanId: 'loan-g', count: '1', guestLoan: 'true' }),
+      ownerReminder('n-owner-friend', { loanId: 'loan-f', count: '1', actorId: 'user-2' }),
+    ])
+
+    const user = userEvent.setup()
+    const panel = await openPanel(user)
+    const hrefs = within(panel)
+      .getAllByRole('link', { name: 'Відкрити позичання' })
+      .map((link) => link.getAttribute('href'))
+
+    expect(hrefs).toEqual(['/loans/guest?loanId=loan-g', '/loans?loanId=loan-f'])
+  })
+})

@@ -1,7 +1,6 @@
 import type { Friend, FriendRequest } from '@bookswap/shared'
 import { otherIdOf } from '../access/friendship.pair'
-import { toPublicUser } from '../users/user.mapper'
-import type { UserModel } from '../generated/prisma/models'
+import { toPublicUser, type PublicUserRow } from '../users/user.mapper'
 
 /**
  * Рядок пари разом з обома учасниками. Описано структурно, бо `include` Prisma
@@ -15,15 +14,12 @@ export interface FriendshipWithUsers {
   requestedById: string
   createdAt: Date
   respondedAt: Date | null
-  userA: Pick<UserModel, 'id' | 'displayName' | 'avatarUrl'>
-  userB: Pick<UserModel, 'id' | 'displayName' | 'avatarUrl'>
+  userA: PublicUserRow
+  userB: PublicUserRow
 }
 
 /** Другий учасник пари — той, кого показуємо тому, хто дивиться. */
-function counterpart(
-  friendship: FriendshipWithUsers,
-  viewerId: string,
-): Pick<UserModel, 'id' | 'displayName' | 'avatarUrl'> {
+function counterpart(friendship: FriendshipWithUsers, viewerId: string): PublicUserRow {
   return otherIdOf(friendship, viewerId) === friendship.userAId
     ? friendship.userA
     : friendship.userB

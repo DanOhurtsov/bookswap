@@ -3,11 +3,12 @@ import {
   copyVisibleTo,
   holderNamesVisibleTo,
   isVisibleTo,
+  mayRequestLoan,
   strictestVisibility,
   type ViewerRole,
 } from './visibility'
 
-const ROLES: readonly ViewerRole[] = ['OWNER', 'FRIEND', 'OTHER', 'BLOCKED']
+const ROLES: readonly ViewerRole[] = ['OWNER', 'FRIEND', 'FRIEND_OF_FRIEND', 'OTHER', 'BLOCKED']
 
 describe('strictestVisibility', () => {
   it.each([
@@ -38,6 +39,8 @@ describe('isVisibleTo — §9, рядки «Бібліотека»', () => {
   const MATRIX: Record<ViewerRole, Record<Visibility, boolean>> = {
     OWNER: { PUBLIC: true, FRIENDS: true, PRIVATE: true },
     FRIEND: { PUBLIC: true, FRIENDS: true, PRIVATE: false },
+    // BS-148: the owner opened the library to friends of friends — the role exists only then.
+    FRIEND_OF_FRIEND: { PUBLIC: true, FRIENDS: true, PRIVATE: false },
     OTHER: { PUBLIC: true, FRIENDS: false, PRIVATE: false },
     // §6.2: заблокований не бачить бібліотеку. Крапка — без винятку для PUBLIC.
     BLOCKED: { PUBLIC: false, FRIENDS: false, PRIVATE: false },
@@ -115,6 +118,8 @@ describe('holderNamesVisibleTo — §6.6', () => {
     ['OWNER', false, true],
     ['FRIEND', true, true],
     ['FRIEND', false, false],
+    ['FRIEND_OF_FRIEND', true, false],
+    ['FRIEND_OF_FRIEND', false, false],
     ['OTHER', true, false],
     ['OTHER', false, false],
     ['BLOCKED', true, false],
@@ -137,5 +142,17 @@ describe('holderNamesVisibleTo — §6.6', () => {
   it('заблокований не бачить імен за жодного значення прапорця', () => {
     expect(holderNamesVisibleTo('BLOCKED', true)).toBe(false)
     expect(holderNamesVisibleTo('BLOCKED', false)).toBe(false)
+  })
+})
+
+describe('mayRequestLoan — §9, «Створити запит на позичання»', () => {
+  it.each([
+    ['OWNER', false],
+    ['FRIEND', true],
+    ['FRIEND_OF_FRIEND', true],
+    ['OTHER', false],
+    ['BLOCKED', false],
+  ] as [ViewerRole, boolean][])('%s → %s', (role, expected) => {
+    expect(mayRequestLoan(role)).toBe(expected)
   })
 })

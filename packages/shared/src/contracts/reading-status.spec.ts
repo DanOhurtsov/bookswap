@@ -192,7 +192,7 @@ describe('readingStatsResponseSchema (BS-145)', () => {
 
 describe('friendsReadingResponseSchema (BS-137)', () => {
   const friendItem = {
-    friend: { id: 'user-2', displayName: 'Марта', avatarUrl: null },
+    friend: { id: 'user-2', displayName: 'Марта', handle: 'marta', avatarUrl: null },
     work: { id: 'work-1', title: 'Шантарам' },
     authors: [{ id: 'a-1', name: 'Ґреґорі Робертс', nameLatin: null, role: 'AUTHOR', position: 0 }],
     coverUrl: 'https://covers.example/1.jpg',

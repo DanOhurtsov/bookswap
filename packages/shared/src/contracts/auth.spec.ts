@@ -74,10 +74,16 @@ describe('sessionResponseSchema', () => {
     email: 'a@example.com',
     emailVerified: true,
     displayName: 'Марта',
+    handle: 'marta',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: false,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2026-09-27T10:00:00.000Z',
   }
 

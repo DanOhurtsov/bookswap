@@ -225,7 +225,7 @@ describe('NavBarNotifications: відповідь на запит у друзі 
   it('застарілий запит і видалений ініціатор: дій немає, пояснення є', async () => {
     const user = userEvent.setup()
     const goneRequest = pendingRequest(
-      { id: 'user-gone', displayName: 'Видалений', avatarUrl: null },
+      { id: 'user-gone', displayName: 'Видалений', handle: 'gone', avatarUrl: null },
       'friendship-gone',
     )
 

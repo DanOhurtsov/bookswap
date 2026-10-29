@@ -40,7 +40,7 @@ describe('respondFriendRequestSchema', () => {
 
 describe('friendListResponseSchema', () => {
   const friend = {
-    user: { id: 'user-1', displayName: 'Марта Крук', avatarUrl: null },
+    user: { id: 'user-1', displayName: 'Марта Крук', handle: 'marta', avatarUrl: null },
     friendsSince: '2026-08-15T10:00:00.000Z',
   }
 
@@ -79,7 +79,7 @@ describe('friendRequestsResponseSchema', () => {
   it('запит адресується id рядка, а не id людини (§8)', () => {
     const request = {
       id: 'friendship-1',
-      user: { id: 'user-2', displayName: 'Олесь', avatarUrl: null },
+      user: { id: 'user-2', displayName: 'Олесь', handle: 'oles', avatarUrl: null },
       createdAt: '2026-08-15T10:00:00.000Z',
     }
 

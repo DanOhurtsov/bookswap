@@ -190,6 +190,8 @@ function NotificationRow({
   const confirmationId = isGuestResponseNotificationType(notification.type)
     ? notification.payload.confirmationId
     : undefined
+  // BS-148: an owner's reminder about a guest loan — guest loans have their own screen.
+  const loanPath = notification.payload.guestLoan === 'true' ? '/loans/guest' : '/loans'
 
   return (
     <li className={unread ? 'person notification--unread' : 'person'}>
@@ -209,7 +211,9 @@ function NotificationRow({
             Відкрити запит підтвердження
           </Link>
         ) : (
-          loanId !== undefined && <Link href={`/loans?loanId=${loanId}`}>Відкрити позичання</Link>
+          loanId !== undefined && (
+            <Link href={`${loanPath}?loanId=${loanId}`}>Відкрити позичання</Link>
+          )
         )}
         {unread && (
           <button

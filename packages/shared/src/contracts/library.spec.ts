@@ -9,7 +9,7 @@ import {
   visibleCopySchema,
 } from './library'
 
-const owner = { id: 'user-1', displayName: 'Марта', avatarUrl: null }
+const owner = { id: 'user-1', displayName: 'Марта', handle: 'marta', avatarUrl: null }
 
 const rawCopy = {
   id: 'copy-1',

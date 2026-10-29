@@ -16,6 +16,12 @@ export type ViewerRole =
   | 'OWNER'
   /** Дружба в статусі `ACCEPTED`. */
   | 'FRIEND'
+  /**
+   * BS-148: not a friend, but has a mutual `ACCEPTED` friend with an owner who opened the library to
+   * friends of friends (`User.friendsOfFriendsAccess`). Sees the library and borrows like a friend;
+   * never the history with names and never the full profile.
+   */
+  | 'FRIEND_OF_FRIEND'
   /** Будь-хто інший: незнайомець, той, чий запит висить, той, кому відмовили. */
   | 'OTHER'
   /**
@@ -59,9 +65,17 @@ export function strictestVisibility(one: Visibility, other: Visibility): Visibil
 export function isVisibleTo(role: ViewerRole, visibility: Visibility): boolean {
   if (role === 'BLOCKED') return false
   if (role === 'OWNER') return true
-  if (role === 'FRIEND') return visibility !== 'PRIVATE'
+  if (role === 'FRIEND' || role === 'FRIEND_OF_FRIEND') return visibility !== 'PRIVATE'
 
   return visibility === 'PUBLIC'
+}
+
+/**
+ * §9, рядок «Створити запит на позичання»: друг — так, і (BS-148) друг друга. Одна функція для
+ * `LoanService.request()` і його передбачення `canRequestCopy`, щоб вони не розійшлися.
+ */
+export function mayRequestLoan(role: ViewerRole): boolean {
+  return role === 'FRIEND' || role === 'FRIEND_OF_FRIEND'
 }
 
 /**
@@ -85,6 +99,7 @@ export function copyVisibleTo(
  *
  * Прапорець власника не питається у стороннього не тому, що він `false`, а тому
  * що §9 не дає стороннім доступу до історії в принципі — навіть із `showHolderNames`.
+ * A friend of a friend (BS-148) is the same: names are a friends-only privilege.
  */
 export function holderNamesVisibleTo(role: ViewerRole, showHolderNames: boolean): boolean {
   if (role === 'BLOCKED') return false

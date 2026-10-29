@@ -1,5 +1,6 @@
 import type { FriendsReadingResponse, PublicUser, WorkAuthor } from '@bookswap/shared'
 import { describeError } from '@/app/lib/api'
+import { personHref } from '@/app/lib/person-href'
 
 /** One friend reading one work — everything the card renders, already decided. */
 export interface FriendsReadingCard {
@@ -61,7 +62,7 @@ export function toFriendsReadingView({
       coverAlt: `Обкладинка «${item.work.title}»`,
       authors: item.authors,
       friend: item.friend,
-      friendHref: `/users/${item.friend.id}/library`,
+      friendHref: personHref(item.friend),
     })),
   }
 }

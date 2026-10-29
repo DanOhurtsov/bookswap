@@ -111,16 +111,11 @@ describe('UpdateProfileDto ↔ updateProfileRequestSchema', () => {
   it('однаково ставиться до кожного поля окремо', () => {
     expectAgreement(UpdateProfileDto, updateProfileRequestSchema, [
       { name: 'зміна імені', payload: { displayName: 'Марта К.' }, valid: true },
-      { name: 'занулення аватарки', payload: { avatarUrl: null }, valid: true },
+      // BS-148: the photo changes only through POST /me/avatar; neither side takes an address.
       {
-        name: 'відносний шлях замість URL',
-        payload: { avatarUrl: '/uploads/1.png' },
-        valid: false,
-      },
-      {
-        name: 'абсолютний URL',
+        name: 'аватар більше не поле профілю',
         payload: { avatarUrl: 'https://cdn.example.com/a.png' },
-        valid: true,
+        valid: false,
       },
       { name: 'занулення біо', payload: { bio: null }, valid: true },
       { name: 'біо задовге', payload: { bio: 'я'.repeat(501) }, valid: false },
@@ -128,6 +123,23 @@ describe('UpdateProfileDto ↔ updateProfileRequestSchema', () => {
       { name: 'невідома видимість', payload: { libraryVisibility: 'SECRET' }, valid: false },
       { name: 'showHolderNames рядком', payload: { showHolderNames: 'так' }, valid: false },
       { name: 'showHolderNames булевим', payload: { showHolderNames: false }, valid: true },
+    ])
+  })
+
+  it('однаково ставиться до налаштувань позичання (BS-148)', () => {
+    expectAgreement(UpdateProfileDto, updateProfileRequestSchema, [
+      { name: 'друзі друзів', payload: { friendsOfFriendsAccess: true }, valid: true },
+      { name: 'друзі друзів null', payload: { friendsOfFriendsAccess: null }, valid: false },
+      { name: 'пауза', payload: { loanRequestsPaused: false }, valid: true },
+      { name: 'пауза рядком', payload: { loanRequestsPaused: 'true' }, valid: false },
+      { name: 'пауза null', payload: { loanRequestsPaused: null }, valid: false },
+      { name: 'термін 14', payload: { defaultLoanTermDays: 14 }, valid: true },
+      { name: 'термін 30', payload: { defaultLoanTermDays: 30 }, valid: true },
+      { name: 'термін скинуто', payload: { defaultLoanTermDays: null }, valid: true },
+      { name: 'термін 7', payload: { defaultLoanTermDays: 7 }, valid: false },
+      { name: 'термін рядком', payload: { defaultLoanTermDays: '21' }, valid: false },
+      { name: 'нагадування', payload: { ownerDueReminders: false }, valid: true },
+      { name: 'нагадування null', payload: { ownerDueReminders: null }, valid: false },
     ])
   })
 

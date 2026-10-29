@@ -2,6 +2,11 @@ import { INVITATION_TOKEN_MAX } from '@bookswap/shared'
 
 const STORAGE_KEY = 'bookswap.invite-token'
 
+/** The address an invitee opens: the token rides in the fragment (see `tokenFromHash`). */
+export function inviteLinkFor(token: string, origin: string): string {
+  return `${origin}/invite#${encodeURIComponent(token)}`
+}
+
 /** The token travels in the URL fragment: it never reaches server logs or `Referer`. */
 export function tokenFromHash(hash: string): string | undefined {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash

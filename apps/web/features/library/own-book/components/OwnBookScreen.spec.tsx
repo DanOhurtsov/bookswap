@@ -124,7 +124,7 @@ describe('OwnBookScreen: the owner’s page of one copy', () => {
     stored = ownBookFixture({
       isHome: false,
       status: 'LENT_OUT',
-      holder: { id: 'friend-1', displayName: 'Марта', avatarUrl: null },
+      holder: { id: 'friend-1', displayName: 'Марта', handle: 'friend-1', avatarUrl: null },
     })
     renderScreen()
 

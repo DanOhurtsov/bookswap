@@ -17,10 +17,16 @@ const mockState: SessionState = {
     email: 'owner@example.com',
     emailVerified: true,
     displayName: 'Owner',
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: false,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
 }
@@ -85,5 +91,25 @@ describe('NotificationSettingsPage: відповіді гостя (Stage 10, 10i
     expect(screen.getAllByText(/лише загальне нагадування без подробиць/)).toHaveLength(2)
     expect(screen.getByLabelText('У вас просять книжку — Telegram')).toBeEnabled()
     expect(screen.getByLabelText('У вас просять книжку — Пошта')).toBeEnabled()
+  })
+})
+
+describe('NotificationSettingsPage: нагадування власнику (BS-148)', () => {
+  it('має власний рядок, усі канали керовані', () => {
+    render(<NotificationSettingsPage />)
+
+    for (const channel of ['У застосунку', 'Пошта', 'Telegram']) {
+      expect(screen.getByLabelText(`Скоро мають повернути вашу книжку — ${channel}`)).toBeEnabled()
+    }
+  })
+
+  it('називає всі три дайджестові типи в підказці', () => {
+    render(<NotificationSettingsPage />)
+
+    expect(
+      screen.getByText(
+        /«Скоро повертати», «Термін минув» і «Скоро мають повернути вашу книжку» — щоденним дайджестом/,
+      ),
+    ).toBeInTheDocument()
   })
 })

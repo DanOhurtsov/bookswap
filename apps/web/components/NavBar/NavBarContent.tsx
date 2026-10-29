@@ -38,7 +38,7 @@ const NavContent = ({ state }: { state: SessionState }) => {
 /**
  * The header entry the pathname belongs to, the same one for the inline row and the compact menu.
  * Only the entries that stand for a whole area have a current state: «Моя бібліотека» for its
- * sections (someone else's library at `/users/:id/library` is not one of them) and «Друзі» for
+ * sections (someone else's library at `/u/:handle` is not one of them) and «Друзі» for
  * `/friends` and the pages under it. Matching is by whole path segments, so `/friends-other` is not
  * «Друзі».
  */

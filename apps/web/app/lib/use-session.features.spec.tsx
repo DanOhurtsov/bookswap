@@ -13,10 +13,16 @@ const me: Me = {
   email: 'reader@example.com',
   emailVerified: true,
   displayName: 'Reader',
+  handle: 'reader',
+  city: null,
   avatarUrl: null,
   bio: null,
   libraryVisibility: 'FRIENDS',
   showHolderNames: false,
+  friendsOfFriendsAccess: false,
+  loanRequestsPaused: false,
+  defaultLoanTermDays: null,
+  ownerDueReminders: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 
@@ -95,5 +101,85 @@ describe('session features', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'relogin-off' }))
     expect(screen.getByText('guestLoans=false')).toBeInTheDocument()
+  })
+})
+
+/** BS-148: a profile answer reaches the session only while its user is the one signed in. */
+function UpdateProbe() {
+  const { state, setGuest, setUser, updateUser } = useSession()
+
+  return (
+    <>
+      <p>
+        {state.status === 'authenticated'
+          ? `${state.user.id}: ${state.user.displayName}, ${String(state.user.avatarUrl)}, guestLoans=${String(state.features?.guestLoans)}`
+          : state.status}
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          updateUser(me.id, { displayName: 'Renamed' })
+          updateUser(me.id, { avatarUrl: 'https://avatars.example/a.webp' })
+        }}
+      >
+        two-answers
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setGuest()
+          updateUser(me.id, { displayName: 'Renamed' })
+        }}
+      >
+        logout-then-answer
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setUser({ ...me, id: 'user-2', displayName: 'Other' })
+          updateUser(me.id, { displayName: 'Renamed' })
+        }}
+      >
+        relogin-then-answer
+      </button>
+    </>
+  )
+}
+
+describe('updateUser', () => {
+  const renderUpdateProbe = async () => {
+    respondWith({ user: me, features: { guestLoans: true } })
+    render(
+      <SessionProvider>
+        <UpdateProbe />
+      </SessionProvider>,
+    )
+    await screen.findByText('user-1: Reader, null, guestLoans=true')
+  }
+
+  it('merges each answer’s fields into the signed-in user, keeping the rest and the features', async () => {
+    await renderUpdateProbe()
+
+    await userEvent.click(screen.getByRole('button', { name: 'two-answers' }))
+
+    expect(
+      screen.getByText('user-1: Renamed, https://avatars.example/a.webp, guestLoans=true'),
+    ).toBeInTheDocument()
+  })
+
+  it('an answer after a logout — even in the same tick — does not bring the user back', async () => {
+    await renderUpdateProbe()
+
+    await userEvent.click(screen.getByRole('button', { name: 'logout-then-answer' }))
+
+    expect(screen.getByText('guest')).toBeInTheDocument()
+  })
+
+  it('an answer about the previous account does not touch the new one', async () => {
+    await renderUpdateProbe()
+
+    await userEvent.click(screen.getByRole('button', { name: 'relogin-then-answer' }))
+
+    expect(screen.getByText('user-2: Other, null, guestLoans=true')).toBeInTheDocument()
   })
 })

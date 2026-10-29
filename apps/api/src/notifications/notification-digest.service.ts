@@ -13,7 +13,8 @@ const DAY_MS = 24 * 60 * 60_000
 interface DueLoan {
   id: string
   copyId: string
-  borrowerId: string
+  /** Who is reminded: the borrower, or (BS-148, `LOAN_DUE_SOON_OWNER`) the owner. */
+  recipientId: string
   dueAt: Date
 }
 
@@ -23,11 +24,18 @@ interface LockedLoan {
   copyId: string
   status: string
   dueAt: Date | null
+  /** `null` — a guest loan (Stage 10, T1). */
+  borrowerId: string | null
 }
 
 /**
  * §7.5, друга група: `LOAN_DUE_SOON` (рівно за 3 календарні дні до `dueAt`) і
  * `LOAN_OVERDUE`.
+ *
+ * BS-148 adds `LOAN_DUE_SOON_OWNER`: the same day as `LOAN_DUE_SOON`, to the owner instead of the
+ * borrower, unless the owner turned «Нагадувати про повернення» off (`User.ownerDueReminders`).
+ * Guest loans are included (PO decision, 27.10.2026) — the owner lent the book either way; the guest
+ * is never named in it.
  *
  * Чотири речі, які тут легко зламати й важко помітити:
  *
@@ -173,10 +181,13 @@ export class NotificationDigestService implements OnModuleInit, OnModuleDestroy 
     try {
       const dueSoon = await this.emit('LOAN_DUE_SOON', now)
       const overdue = await this.emit('LOAN_OVERDUE', now)
-      const total = dueSoon + overdue
+      const ownerDueSoon = await this.emit('LOAN_DUE_SOON_OWNER', now)
+      const total = dueSoon + overdue + ownerDueSoon
 
       if (total > 0) {
-        this.logger.log(`Дайджест: DUE_SOON ${String(dueSoon)}, OVERDUE ${String(overdue)}`)
+        this.logger.log(
+          `Дайджест: DUE_SOON ${String(dueSoon)}, OVERDUE ${String(overdue)}, DUE_SOON_OWNER ${String(ownerDueSoon)}`,
+        )
         // §7.3: доставка — після коміту. Один поштовх на весь прохід, а не на
         // кожну подію: дайджест — це пачка, і будити диспетчер щоразу означало б
         // поводитися з ним як із негайною подією §7.5.
@@ -200,27 +211,35 @@ export class NotificationDigestService implements OnModuleInit, OnModuleDestroy 
    * лок на `Loan`, і перечитування умов, і унікальний ключ доби.
    */
   private async emit(type: NotificationType, now: Date): Promise<number> {
+    const forOwner = isOwnerReminder(type)
     const loans = await this.prisma.loan.findMany({
-      // Stage 10 (T1): гостьова позика (`borrowerId = NULL`) не має кому адресувати нагадування —
-      // гостю нічого не надсилається, а власникові гостьові прострочення не входять у 10a.
-      where: { status: 'HANDED_OVER', dueAt: { not: null }, borrowerId: { not: null } },
-      select: { id: true, copyId: true, borrowerId: true, dueAt: true },
+      where: forOwner
+        ? // BS-148: guest loans count too; the owner's switch decides.
+          { status: 'HANDED_OVER', dueAt: { not: null }, owner: { ownerDueReminders: true } }
+        : // Stage 10 (T1): гостьова позика (`borrowerId = NULL`) не має кому адресувати нагадування
+          // позичальнику — гостю нічого не надсилається.
+          { status: 'HANDED_OVER', dueAt: { not: null }, borrowerId: { not: null } },
+      select: { id: true, copyId: true, ownerId: true, borrowerId: true, dueAt: true },
     })
 
-    const matching = loans.filter(
-      (loan): loan is DueLoan =>
-        loan.dueAt !== null && loan.borrowerId !== null && matchesDigestType(type, loan.dueAt, now),
-    )
+    const matching = loans.flatMap((loan): DueLoan[] => {
+      const recipientId = forOwner ? loan.ownerId : loan.borrowerId
+
+      if (loan.dueAt === null || recipientId === null) return []
+      if (!matchesDigestType(type, loan.dueAt, now)) return []
+
+      return [{ id: loan.id, copyId: loan.copyId, recipientId, dueAt: loan.dueAt }]
+    })
 
     if (matching.length === 0) return 0
 
     const byUser = new Map<string, DueLoan[]>()
 
     for (const loan of matching) {
-      const bucket = byUser.get(loan.borrowerId) ?? []
+      const bucket = byUser.get(loan.recipientId) ?? []
 
       bucket.push(loan)
-      byUser.set(loan.borrowerId, bucket)
+      byUser.set(loan.recipientId, bucket)
     }
 
     let created = 0
@@ -257,11 +276,26 @@ export class NotificationDigestService implements OnModuleInit, OnModuleDestroy 
         // FOR UPDATE серіалізується з ним на тому самому рядку, а не
         // заходить у чергу за іншим ресурсом — дедлоку з `Copy`-локом §5.1
         // звідси не буде: ми `Copy` не чіпаємо.
+        const forOwner = isOwnerReminder(type)
+
+        // BS-148: the switch is read again here, next to the write — a reminder turned off between
+        // the candidate scan and now is not sent.
+        if (forOwner) {
+          const owner = await tx.user.findUnique({
+            where: { id: userId },
+            select: { ownerDueReminders: true },
+          })
+
+          if (owner?.ownerDueReminders !== true) return false
+        }
+
         const ids = candidates.map((loan) => loan.id)
+        // A fixed column name, never input: `Prisma.raw` only picks which side of the loan is reminded.
+        const recipientColumn = Prisma.raw(forOwner ? '"ownerId"' : '"borrowerId"')
         const locked = await tx.$queryRaw<LockedLoan[]>`
-          SELECT "id", "copyId", "status", "dueAt"
+          SELECT "id", "copyId", "status", "dueAt", "borrowerId"
           FROM "Loan"
-          WHERE "id" IN (${Prisma.join(ids)}) AND "borrowerId" = ${userId}
+          WHERE "id" IN (${Prisma.join(ids)}) AND ${recipientColumn} = ${userId}
           FOR UPDATE
         `
 
@@ -288,6 +322,7 @@ export class NotificationDigestService implements OnModuleInit, OnModuleDestroy 
               loanId: stillDue[0]?.id ?? '',
               copyId: stillDue[0]?.copyId ?? '',
               loanIds: stillDue.map((loan) => loan.id).join(','),
+              ...(forOwner ? ownerReminderDetails(stillDue) : {}),
             },
             digestKey,
           },
@@ -331,15 +366,42 @@ function dayOf(now: Date): string {
   return calendarDay(now)
 }
 
+function isOwnerReminder(type: NotificationType): boolean {
+  return type === 'LOAN_DUE_SOON_OWNER'
+}
+
+/**
+ * BS-148: what the owner's reminder says beyond the ids — «Люба має повернути „1984“ до 2 листопада».
+ * The due day (UTC, like the trigger day) always; the borrower only when the reminder is about one
+ * book lent to a registered person. A guest is never named: `guestLoan` only tells the link where
+ * the guest loans live.
+ */
+function ownerReminderDetails(
+  stillDue: readonly (LockedLoan & { dueAt: Date })[],
+): Record<string, string> {
+  const [first] = stillDue
+
+  if (first === undefined) return {}
+
+  const details: Record<string, string> = { dueDate: calendarDay(first.dueAt) }
+
+  if (stillDue.length === 1) {
+    if (first.borrowerId === null) details.guestLoan = 'true'
+    else details.actorId = first.borrowerId
+  }
+
+  return details
+}
+
 /**
  * Чи відповідає лоан типу дайджесту саме зараз.
  *
  * `LOAN_OVERDUE` лишається порівнянням миті: прострочення — стан, що триває,
  * і щойно `dueAt` минув, лоан підпадає під нього щодня, аж доки не повернуть.
  *
- * `LOAN_DUE_SOON`, навпаки, — подія одного календарного дня: того, що рівно на
- * `DUE_SOON_WINDOW_DAYS` раніший за календарний день `dueAt`. Різниця дат, а не
- * різниця миттєвостей: `dueAt` може стояти на будь-якій годині своєї доби, і
+ * `LOAN_DUE_SOON` (і BS-148 `LOAN_DUE_SOON_OWNER`), навпаки, — подія одного
+ * календарного дня: того, що рівно на `DUE_SOON_WINDOW_DAYS` раніший за
+ * календарний день `dueAt`. Різниця дат, а не різниця миттєвостей: `dueAt` може стояти на будь-якій годині своєї доби, і
  * віднімання рівно N×24 години від будь-якої точки доби `D` завжди дає ту саму
  * точку доби `D-N` — календарний день не зсувається, хоч би яка була година.
  */

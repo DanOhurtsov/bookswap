@@ -1,17 +1,20 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import type { Loan, LoanAction } from '@bookswap/shared'
+import type { Loan, LoanAction, LoanTermDays } from '@bookswap/shared'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { RecordedLoanActions } from '@/components/RecordedLoanActions'
 import { TextField } from '@/components/Form/FormFields'
 import { LOAN_ACTION_LABELS } from '@/app/lib/labels'
+import { initialDueDate } from '../model/approve-due-date'
 import type { Confirmation, LoanActionsState } from '../model/use-loan-actions'
 
 type LoanActionsProps = {
   loan: Loan
   isOwner: boolean
+  /** BS-148: the viewer's default term — fills the approval's date when the borrower proposed none. */
+  defaultLoanTermDays: LoanTermDays | null
   busyKey: string | undefined
   onAct: (loan: Loan, action: LoanAction, body?: Record<string, unknown>) => Promise<void>
   onConfirm: (confirmation: Confirmation) => void
@@ -24,7 +27,14 @@ type LoanActionsProps = {
  * quietly leave the card without any action. The same technique as `RelationAction` on the friends
  * page. The server still decides "may I" — the buttons only don't offer what is certain to be a 409.
  */
-export function LoanActions({ loan, isOwner, busyKey, onAct, onConfirm }: LoanActionsProps) {
+export function LoanActions({
+  loan,
+  isOwner,
+  defaultLoanTermDays,
+  busyKey,
+  onAct,
+  onConfirm,
+}: LoanActionsProps) {
   const busy = busyKey !== undefined
   const label = (action: LoanAction): string =>
     busyKey === `${action}:${loan.id}` ? 'Виконую…' : LOAN_ACTION_LABELS[action]
@@ -59,7 +69,13 @@ export function LoanActions({ loan, isOwner, busyKey, onAct, onConfirm }: LoanAc
         <div className="person__actions">
           {isOwner ? (
             <>
-              <ApproveForm loan={loan} busy={busy} label={label('approve')} onAct={onAct} />
+              <ApproveForm
+                loan={loan}
+                defaultLoanTermDays={defaultLoanTermDays}
+                busy={busy}
+                label={label('approve')}
+                onAct={onAct}
+              />
               {button('reject')}
             </>
           ) : (
@@ -151,6 +167,7 @@ const DANGER_DESCRIPTIONS: Readonly<Record<LoanAction, string>> = {
 
 type ApproveFormProps = {
   loan: Loan
+  defaultLoanTermDays: LoanTermDays | null
   busy: boolean
   label: string
   onAct: (loan: Loan, action: LoanAction, body?: Record<string, unknown>) => Promise<void>
@@ -160,8 +177,10 @@ type ApproveFormProps = {
  * §8: `dueAt` is accepted only together with `approve` — the owner sets the term while approving
  * the request. That is why the field lives inside this action and not on its own.
  */
-function ApproveForm({ loan, busy, label, onAct }: ApproveFormProps) {
-  const [dueAt, setDueAt] = useState(loan.dueAt ?? '')
+function ApproveForm({ loan, defaultLoanTermDays, busy, label, onAct }: ApproveFormProps) {
+  const [dueAt, setDueAt] = useState(() =>
+    initialDueDate(loan.dueAt, defaultLoanTermDays, new Date()),
+  )
   const [note, setNote] = useState('')
 
   return (

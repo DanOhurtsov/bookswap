@@ -197,6 +197,8 @@ function NotificationRow({
 }) {
   const unread = notification.readAt === null
   const loanId = notification.payload.loanId
+  // BS-148: an owner's reminder about a guest loan — guest loans have their own screen.
+  const loanPath = notification.payload.guestLoan === 'true' ? '/loans/guest' : '/loans'
 
   return (
     <li
@@ -228,7 +230,7 @@ function NotificationRow({
 
       {loanId !== undefined && (
         <Link
-          href={`/loans?loanId=${loanId}`}
+          href={`${loanPath}?loanId=${loanId}`}
           className="mt-2 inline-block text-xs font-medium"
           onClick={onNavigate}
         >

@@ -26,6 +26,7 @@
     "clean": "rimraf dist .turbo src/generated *.tsbuildinfo"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1156.0",
     "@bookswap/shared": "workspace:*",
     "@nestjs/common": "^11.2.1",
     "@nestjs/config": "^4.0.4",
@@ -45,6 +46,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "saxes": "^6.0.0",
+    "sharp": "^0.35.5",
     "yauzl": "^3.4.0",
     "zod": "^4.4.3"
   },

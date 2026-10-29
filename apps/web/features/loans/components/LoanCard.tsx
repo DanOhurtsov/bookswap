@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import type { Loan, LoanAction } from '@bookswap/shared'
+import type { Loan, LoanAction, Me } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { CONDITION_LABELS, LOAN_STATUS_LABELS, formatDate } from '@/app/lib/labels'
 import { counterpartOf } from '@/app/lib/use-loans'
@@ -10,15 +10,15 @@ import { LoanActions } from './LoanCardActions'
 
 type LoanCardProps = {
   loan: Loan
-  userId: string
+  user: Me
   busyKey: string | undefined
   onAct: (loan: Loan, action: LoanAction, body?: Record<string, unknown>) => Promise<void>
   onConfirm: (confirmation: Confirmation) => void
 }
 
-export function LoanCard({ loan, userId, busyKey, onAct, onConfirm }: LoanCardProps) {
-  const isOwner = loan.owner.id === userId
-  const counterpart = counterpartOf(loan, userId)
+export function LoanCard({ loan, user, busyKey, onAct, onConfirm }: LoanCardProps) {
+  const isOwner = loan.owner.id === user.id
+  const counterpart = counterpartOf(loan, user.id)
 
   return (
     <li className="book">
@@ -55,6 +55,7 @@ export function LoanCard({ loan, userId, busyKey, onAct, onConfirm }: LoanCardPr
       <LoanActions
         loan={loan}
         isOwner={isOwner}
+        defaultLoanTermDays={user.defaultLoanTermDays}
         busyKey={busyKey}
         onAct={onAct}
         onConfirm={onConfirm}

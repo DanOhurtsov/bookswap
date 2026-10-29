@@ -18,7 +18,7 @@ export const LIBRARY_SECTIONS = [
 /**
  * The section a pathname belongs to: the route itself or any page nested under it (`/library/:copyId`,
  * `/loans/guest`). Matching is by whole path segments, so `/libraryish` or someone else's library at
- * `/users/:id/library` belong to no section.
+ * `/u/:handle` belong to no section.
  */
 export function currentLibrarySection(pathname: string): LibrarySection | undefined {
   return LIBRARY_SECTIONS.find(

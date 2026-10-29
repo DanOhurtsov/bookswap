@@ -21,8 +21,8 @@ import {
  * теж був би витоком — він каже, що позичальник узагалі був.
  */
 
-const MARTA = { id: 'user-marta', displayName: 'Марта', avatarUrl: null }
-const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
+const MARTA = { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null }
+const OLES = { id: 'user-oles', displayName: 'Олесь', handle: 'oles', avatarUrl: null }
 
 const NOW = new Date('2026-06-15T12:00:00.000Z')
 

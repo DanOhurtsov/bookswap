@@ -41,7 +41,7 @@ const item = (
   work: { id: string; title: string },
   coverUrl: string | null = null,
 ): FriendsReadingItem => ({
-  friend: { ...friend, avatarUrl: null },
+  friend: { ...friend, handle: `${friend.id}-handle`, avatarUrl: null },
   work,
   authors: [{ id: 'a-1', name: 'Ліна Костенко', nameLatin: null, role: 'AUTHOR', position: 0 }],
   coverUrl,
@@ -184,7 +184,7 @@ describe('FriendsReading (BS-137)', () => {
     expect(first).toHaveTextContent('Читає')
     expect(within(first).getByRole('link', { name: 'Марта' })).toHaveAttribute(
       'href',
-      '/users/f-1/library',
+      '/u/f-1-handle',
     )
 
     // No cover: the placeholder, not an image that is not there.
@@ -192,7 +192,7 @@ describe('FriendsReading (BS-137)', () => {
     expect(second.querySelector('[data-slot="book-cover-placeholder"]')).not.toBeNull()
     expect(within(second).getByRole('link', { name: 'Олесь' })).toHaveAttribute(
       'href',
-      '/users/f-2/library',
+      '/u/f-2-handle',
     )
 
     // Two separate links per card, neither inside the other; the title comes first.

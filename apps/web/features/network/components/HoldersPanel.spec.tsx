@@ -17,7 +17,7 @@ const { apiRequest, apiRequestWithRedirect } = jest.requireMock<{
   apiRequestWithRedirect: jest.Mock
 }>('@/app/lib/api')
 
-const friend = { id: 'f-1', displayName: 'Олена', avatarUrl: null }
+const friend = { id: 'f-1', displayName: 'Олена', handle: 'olena', avatarUrl: null }
 
 function copyOf(id: string, over: Partial<NetworkCopy> = {}): NetworkCopy {
   return {
@@ -48,7 +48,7 @@ const response: WorkHoldersResponse = {
       translator: 'Ірина',
       owners: [
         {
-          owner: { id: 'f-2', displayName: 'Тарас', avatarUrl: null },
+          owner: { id: 'f-2', displayName: 'Тарас', handle: 'f-2', avatarUrl: null },
           relation: 'FRIEND',
           availableCopies: 0,
           copies: [
@@ -76,10 +76,7 @@ describe('HoldersPanel', () => {
 
     expect(await screen.findByRole('heading', { name: 'Оригінал (en)' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'uk · Ірина' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Олена' })).toHaveAttribute(
-      'href',
-      '/users/f-1/library',
-    )
+    expect(screen.getByRole('link', { name: 'Олена' })).toHaveAttribute('href', '/u/olena')
     expect(screen.getByText(/орієнтовно вільна 1 листопада 2026/)).toBeInTheDocument()
     expect(apiRequestWithRedirect).toHaveBeenCalledWith(
       '/works/w-1/holders',

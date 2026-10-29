@@ -22,4 +22,4 @@ function UserAvatar({ user }: { user: PublicUser }) {
   )
 }
 
-export { UserAvatar }
+export { UserAvatar, getInitials }

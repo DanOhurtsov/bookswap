@@ -657,6 +657,113 @@ describe('Щоденна задача сповіщень (e2e)', () => {
     })
   })
 
+  describe('BS-148: LOAN_DUE_SOON_OWNER — нагадування власнику', () => {
+    const today = new Date('2026-06-10T12:00:00.000Z')
+    const inThreeDays = new Date(today.getTime() + 3 * DAY_MS)
+
+    it('той самий день, що й нагадування позичальнику: власнику — хто й до якого дня', async () => {
+      const { owner, borrower, loanId } = await handedOver('owner-due', inThreeDays)
+
+      await digest.run(today)
+
+      const [event] = await eventsFor(owner.id, 'LOAN_DUE_SOON_OWNER')
+
+      expect(event?.payload).toMatchObject({
+        count: '1',
+        loanId,
+        actorId: borrower.id,
+        dueDate: '2026-06-13',
+      })
+      // The borrower's reminder is unchanged and still theirs alone.
+      expect(await eventsFor(borrower.id, 'LOAN_DUE_SOON')).toHaveLength(1)
+      expect(await eventsFor(owner.id, 'LOAN_DUE_SOON')).toHaveLength(0)
+      expect(await eventsFor(borrower.id, 'LOAN_DUE_SOON_OWNER')).toHaveLength(0)
+    })
+
+    it('вимкнене «Нагадувати про повернення» — власнику нічого, позичальнику як і раніше', async () => {
+      const { owner, borrower } = await handedOver('owner-due-off', inThreeDays)
+
+      await prisma.user.update({ where: { id: owner.id }, data: { ownerDueReminders: false } })
+      await digest.run(today)
+
+      expect(await eventsFor(owner.id, 'LOAN_DUE_SOON_OWNER')).toHaveLength(0)
+      expect(await eventsFor(borrower.id, 'LOAN_DUE_SOON')).toHaveLength(1)
+    })
+
+    it('не дублюється: повторний прохід тієї самої доби нічого не створює', async () => {
+      const { owner } = await handedOver('owner-due-once', inThreeDays)
+
+      await digest.run(today)
+      await digest.run(new Date(today.getTime() + 60 * 60_000))
+
+      expect(await eventsFor(owner.id, 'LOAN_DUE_SOON_OWNER')).toHaveLength(1)
+    })
+
+    it('не в той день — нічого: за 2 і за 4 дні', async () => {
+      const early = await handedOver('owner-due-early', new Date(today.getTime() + 2 * DAY_MS))
+      const late = await handedOver('owner-due-late', new Date(today.getTime() + 4 * DAY_MS))
+
+      await digest.run(today)
+
+      expect(await eventsFor(early.owner.id, 'LOAN_DUE_SOON_OWNER')).toHaveLength(0)
+      expect(await eventsFor(late.owner.id, 'LOAN_DUE_SOON_OWNER')).toHaveLength(0)
+    })
+
+    it('кілька книжок одного власника — одна подія з кількістю, без імені', async () => {
+      const scenes = await handedOverMany('owner-due-many', inThreeDays, 3)
+      const ownerId = scenes[0]?.owner.id ?? ''
+
+      await digest.run(today)
+
+      const events = await eventsFor(ownerId, 'LOAN_DUE_SOON_OWNER')
+
+      expect(events).toHaveLength(1)
+
+      const payload = events[0]?.payload as Record<string, string>
+
+      expect(payload.count).toBe('3')
+      expect(payload.loanIds?.split(',')).toHaveLength(3)
+      expect(payload).not.toHaveProperty('actorId')
+    })
+
+    it('гостьова позика теж: власнику нагадування, гостя в ньому немає', async () => {
+      const owner = await registerAccount(app, 'owner-due-guest')
+      const shelf = await createShelfCopy(app, owner)
+      const contact = await prisma.externalBorrower.create({
+        data: { ownerId: owner.id, alias: 'Сусідка Оля' },
+      })
+      const [, loan] = await prisma.$transaction([
+        prisma.copy.update({
+          where: { id: shelf.copyId },
+          data: { status: 'LENT_OUT', currentHolderId: null, heldByContactId: contact.id },
+        }),
+        prisma.loan.create({
+          data: {
+            copyId: shelf.copyId,
+            ownerId: owner.id,
+            borrowerId: null,
+            borrowerContactId: contact.id,
+            borrowerKind: 'GUEST',
+            origin: 'RECORDED_GUEST',
+            requestedAt: null,
+            status: 'HANDED_OVER',
+            handedAt: new Date(today.getTime() - 7 * DAY_MS),
+            dueAt: inThreeDays,
+          },
+        }),
+      ])
+
+      await digest.run(today)
+
+      const [event] = await eventsFor(owner.id, 'LOAN_DUE_SOON_OWNER')
+      const payload = event?.payload as Record<string, string>
+
+      expect(payload).toMatchObject({ loanId: loan.id, guestLoan: 'true', dueDate: '2026-06-13' })
+      expect(payload).not.toHaveProperty('actorId')
+      expect(JSON.stringify(payload)).not.toContain('Оля')
+    })
+  })
+
   describe('§7.3: дайджест теж іде крізь доставки', () => {
     it('створює рядки NotificationDelivery, як і будь-яка інша подія', async () => {
       const now = new Date()

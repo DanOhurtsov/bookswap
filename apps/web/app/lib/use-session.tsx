@@ -27,8 +27,14 @@ export type SessionState =
 export interface SessionApi {
   state: SessionState
   reload: () => void
-  /** `features` omitted keeps the ones already known (e.g. after a profile edit). */
+  /** `features` omitted keeps the ones already known. A profile edit uses `updateUser` instead. */
   setUser: (user: Me, features?: SessionFeatures) => void
+  /**
+   * What a request about `userId`'s own profile saved, merged into the session user. Nothing happens
+   * when that user is no longer the one signed in: an answer that lands after a logout, or after
+   * another account came in, never brings the old user back.
+   */
+  updateUser: (userId: string, changes: Partial<Me>) => void
   /** Explicit "I just confirmed with the server that no one is logged in" — see `setGuest` below. */
   setGuest: () => void
 }
@@ -108,13 +114,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  // Decided inside the updater, against the state every earlier set has already queued — a logout
+  // or another login just before is seen even before it renders. No `generation` bump: a session GET
+  // in flight may be that very logout, and it must still land.
+  const updateUser = useCallback((userId: string, changes: Partial<Me>) => {
+    setState((previous) =>
+      previous.status === 'authenticated' && previous.user.id === userId
+        ? { ...previous, user: { ...previous.user, ...changes } }
+        : previous,
+    )
+  }, [])
+
   const setGuest = useCallback(() => {
     generation.current += 1
     setState({ status: 'guest' })
   }, [])
 
   return (
-    <SessionContext.Provider value={{ state, reload, setUser, setGuest }}>
+    <SessionContext.Provider value={{ state, reload, setUser, updateUser, setGuest }}>
       {children}
     </SessionContext.Provider>
   )

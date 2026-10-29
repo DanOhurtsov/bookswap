@@ -1,9 +1,9 @@
 import type { HistoryCopy, MyHistoryEntry, NamedHistoryEntry } from '@bookswap/shared'
 import { toLoanHistory } from './loan-history'
 
-const ME = { id: 'user-me', displayName: 'Я', avatarUrl: null }
-const MARTA = { id: 'user-marta', displayName: 'Марта', avatarUrl: null }
-const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
+const ME = { id: 'user-me', displayName: 'Я', handle: 'me-user', avatarUrl: null }
+const MARTA = { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null }
+const OLES = { id: 'user-oles', displayName: 'Олесь', handle: 'oles', avatarUrl: null }
 
 function copyOf(id: string): HistoryCopy {
   return {

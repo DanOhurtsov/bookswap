@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { PublicUser, ResolveInvitationResponse } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
+import { personHref } from '@/app/lib/person-href'
 import { useSession } from '@/app/lib/use-session'
 import { UserAvatar } from '@/components/Friends/UserAvatar'
 import { acceptInvitation, resolveInvitation } from '../api/network-requests'
@@ -142,10 +143,8 @@ export function InviteAcceptance() {
               Тепер ви друзі з {phase.inviter.displayName}.
             </p>
             <p>
-              <Link href={`/users/${encodeURIComponent(phase.inviter.id)}/library`}>
-                Переглянути бібліотеку
-              </Link>{' '}
-              · <Link href="/catalog">Доступні від друзів</Link>
+              <Link href={personHref(phase.inviter)}>Переглянути бібліотеку</Link> ·{' '}
+              <Link href="/catalog">Доступні від друзів</Link>
             </p>
           </div>
         )
@@ -168,10 +167,7 @@ export function InviteAcceptance() {
         <div>
           {inviter}
           <p className="empty">
-            Ви вже друзі.{' '}
-            <Link href={`/users/${encodeURIComponent(resolved.inviter.id)}/library`}>
-              Бібліотека
-            </Link>
+            Ви вже друзі. <Link href={personHref(resolved.inviter)}>Бібліотека</Link>
           </p>
         </div>
       )

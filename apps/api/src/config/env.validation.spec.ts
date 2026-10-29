@@ -5,6 +5,16 @@ const DB_URL = 'postgresql://bookswap:dev@localhost:5432/bookswap?schema=public'
 /** Мінімум, без якого застосунок не має стартувати. */
 const required = { DATABASE_URL: DB_URL, DIRECT_DATABASE_URL: DB_URL }
 
+/** BS-148: production needs a real photo store; these are the variables R2 takes. */
+const r2 = {
+  AVATAR_STORAGE: 'r2',
+  R2_ACCOUNT_ID: 'account',
+  R2_ACCESS_KEY_ID: 'key',
+  R2_SECRET_ACCESS_KEY: 'secret',
+  R2_AVATAR_BUCKET: 'bookswap-avatars',
+  R2_PUBLIC_BASE_URL: 'https://avatars.example.com',
+}
+
 describe('validateEnv', () => {
   it('заповнює дефолти для змінних без явного значення', () => {
     const result = validateEnv({ ...required, NODE_ENV: 'test' })
@@ -63,6 +73,8 @@ describe('validateEnv', () => {
       LIBRARY_IMPORT_PREVIEW_RATE_LIMIT: 5,
       LIBRARY_IMPORT_PATCH_RATE_LIMIT: 120,
       LIBRARY_IMPORT_RATE_WINDOW_MS: 60000,
+      // BS-148: a fresh clone shows uploaded photos without R2 keys.
+      AVATAR_STORAGE: 'memory',
       GUEST_LOANS_ENABLED: false,
       GUEST_LOANS_SYNTHETIC_ONLY: false,
     })
@@ -114,6 +126,7 @@ describe('пошта (§7.2)', () => {
         RESEND_API_KEY: 're_x',
         EMAIL_FROM: 'BookSwap <hi@example.com>',
         INVITE_EMAIL_HMAC_SECRET: 's'.repeat(32),
+        ...r2,
       }),
     ).not.toThrow()
   })
@@ -203,6 +216,7 @@ describe('гостьові позики — запобіжник D2 (Stage 10 §
     RESEND_API_KEY: 're_x',
     EMAIL_FROM: 'BookSwap <noreply@example.com>',
     INVITE_EMAIL_HMAC_SECRET: 'x'.repeat(32),
+    ...r2,
   }
 
   it('вимкнено за замовчуванням, у будь-якому NODE_ENV', () => {
@@ -273,4 +287,40 @@ describe('гостьові позики — запобіжник D2 (Stage 10 §
       )
     },
   )
+})
+
+describe('фото профілю (BS-148)', () => {
+  const production = {
+    ...required,
+    NODE_ENV: 'production',
+    EMAIL_PROVIDER: 'resend',
+    RESEND_API_KEY: 're_x',
+    EMAIL_FROM: 'BookSwap <hi@example.com>',
+    INVITE_EMAIL_HMAC_SECRET: 's'.repeat(32),
+  }
+
+  it('за замовчуванням — memory, поза production цього досить', () => {
+    expect(validateEnv(required).AVATAR_STORAGE).toBe('memory')
+  })
+
+  it('у production memory заборонене', () => {
+    expect(() => validateEnv(production)).toThrow(/AVATAR_STORAGE/)
+    expect(() => validateEnv({ ...production, ...r2 })).not.toThrow()
+  })
+
+  it('r2 вимагає всі п’ять змінних', () => {
+    for (const key of Object.keys(r2).filter((name) => name !== 'AVATAR_STORAGE')) {
+      const partial: Record<string, string> = { ...required, ...r2 }
+
+      delete partial[key]
+
+      expect(() => validateEnv(partial)).toThrow(new RegExp(key))
+    }
+  })
+
+  it('публічна адреса бакета — URL без / у кінці', () => {
+    expect(() =>
+      validateEnv({ ...required, ...r2, R2_PUBLIC_BASE_URL: 'https://avatars.example.com/' }),
+    ).toThrow(/R2_PUBLIC_BASE_URL/)
+  })
 })

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { personHref } from '@/app/lib/person-href'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import type { CatalogDiscoveryResult } from '@bookswap/shared'
 import type { LocalCandidate } from '../model/unified-results'
@@ -113,13 +114,7 @@ export function LocalResultCard({
         <ul className="book__locations">
           {locations.map((location) => (
             <li key={location.owner.id}>
-              <Link
-                href={
-                  location.relation === 'SELF'
-                    ? '/library'
-                    : `/users/${encodeURIComponent(location.owner.id)}/library`
-                }
-              >
+              <Link href={location.relation === 'SELF' ? '/library' : personHref(location.owner)}>
                 {location.relation === 'SELF'
                   ? 'У моїй бібліотеці'
                   : `У ${location.owner.displayName}`}

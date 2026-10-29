@@ -1,10 +1,18 @@
-import { Body, Controller, Get, HttpStatus, Patch, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, HttpStatus, Param, Patch, Query, UseGuards } from '@nestjs/common'
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
-import { API_ERROR_CODES, type Me, type UserSearchResponse } from '@bookswap/shared'
+import {
+  API_ERROR_CODES,
+  type HandleAvailability,
+  type Me,
+  type ProfileSummary,
+  type PublicUser,
+  type UserSearchResponse,
+} from '@bookswap/shared'
 import { CurrentUser } from '../auth/authenticated-request'
 import { SessionGuard } from '../auth/session.guard'
 import { ApiException } from '../common/api.exception'
-import { UpdateProfileDto, UserSearchDto } from './dto/user.dto'
+import { HandleParamDto, UpdateProfileDto, UserSearchDto } from './dto/user.dto'
+import { ProfileSummaryService } from './profile-summary/profile-summary.service'
 import { toMe } from './user.mapper'
 import { UsersService } from './users.service'
 import type { UserModel } from '../generated/prisma/models'
@@ -12,10 +20,22 @@ import type { UserModel } from '../generated/prisma/models'
 /** Перебір бази по імені теж треба стримувати, хай і м'якше за логін. */
 const SEARCH_LIMIT = { auth: { limit: 60, ttl: 60_000 } }
 
+/**
+ * BS-148: the edit form asks once per pause in typing (400 ms), so a person needs a few dozen a minute
+ * at most; more is someone listing which nicknames exist.
+ */
+const HANDLE_AVAILABILITY_LIMIT = { auth: { limit: 60, ttl: 60_000 } }
+
+/** BS-148: opening `/u/<handle>` says whether the nickname exists, so it is held to the same pace. */
+const HANDLE_LOOKUP_LIMIT = { auth: { limit: 60, ttl: 60_000 } }
+
 @Controller()
 @UseGuards(SessionGuard)
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly profileSummary: ProfileSummaryService,
+  ) {}
 
   /** Власний профіль повністю (§9). Джерело правди для фронту після логіну. */
   @Get('me')
@@ -38,6 +58,44 @@ export class UsersController {
     }
 
     return this.users.updateProfile(user.id, changes)
+  }
+
+  /** BS-148: what the profile page shows beyond `Me` — always the caller's own. */
+  @Get('me/profile-summary')
+  summary(@CurrentUser() user: UserModel): Promise<ProfileSummary> {
+    return this.profileSummary.summaryOf(user.id)
+  }
+
+  /**
+   * BS-148: whether the viewer may take this nickname. Answers only free/not free — never whose it
+   * is. A malformed nickname is a 400 (`HandleParamDto`), not «taken»: the form checks the format
+   * itself before asking.
+   */
+  @Get('users/handles/:handle/availability')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(HANDLE_AVAILABILITY_LIMIT)
+  async handleAvailability(
+    @CurrentUser() user: UserModel,
+    @Param() params: HandleParamDto,
+  ): Promise<HandleAvailability> {
+    return { available: await this.users.isHandleAvailable(params.handle, user.id) }
+  }
+
+  /** BS-148: the person at `/u/<handle>`. Unknown and blocked are the same 404 (`findPerson`). */
+  @Get('users/handles/:handle')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(HANDLE_LOOKUP_LIMIT)
+  personByHandle(
+    @CurrentUser() user: UserModel,
+    @Param() params: HandleParamDto,
+  ): Promise<PublicUser> {
+    return this.users.findPerson({ handle: params.handle }, user.id)
+  }
+
+  /** BS-148: lets an old `/users/<id>/library` address find the person's `/u/<handle>`. */
+  @Get('users/:id')
+  personById(@CurrentUser() user: UserModel, @Param('id') id: string): Promise<PublicUser> {
+    return this.users.findPerson({ id }, user.id)
   }
 
   /**

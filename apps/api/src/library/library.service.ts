@@ -143,7 +143,12 @@ export class LibraryService {
   async listOf(viewerId: string, ownerId: string): Promise<VisibleLibraryResponse> {
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
-      select: { ...PUBLIC_USER_FIELDS, libraryVisibility: true, showHolderNames: true },
+      select: {
+        ...PUBLIC_USER_FIELDS,
+        libraryVisibility: true,
+        showHolderNames: true,
+        loanRequestsPaused: true,
+      },
     })
 
     if (owner === null) throw notFound('Користувача не знайдено')
@@ -166,7 +171,12 @@ export class LibraryService {
       copyVisibleTo(role, owner.libraryVisibility, copy.visibility),
     )
     const groups = groupByEdition(visible, (copy) =>
-      toVisibleCopy(copy, { id: viewerId, role, showHolderNames }),
+      toVisibleCopy(copy, {
+        id: viewerId,
+        role,
+        showHolderNames,
+        ownerPausedRequests: owner.loanRequestsPaused,
+      }),
     )
     const wishlisted = await this.wishlistedWorkIds(
       viewerId,

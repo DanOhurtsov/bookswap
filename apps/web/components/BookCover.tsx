@@ -61,7 +61,7 @@ type BookCoverProps = {
  * stored value that is not a usable URL is exactly the "no cover" case this
  * component exists for, so it is answered with the placeholder instead.
  */
-function usableSrc(url: string | null | undefined): string | undefined {
+export function usableSrc(url: string | null | undefined): string | undefined {
   if (url === null || url === undefined) return undefined
 
   const trimmed = url.trim()

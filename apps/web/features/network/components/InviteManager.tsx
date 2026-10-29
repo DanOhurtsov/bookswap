@@ -7,6 +7,7 @@ import { FormStatus } from '@/components/Form/FormStatus'
 import { TextField } from '@/components/Form/FormFields'
 import { createInvitation, listInvitations, revokeInvitation } from '../api/network-requests'
 import { describeInviteError } from '../model/invite-errors'
+import { inviteLinkFor } from '../model/invite-token'
 
 const STATUS_LABELS: Record<InvitationStatus, string> = {
   ACTIVE: 'чинне',
@@ -75,11 +76,7 @@ export function InviteManager() {
       const { token } = await createInvitation({ kind: 'LINK' })
 
       setCopied(false)
-      setLink(
-        token === undefined
-          ? undefined
-          : `${window.location.origin}/invite#${encodeURIComponent(token)}`,
-      )
+      setLink(token === undefined ? undefined : inviteLinkFor(token, window.location.origin))
     })
   }
 

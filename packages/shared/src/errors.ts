@@ -44,6 +44,17 @@ export const API_ERROR_CODES = {
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   /** Одноразовий токен із листа недійсний: не існує, прострочений або вже використаний (HTTP 400). */
   INVALID_TOKEN: 'INVALID_TOKEN',
+  /**
+   * BS-148: the nickname belongs to someone else or is reserved (HTTP 409). One code for both:
+   * the person only needs to pick another one (`HANDLE_RULES`).
+   */
+  HANDLE_TAKEN: 'HANDLE_TAKEN',
+  /** BS-148: the photo is larger than `AVATAR_RULES.maxBytes` (HTTP 413). */
+  AVATAR_TOO_LARGE: 'AVATAR_TOO_LARGE',
+  /** BS-148: the bytes are not a JPEG, PNG or WebP image, whatever `Content-Type` said (HTTP 415). */
+  AVATAR_UNSUPPORTED_TYPE: 'AVATAR_UNSUPPORTED_TYPE',
+  /** BS-148: the photo's shorter side is under `AVATAR_RULES.minSide` (HTTP 422). */
+  AVATAR_TOO_SMALL: 'AVATAR_TOO_SMALL',
 
   // --- Дружба (§6.2, §8) -----------------------------------------------------
   /** Запит у друзі самому собі (HTTP 400). */
@@ -238,6 +249,11 @@ export const API_ERROR_CODES = {
    * забороняє **власний** повторний запит; чужі одночасні запити дозволені.
    */
   LOAN_DUPLICATE_REQUEST: 'LOAN_DUPLICATE_REQUEST',
+  /**
+   * BS-148: the owner paused loan requests (HTTP 409). Told only to someone who could otherwise ask —
+   * a stranger still gets 403/404, so the pause tells nobody else anything.
+   */
+  LOAN_REQUESTS_PAUSED: 'LOAN_REQUESTS_PAUSED',
   /**
    * Дія неможлива з поточного статусу лоану (HTTP 409) — рядок таблиці §5.1, якого
    * не існує. Сюди ж потрапляє програвший гонку апруву: поки він чекав на

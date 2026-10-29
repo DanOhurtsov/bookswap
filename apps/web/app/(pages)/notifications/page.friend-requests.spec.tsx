@@ -40,10 +40,16 @@ const mockSession: SessionState = {
     email: 'me@example.com',
     emailVerified: true,
     displayName: 'Я',
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: false,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
   features: { guestLoans: true },
@@ -292,7 +298,7 @@ describe('NotificationsPage: відповідь на запит у друзі', 
   it('видалений ініціатор: 404 прибирає дії; сповіщення без актуального запиту кнопок не має', async () => {
     const user = userEvent.setup()
     const goneRequest = pendingRequest(
-      { id: 'user-gone', displayName: 'Видалений', avatarUrl: null },
+      { id: 'user-gone', displayName: 'Видалений', handle: 'gone', avatarUrl: null },
       'friendship-gone',
     )
 

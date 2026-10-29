@@ -28,7 +28,7 @@ jest.mock('next/navigation', () => ({ useRouter: () => router }))
 
 const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
 
-const inviter = { id: 'inv-1', displayName: 'Марта', avatarUrl: null }
+const inviter = { id: 'inv-1', displayName: 'Марта', handle: 'marta', avatarUrl: null }
 
 function resolved(over: Partial<ResolveInvitationResponse> = {}): ResolveInvitationResponse {
   return { state: 'ACTIVE', inviter, relation: 'NONE', ...over }
@@ -106,7 +106,7 @@ describe('InviteAcceptance', () => {
     expect(await screen.findByText(/Тепер ви друзі з Марта/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Переглянути бібліотеку' })).toHaveAttribute(
       'href',
-      '/users/inv-1/library',
+      '/u/marta',
     )
   })
 

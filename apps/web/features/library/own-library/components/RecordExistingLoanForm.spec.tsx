@@ -16,7 +16,7 @@ jest.mock('@/app/lib/api', () => {
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
 
 const FRIEND = {
-  user: { id: 'friend-1', displayName: 'Олесь', avatarUrl: null },
+  user: { id: 'friend-1', displayName: 'Олесь', handle: 'friend-1', avatarUrl: null },
   friendsSince: '2026-01-01T00:00:00.000Z',
 }
 

@@ -26,7 +26,7 @@ describe('toOwnBookView', () => {
   it('names the holder only when the copy is not at home', () => {
     expect(toOwnBookView(ownBookFixture()).holderLabel).toBeNull()
 
-    const holder = { id: 'friend-1', displayName: 'Марта', avatarUrl: null }
+    const holder = { id: 'friend-1', displayName: 'Марта', handle: 'friend-1', avatarUrl: null }
 
     expect(toOwnBookView(ownBookFixture({ isHome: false, holder })).holderLabel).toBe(
       'Зараз у: Марта',
