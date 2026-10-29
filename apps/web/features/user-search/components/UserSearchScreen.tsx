@@ -1,11 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect, useId, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { UserSearchResult } from '@bookswap/shared'
 import { describeError } from '@/app/lib/api'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { Shell } from '@/components/Shell'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { useFoundUserActions, type FoundUserActions } from '../model/use-found-user-actions'
@@ -20,12 +20,9 @@ const NOTE_CLASS =
 
 /** `/friends/search`: the whole answer of the people search, for signed-in people only. */
 export function UserSearchScreen() {
-  const router = useRouter()
   const { state: session, reload } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   switch (session.status) {
     case 'loading':

@@ -78,9 +78,10 @@ describe('ContactsPage (GATE3)', () => {
 
   it('a guest is sent to login and nothing is requested', () => {
     mockState = { status: 'guest' }
+    window.history.replaceState(null, '', '/contacts')
     render(<ContactsPage />)
 
-    expect(mockReplace).toHaveBeenCalledWith('/login')
+    expect(mockReplace).toHaveBeenCalledWith('/login?returnTo=%2Fcontacts')
     expect(apiRequest).not.toHaveBeenCalled()
   })
 

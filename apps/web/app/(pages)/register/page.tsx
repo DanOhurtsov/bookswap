@@ -35,8 +35,10 @@ function RegisterPageForm() {
   const [pending, setPending] = useState(false)
   const authenticated = session.state.status === 'authenticated'
 
-  // Someone who is already signed in has no business here — this also covers the
-  // moment right after a successful submit, when `setUser` flips the session.
+  // The only navigation away from this page (BS-146): someone already signed in has no business
+  // here, and right after a successful submit `setUser` makes them exactly that. `submit` itself does
+  // not navigate: a second navigation would race this one — the target was fetched twice, and which
+  // of the two Next finished last decided whether this page stayed in the history.
   useEffect(() => {
     if (authenticated) router.replace(safeReturnTo(returnTo))
   }, [authenticated, returnTo, router])
@@ -73,7 +75,6 @@ function RegisterPageForm() {
       // every other mounted consumer (`NavBar` included) sees the new
       // identity through the same context, without a fetch of its own.
       session.setUser(user, features)
-      router.push(safeReturnTo(returnTo))
     } catch (error) {
       // A taken or blocked address is an error of the email field, not of the whole
       // form. The server check stands on its own: the precheck above is only a hint.

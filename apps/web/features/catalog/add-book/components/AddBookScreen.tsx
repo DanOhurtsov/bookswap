@@ -4,6 +4,7 @@ import type { Visibility } from '@bookswap/shared'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import {
   addBookModeOf,
   correctedSearchHref,
@@ -27,12 +28,9 @@ import { pendingStatusClass } from './screen-styles'
  * форми веде до бібліотеки.
  */
 export function AddBookScreen() {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') return <SessionNotice text="Перевіряю сесію…" />
 

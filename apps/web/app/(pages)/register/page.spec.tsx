@@ -21,10 +21,11 @@ jest.mock('@/app/lib/api', () => {
 
 const mockReplace = jest.fn()
 const mockPush = jest.fn()
+let mockSearchParams = new URLSearchParams()
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mockSearchParams,
 }))
 
 const { apiRequest: mockApiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/api')
@@ -89,6 +90,13 @@ function expectRefusalAtEmail(): void {
   expect(field).toHaveAccessibleDescription(REFUSAL)
 }
 
+/** BS-146: one navigation away, owned by the page's session effect — never a second one from submit. */
+function expectOneNavigationTo(target: string): void {
+  expect(mockReplace).toHaveBeenCalledTimes(1)
+  expect(mockReplace).toHaveBeenCalledWith(target)
+  expect(mockPush).not.toHaveBeenCalled()
+}
+
 function expectStillOnTheForm(email: string): void {
   expect(screen.getByLabelText('Email')).toHaveValue(email)
   expect(screen.getByLabelText('Імʼя')).toHaveValue('Нова Людина')
@@ -100,6 +108,7 @@ function expectStillOnTheForm(email: string): void {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockSearchParams = new URLSearchParams()
 })
 
 it.each([
@@ -143,7 +152,7 @@ it('після відмови повтор із дозволеною адрес�
       }),
     ],
   ])
-  expect(mockPush).toHaveBeenCalledWith('/')
+  expectOneNavigationTo('/')
 })
 
 it('серверна відмова EMAIL_DOMAIN_BLOCKED показується біля email; повтор успішний', async () => {
@@ -171,7 +180,7 @@ it('серверна відмова EMAIL_DOMAIN_BLOCKED показується 
     expect(screen.getByText('Вітаю, user-new')).toBeInTheDocument()
   })
   expect(registerCalls()).toHaveLength(2)
-  expect(mockPush).toHaveBeenCalledWith('/')
+  expectOneNavigationTo('/')
 })
 
 it('заблокований домен не ховає помилок інших полів', async () => {
@@ -190,4 +199,52 @@ it('заблокований домен не ховає помилок інши�
   expect(screen.getByLabelText('Email')).toHaveAccessibleDescription(REFUSAL)
   expect(screen.getByLabelText('Імʼя')).toHaveAttribute('aria-invalid', 'true')
   expect(registerCalls()).toHaveLength(0)
+})
+
+describe('BS-146: back to the page that asked for an account', () => {
+  const TARGET = '/works/w-1?edition=e-2#holders'
+
+  it('keeps returnTo through a refused address and a retry, then opens the page', async () => {
+    mockSearchParams = new URLSearchParams({ returnTo: TARGET })
+    serveRegister((email) =>
+      email === 'taken@example.com'
+        ? Promise.reject(new ApiRequestError(409, { code: 'EMAIL_TAKEN', message: 'Зайнято' }))
+        : registered(),
+    )
+    const user = await renderForm()
+
+    await submitWithEmail(user, 'taken@example.com')
+
+    expect(await screen.findByText('Зайнято')).toBeInTheDocument()
+    expectStillOnTheForm('taken@example.com')
+    expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute(
+      'href',
+      `/login?returnTo=${encodeURIComponent(TARGET)}`,
+    )
+
+    await submitWithEmail(user, 'new@example.com')
+
+    await waitFor(() => {
+      expect(screen.getByText('Вітаю, user-new')).toBeInTheDocument()
+    })
+    expectOneNavigationTo(TARGET)
+  })
+
+  it.each(['https://evil.example/works', '//evil.example', '/login', '/invite#token'])(
+    'falls back to the home page for returnTo %j and does not pass it on',
+    async (returnTo) => {
+      mockSearchParams = new URLSearchParams({ returnTo })
+      serveRegister(registered)
+      const user = await renderForm()
+
+      expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute('href', '/login')
+
+      await submitWithEmail(user, 'new@example.com')
+
+      await waitFor(() => {
+        expect(screen.getByText('Вітаю, user-new')).toBeInTheDocument()
+      })
+      expectOneNavigationTo('/')
+    },
+  )
 })

@@ -1,9 +1,8 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
 import type { Me } from '@bookswap/shared'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useInviteLink } from '../model/use-invite-link'
@@ -28,13 +27,10 @@ export type ProfileMode = 'view' | 'edit'
  * from the first paint on.
  */
 export function ProfileScreen({ mode = 'view' }: { mode?: ProfileMode }) {
-  const router = useRouter()
   const { state, updateUser } = useSession()
 
-  // Захист сторінки: гостя відправляємо на логін, щойно це стало відомо.
-  useEffect(() => {
-    if (state.status === 'guest') router.replace('/login')
-  }, [state.status, router])
+  // Both profile routes return here after sign-in, including their query and fragment.
+  useGuestRedirect(state.status)
 
   if (state.status === 'loading') {
     return (

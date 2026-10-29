@@ -1,8 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { isGuestResponseNotificationType, type Notification } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { buttonVariants } from '@/components/ui/button'
@@ -20,6 +19,7 @@ import {
   useNotifications,
 } from '../../lib/use-notifications'
 import { useSession } from '../../lib/use-session'
+import { useGuestRedirect } from '../../lib/use-login-redirect'
 
 /**
  * §7 і §8: центр in-app сповіщень.
@@ -28,12 +28,9 @@ import { useSession } from '../../lib/use-session'
  * тут не було б чого показувати, крім вічного `PENDING`.
  */
 export default function NotificationsPage() {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

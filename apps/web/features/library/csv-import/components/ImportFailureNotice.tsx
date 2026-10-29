@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { LoginLink } from '@/app/lib/use-login-redirect'
 import type { ImportFailure } from '../model/import-draft-state'
 
 type ImportFailureNoticeProps = {
@@ -34,9 +35,7 @@ export function ImportFailureNotice({ failure, onRetry }: ImportFailureNoticePro
         ) : null}
 
         {failure.kind === 'unauthorized' && (
-          <Link className="import-action import-action--link" href="/login">
-            Увійти
-          </Link>
+          <LoginLink className="import-action import-action--link">Увійти</LoginLink>
         )}
 
         {canRetry && onRetry !== undefined && (

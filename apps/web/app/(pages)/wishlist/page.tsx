@@ -1,12 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
 import { AuthorLine } from '@/components/BookParts'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { useSession } from '../../lib/use-session'
+import { useGuestRedirect } from '../../lib/use-login-redirect'
 import { useWishlist } from '../../lib/use-wishlist'
 
 /**
@@ -15,13 +14,10 @@ import { useWishlist } from '../../lib/use-wishlist'
  * тут лише малювання.
  */
 export default function WishlistPage() {
-  const router = useRouter()
   const { state: session } = useSession()
   const wishlist = useWishlist()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

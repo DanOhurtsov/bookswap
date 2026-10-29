@@ -58,10 +58,20 @@ describe('FriendsSessionBoundary', () => {
 
   it('redirects guests without rendering authenticated content', async () => {
     setSessionState({ status: 'guest' })
+    window.history.replaceState(null, '', '/friends?tab=requests#incoming')
 
     render(<FriendsSessionBoundary />)
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'))
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith(
+        '/login?returnTo=%2Ffriends%3Ftab%3Drequests%23incoming',
+      ),
+    )
+    // BS-146: the link offered while redirecting comes back here too.
+    expect(screen.getByRole('link', { name: 'Увійти зараз' })).toHaveAttribute(
+      'href',
+      '/login?returnTo=%2Ffriends%3Ftab%3Drequests%23incoming',
+    )
     expect(screen.queryByText('Готовий список друзів')).not.toBeInTheDocument()
   })
 

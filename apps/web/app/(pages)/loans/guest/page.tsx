@@ -1,10 +1,9 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { GuestLoansScreen } from '@/features/guest-loans/index.client'
 import { useSession } from '../../../lib/use-session'
+import { useGuestRedirect } from '../../../lib/use-login-redirect'
 
 /**
  * Stage 10, 10f.3. Owner-only, той самий прийом, що `/contacts` (10f.2): маршрут існує лише поки
@@ -12,12 +11,9 @@ import { useSession } from '../../../lib/use-session'
  * невідомий маршрут і `GuestLoansScreen` не монтується взагалі — жодного гостьового запиту.
  */
 export default function GuestLoansPage() {
-  const router = useRouter()
   const { state } = useSession()
 
-  useEffect(() => {
-    if (state.status === 'guest') router.replace('/login')
-  }, [state.status, router])
+  useGuestRedirect(state.status)
 
   if (state.status === 'error') {
     return (

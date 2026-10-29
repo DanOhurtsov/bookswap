@@ -1,13 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { BookCover } from '@/components/BookCover'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ReadingStatusPanel } from '@/features/reading-status/index.client'
 import { useSession } from '@/app/lib/use-session'
+import { LoginLink, useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { toOwnBookView } from '../model/own-book-view'
 import { useOwnBook } from '../model/use-own-book'
 import { NoteSection } from './NoteSection'
@@ -21,12 +21,9 @@ function Shell({ children }: { children: ReactNode }) {
  * below it (`OwnBookContent`), so nothing asks for the owner's copy before there is an owner.
  */
 export function OwnBookScreen({ entryId }: { entryId: string }) {
-  const router = useRouter()
   const { state: session, reload: reloadSession } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (
@@ -45,7 +42,7 @@ export function OwnBookScreen({ entryId }: { entryId: string }) {
           <button type="button" onClick={reloadSession}>
             Спробувати ще раз
           </button>{' '}
-          · <Link href="/login">Увійти</Link>
+          · <LoginLink>Увійти</LoginLink>
         </p>
       </Shell>
     )

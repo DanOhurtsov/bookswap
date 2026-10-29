@@ -48,6 +48,7 @@ function requestedPaths(): string[] {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  window.history.replaceState(null, '', '/u/marta')
   apiRequest.mockReset()
   useSession.mockReturnValue({
     state: { status: 'authenticated', user: { id: 'viewer-1' } as Me },
@@ -98,14 +99,44 @@ describe('PersonScreen: /u/<handle> (BS-148)', () => {
     expect(apiRequest).not.toHaveBeenCalled()
   })
 
-  it('a guest is sent to the login page before anything is asked', async () => {
-    useSession.mockReturnValue({ state: { status: 'guest' }, reload: jest.fn() })
+  it.each([
+    { address: '/u/marta?view=available#copy-1', legacy: false },
+    { address: '/users/user-2/library?view=available#copy-1', legacy: true },
+  ])(
+    'a guest returns to $address after sign-in, without a lookup first',
+    async ({ address, legacy }) => {
+      window.history.replaceState(null, '', address)
+      useSession.mockReturnValue({ state: { status: 'guest' }, reload: jest.fn() })
+
+      render(
+        withQueryClient(
+          legacy ? <LegacyPersonRedirect userId="user-2" /> : <PersonScreen handle="marta" />,
+        ),
+      )
+
+      await waitFor(() => {
+        expect(mockReplace).toHaveBeenCalledWith(`/login?returnTo=${encodeURIComponent(address)}`)
+      })
+      expect(apiRequest).not.toHaveBeenCalled()
+    },
+  )
+
+  it('a failed session check keeps the address in its sign-in link and does not redirect', () => {
+    const address = '/u/marta?view=available#copy-1'
+
+    window.history.replaceState(null, '', address)
+    useSession.mockReturnValue({
+      state: { status: 'error', message: 'Сервіс недоступний' },
+      reload: jest.fn(),
+    })
 
     render(withQueryClient(<PersonScreen handle="marta" />))
 
-    await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith('/login')
-    })
+    expect(screen.getByRole('link', { name: 'Увійти' })).toHaveAttribute(
+      'href',
+      `/login?returnTo=${encodeURIComponent(address)}`,
+    )
+    expect(mockReplace).not.toHaveBeenCalled()
     expect(apiRequest).not.toHaveBeenCalled()
   })
 })

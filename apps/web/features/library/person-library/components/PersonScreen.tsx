@@ -7,6 +7,7 @@ import type { PublicUser } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { personHref } from '@/app/lib/person-href'
 import { useSession } from '@/app/lib/use-session'
+import { LoginLink, useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { usePerson, type PersonLookup } from '../model/use-person'
 import { PersonLibrary, PersonShell } from './PersonLibrary'
 
@@ -55,12 +56,9 @@ function PersonGate({
   lookup: PersonLookup
   children: (person: PublicUser) => ReactNode
 }) {
-  const router = useRouter()
   const { state: session, reload: reloadSession } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (
@@ -80,7 +78,7 @@ function PersonGate({
           <button type="button" onClick={reloadSession}>
             Спробувати ще раз
           </button>{' '}
-          · <Link href="/login">Увійти</Link>
+          · <LoginLink>Увійти</LoginLink>
         </p>
       </PersonShell>
     )

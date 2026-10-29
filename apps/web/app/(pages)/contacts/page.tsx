@@ -1,10 +1,9 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { ContactsScreen } from '@/features/contacts/index.client'
 import { useSession } from '../../lib/use-session'
+import { useGuestRedirect } from '../../lib/use-login-redirect'
 
 /**
  * Stage 10, 10f.2. Private contacts exist only while the server reports the feature on;
@@ -12,12 +11,9 @@ import { useSession } from '../../lib/use-session'
  * so no contact request is sent.
  */
 export default function ContactsPage() {
-  const router = useRouter()
   const { state } = useSession()
 
-  useEffect(() => {
-    if (state.status === 'guest') router.replace('/login')
-  }, [state.status, router])
+  useGuestRedirect(state.status)
 
   if (state.status === 'error') {
     return (

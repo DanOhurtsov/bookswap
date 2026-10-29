@@ -211,6 +211,7 @@ const handleField = () => screen.getByRole('textbox', { name: 'Нік' })
 
 beforeEach(() => {
   jest.clearAllMocks()
+  window.history.replaceState(null, '', '/profile/edit')
   stored = saved
   patchAnswer = undefined
   availabilityAnswer = undefined
@@ -220,6 +221,29 @@ beforeEach(() => {
 })
 
 describe('/profile/edit: форма', () => {
+  it('returns a guest to the edit route with its query and fragment after sign-in', async () => {
+    const address = '/profile/edit?from=profile#bio'
+
+    window.history.replaceState(null, '', address)
+    apiRequest.mockRejectedValue(new ApiRequestError(401, { code: 'UNAUTHORIZED', message: '' }))
+
+    render(
+      withQueryClient(
+        <SessionProvider>
+          <ToastProvider>
+            <ProfileScreen mode="edit" />
+          </ToastProvider>
+        </SessionProvider>,
+      ),
+    )
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith(`/login?returnTo=${encodeURIComponent(address)}`)
+    })
+    expect(apiRequest.mock.calls.map(([path]) => path)).toEqual(['/auth/session'])
+    expect(screen.queryByRole('textbox', { name: 'Нік' })).not.toBeInTheDocument()
+  })
+
   it('починає зі збережених даних; «Зберегти» неактивна, доки нічого не змінено', async () => {
     await renderEdit()
 
@@ -720,7 +744,7 @@ describe('/profile/edit: сесія змінилася до відповіді',
     expect(sessionStatus()).toBe('guest')
     expect(screen.getByText('Потрібен вхід. Переадресовую…')).toBeInTheDocument()
     expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
-    expect(mockReplace.mock.calls).toEqual([['/login']])
+    expect(mockReplace.mock.calls).toEqual([['/login?returnTo=%2Fprofile%2Fedit']])
   })
 
   it('вхід в інший акаунт: відповіді для старого не змінюють нову сесію', async () => {
