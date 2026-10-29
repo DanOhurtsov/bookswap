@@ -54,6 +54,7 @@ const contexts: BrowserContext[] = []
 
 interface Reader extends Account {
   email: string
+  handle: string
 }
 
 interface Feed {
@@ -87,8 +88,11 @@ async function registerReader(prefix: string, name: string): Promise<Reader> {
     .send({ email, password: VALID_PASSWORD, displayName })
     .expect(201)
 
+  const { user } = response.body as { user: { id: string; handle: string } }
+
   return {
-    id: (response.body as { user: { id: string } }).user.id,
+    id: user.id,
+    handle: user.handle,
     cookie: sessionCookie(response.headers),
     displayName,
     email,
@@ -435,7 +439,7 @@ describe('BS-137: «Що читають мої друзі» на головні�
 
       expect(
         await firstCard.getByRole('link', { name: friends[1]!.displayName }).getAttribute('href'),
-      ).toBe(`/users/${friends[1]!.id}/library`)
+      ).toBe(`/u/${friends[1]!.handle}`)
     })
   }
 
@@ -488,7 +492,7 @@ describe('BS-137: «Що читають мої друзі» на головні�
 
     const onFriend = await focusOf()
 
-    expect(onFriend.href).toBe(`/users/${friends[1]!.id}/library`)
+    expect(onFriend.href).toBe(`/u/${friends[1]!.handle}`)
     // The link found by its accessible name — the initials of the avatar are not part of it.
     expect(await friend.evaluate((element) => element === document.activeElement)).toBe(true)
     expect(onFriend.outline).not.toMatch(/^none|\s0px$/)
@@ -505,7 +509,7 @@ describe('BS-137: «Що читають мої друзі» на головні�
     await page.waitForURL(`${WEB_ORIGIN}/`)
     await friend.focus()
     await page.keyboard.press('Enter')
-    await page.waitForURL(`${WEB_ORIGIN}/users/${friends[1]!.id}/library`)
+    await page.waitForURL(`${WEB_ORIGIN}/u/${friends[1]!.handle}`)
     await page
       .getByRole('heading', { name: `Бібліотека: ${friends[1]!.displayName}`, level: 1 })
       .waitFor()

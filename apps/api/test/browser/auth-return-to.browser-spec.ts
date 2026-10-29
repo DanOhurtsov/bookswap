@@ -225,7 +225,7 @@ it('a signed-in visitor sent to login with returnTo goes straight on, without th
   await tab.goto(loginAddress(target))
 
   await tab.waitForURL(`${WEB_ORIGIN}${target}`)
-  await tab.getByRole('heading', { name: 'Профіль' }).waitFor()
+  await tab.getByRole('heading', { name: reader.displayName, exact: true, level: 1 }).waitFor()
   expect(await tab.getByLabel('Пароль').count()).toBe(0)
 })
 
