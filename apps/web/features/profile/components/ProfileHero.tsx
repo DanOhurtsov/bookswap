@@ -21,7 +21,7 @@ export const PROFILE_EDIT_HREF = '/profile/edit'
  * only whole class names.
  */
 const ONE_CARD_FROM_TABLET =
-  'md:rounded-xl md:border md:border-(--line) md:bg-(--field-bg) md:p-6 md:shadow-[0_1px_2px_rgba(20,28,24,.04),0_2px_8px_rgba(20,28,24,.04)] lg:p-8'
+  'md:rounded-xl md:border md:border-(--line) md:bg-(--field-bg) md:p-6 md:shadow-(--canvas-card-shadow) lg:p-8'
 const OWN_CARD_ON_PHONE = 'md:rounded-none md:border-0 md:bg-transparent md:shadow-none'
 
 /**
