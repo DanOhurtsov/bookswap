@@ -847,7 +847,14 @@ describe('Дружба (e2e)', () => {
       )
 
       expect(incoming?.user.id).toBe(marta.id)
-      expect(raw?.user).toEqual({ id: marta.id, displayName: marta.displayName, avatarUrl: null })
+      const martaRow = await prisma.user.findUniqueOrThrow({ where: { id: marta.id } })
+
+      expect(raw?.user).toEqual({
+        id: marta.id,
+        displayName: marta.displayName,
+        handle: martaRow.handle,
+        avatarUrl: null,
+      })
     })
 
     it('прийняття: ACCEPTED у базі, сповіщення прочитане, але лишається в історії', async () => {

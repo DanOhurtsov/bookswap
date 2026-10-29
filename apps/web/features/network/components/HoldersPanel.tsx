@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { WorkHolderGroup } from '@bookswap/shared'
+import { personHref } from '@/app/lib/person-href'
 import { useWorkHolders } from '../model/use-holders'
 import { NetworkOwnerCopies } from './NetworkCopyActions'
 
@@ -37,10 +38,8 @@ export function HoldersPanel({ workId }: { workId: string }) {
             <ul className="book__locations">
               {group.owners.map((owner) => (
                 <li key={owner.owner.id}>
-                  <Link href={`/users/${encodeURIComponent(owner.owner.id)}/library`}>
-                    {owner.owner.displayName}
-                  </Link>{' '}
-                  · доступних примірників: {owner.availableCopies}
+                  <Link href={personHref(owner.owner)}>{owner.owner.displayName}</Link> · доступних
+                  примірників: {owner.availableCopies}
                   <NetworkOwnerCopies owner={owner} onRequested={reload} />
                 </li>
               ))}

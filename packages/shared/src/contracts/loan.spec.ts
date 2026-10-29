@@ -8,8 +8,8 @@ import {
   updateLoanRequestSchema,
 } from './loan'
 
-const MARTA = { id: 'user-marta', displayName: 'Марта', avatarUrl: null }
-const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: null }
+const MARTA = { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null }
+const OLES = { id: 'user-oles', displayName: 'Олесь', handle: 'oles', avatarUrl: null }
 
 const rawLoan = {
   id: 'loan-1',

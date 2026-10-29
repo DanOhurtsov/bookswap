@@ -145,6 +145,28 @@ export const envSchema = z
       .optional(),
 
     /**
+     * BS-148: where profile photos live. An explicit switch, like `EMAIL_PROVIDER`: inferring R2
+     * from present keys would let a forgotten key silently fall back to memory.
+     *
+     * `memory` keeps photos in the API process and serves them at `/api/v1/avatars/…` — for tests
+     * and for development without keys. It is forbidden in production (superRefine): photos would
+     * vanish with every restart and differ between instances.
+     */
+    AVATAR_STORAGE: z.enum(['memory', 'r2']).default('memory'),
+    /** Cloudflare account id: the S3 endpoint is `https://<id>.r2.cloudflarestorage.com`. */
+    R2_ACCOUNT_ID: z.string().min(1).optional(),
+    /** An R2 API token limited to the avatar bucket (docs/runbooks/r2-avatars.md). */
+    R2_ACCESS_KEY_ID: z.string().min(1).optional(),
+    R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    R2_AVATAR_BUCKET: z.string().min(1).optional(),
+    /** The bucket's public address (custom domain or r2.dev), without a trailing slash. */
+    R2_PUBLIC_BASE_URL: z
+      .string()
+      .url()
+      .refine((value) => !value.endsWith('/'), 'без / у кінці')
+      .optional(),
+
+    /**
      * Stage 10 §7.3 (T9): D2 safeguard for guest loans. Off by default. Outside
      * production, turning it on also requires `GUEST_LOANS_SYNTHETIC_ONLY=true` —
      * an organisational confirmation, not a check: real personal data of a guest
@@ -203,6 +225,33 @@ export const envSchema = z
             code: 'custom',
             path: [key],
             message: 'обов’язкова при EMAIL_PROVIDER=resend',
+          })
+        }
+      }
+    }
+
+    if (env.NODE_ENV === 'production' && env.AVATAR_STORAGE === 'memory') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AVATAR_STORAGE'],
+        message:
+          'у production потрібне r2: memory губить фото з кожним рестартом і різниться між інстансами',
+      })
+    }
+
+    if (env.AVATAR_STORAGE === 'r2') {
+      for (const key of [
+        'R2_ACCOUNT_ID',
+        'R2_ACCESS_KEY_ID',
+        'R2_SECRET_ACCESS_KEY',
+        'R2_AVATAR_BUCKET',
+        'R2_PUBLIC_BASE_URL',
+      ] as const) {
+        if (env[key] === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'обов’язкова при AVATAR_STORAGE=r2',
           })
         }
       }

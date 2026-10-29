@@ -5,6 +5,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Loan } from '@bookswap/shared'
 import type { SessionState } from '@/app/lib/use-session'
+import { initialDueDate } from '../model/approve-due-date'
 import { LoansScreen } from './LoansScreen'
 
 jest.mock('@/app/lib/api', () => {
@@ -30,10 +31,16 @@ const SIGNED_IN: Extract<SessionState, { status: 'authenticated' }> = {
     email: 'me@example.com',
     emailVerified: true,
     displayName: 'Я',
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: false,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
 }
@@ -59,8 +66,8 @@ const BORROWED_LOAN: Loan = {
   handedAt: '2026-01-03T00:00:00.000Z',
   returnedAt: null,
   dueAt: null,
-  owner: { id: 'user-marta', displayName: 'Марта', avatarUrl: null },
-  borrower: { id: 'user-me', displayName: 'Я', avatarUrl: null },
+  owner: { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null },
+  borrower: { id: 'user-me', displayName: 'Я', handle: 'me-user', avatarUrl: null },
   copy: { id: 'copy-7', status: 'LENT_OUT', condition: 'GOOD', isArchived: false },
   edition: {
     id: 'ed-7',
@@ -312,5 +319,55 @@ describe('LoansScreen: розділ «Позичання» у «Моїй біб�
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(
       expect.arrayContaining(['Книжку повернуто', 'Позначити втраченою']),
     )
+  })
+})
+
+describe('LoansScreen: термін за замовчуванням у погодженні (BS-148)', () => {
+  const REQUESTED_LOAN: Loan = {
+    ...BORROWED_LOAN,
+    status: 'REQUESTED',
+    respondedAt: null,
+    handedAt: null,
+    copy: { ...BORROWED_LOAN.copy, status: 'AVAILABLE' },
+  }
+
+  function openAsOwner(loan: Loan, defaultLoanTermDays: 14 | 21 | 30 | null): void {
+    mockParameters = new URLSearchParams(`loanId=${loan.id}`)
+    mockSession = {
+      ...SIGNED_IN,
+      user: { ...SIGNED_IN.user, id: 'user-marta', defaultLoanTermDays },
+    }
+    apiRequest.mockResolvedValue({ loan })
+    render(<LoansScreen />)
+  }
+
+  it('без дати від позичальника підставляє сьогодні + термін власника й надсилає її з погодженням', async () => {
+    const user = userEvent.setup()
+
+    openAsOwner(REQUESTED_LOAN, 21)
+
+    const field = await screen.findByLabelText('Повернути до')
+    const expected = initialDueDate(null, 21, new Date())
+
+    expect(field).toHaveValue(expected)
+
+    await user.click(screen.getByRole('button', { name: 'Погодити' }))
+
+    expect(apiRequest).toHaveBeenCalledWith(`/loans/${REQUESTED_LOAN.id}`, {
+      method: 'PATCH',
+      body: { action: 'approve', dueAt: expected },
+    })
+  })
+
+  it('дата, яку попросив позичальник, лишається', async () => {
+    openAsOwner({ ...REQUESTED_LOAN, dueAt: '2026-12-01' }, 30)
+
+    expect(await screen.findByLabelText('Повернути до')).toHaveValue('2026-12-01')
+  })
+
+  it('без терміну власника поле порожнє, як і раніше', async () => {
+    openAsOwner(REQUESTED_LOAN, null)
+
+    expect(await screen.findByLabelText('Повернути до')).toHaveValue('')
   })
 })

@@ -8,7 +8,7 @@ import {
 import type { ConfirmPasswordResetRequest, LoginRequest, RegisterRequest } from '@bookswap/shared'
 import { AnalyticsService } from '../analytics/analytics.service'
 import { ApiException } from '../common/api.exception'
-import { isUniqueViolation } from '../common/prisma-errors'
+import { isUniqueViolationOn } from '../common/prisma-errors'
 import { EMAIL_SENDER, type EmailSender } from '../email/email-sender'
 import { PrismaService } from '../prisma/prisma.service'
 import { ShutdownBudget } from './auth-shutdown-budget'
@@ -29,6 +29,13 @@ import type { UserModel } from '../generated/prisma/models'
  * сам стає відповіддю на питання «чи є такий акаунт».
  */
 const DUMMY_PASSWORD = 'timing-equalizer-not-a-real-password'
+
+/**
+ * BS-148: the database generates the nickname (`user` + 8 digits), and a collision with an existing
+ * one is a failed insert, not a taken email. A fresh insert draws a new one; three draws in a row
+ * that all collide mean something other than chance, so the error is not swallowed.
+ */
+const HANDLE_ATTEMPTS = 3
 
 interface Authenticated {
   user: UserModel
@@ -393,22 +400,11 @@ export class AuthService implements OnModuleDestroy {
 
       if (existing !== null) throw emailTaken()
 
-      let user: UserModel
-
-      try {
-        user = await this.prisma.user.create({
-          data: {
-            email: request.email,
-            passwordHash,
-            displayName: request.displayName,
-          },
-        })
-      } catch (error) {
-        // Перевірка вище не рятує від двох одночасних реєстрацій — останнє слово
-        // за унікальним індексом на User.email.
-        if (isUniqueViolation(error)) throw emailTaken()
-        throw error
-      }
+      const user = await this.createAccount({
+        email: request.email,
+        passwordHash,
+        displayName: request.displayName,
+      })
 
       // `sendEmailVerification` сама не чекає на провайдера (лист іде фоновим
       // завданням через `enqueueEmail`, без `await`) — тут дочікуємося лише
@@ -435,6 +431,24 @@ export class AuthService implements OnModuleDestroy {
     })
 
     return authenticated
+  }
+
+  private async createAccount(data: {
+    email: string
+    passwordHash: string
+    displayName: string
+  }): Promise<UserModel> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.prisma.user.create({ data })
+      } catch (error) {
+        // The existence check in `register` does not survive two simultaneous registrations — the
+        // unique index on User.email has the last word.
+        if (isUniqueViolationOn(error, 'User_email_key')) throw emailTaken()
+        if (isUniqueViolationOn(error, 'User_handle_key') && attempt < HANDLE_ATTEMPTS) continue
+        throw error
+      }
+    }
   }
 
   async login(request: LoginRequest): Promise<Authenticated> {

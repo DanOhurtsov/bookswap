@@ -36,6 +36,8 @@ export const NOTIFICATION_TYPE = [
   // Stage 10 (10i.3): відповідь гостя на запит підтвердження конкретної позики. IN_APP + загальний EMAIL за правилами власника; Telegram недоступний.
   'GUEST_LOAN_RECEIVED',
   'GUEST_LOAN_DENIED',
+  // BS-148: the owner's reminder three days before a lent book is due (daily digest).
+  'LOAN_DUE_SOON_OWNER',
 ] as const
 
 export const notificationTypeSchema = z.enum(NOTIFICATION_TYPE)
@@ -99,7 +101,12 @@ export function isGuestResponseNotificationType(
  * рядки: не стейт-машина, а щоденна задача. `Loan.status` при цьому не
  * змінюється (§5.2: «`OVERDUE` — не статус»).
  */
-export const DIGEST_NOTIFICATION_TYPE = ['LOAN_DUE_SOON', 'LOAN_OVERDUE'] as const
+export const DIGEST_NOTIFICATION_TYPE = [
+  'LOAN_DUE_SOON',
+  'LOAN_OVERDUE',
+  // BS-148: to the owner, unless they turned «Нагадувати про повернення» off.
+  'LOAN_DUE_SOON_OWNER',
+] as const
 
 export type DigestNotificationType = (typeof DIGEST_NOTIFICATION_TYPE)[number]
 
@@ -119,6 +126,8 @@ export const FLOW_CRITICAL_NOTIFICATION_TYPE = [
   'LOAN_CANCELLED',
   'LOAN_DUE_SOON',
   'LOAN_OVERDUE',
+  // BS-148: the same defaults as the borrower's reminder (PO decision, 26.10.2026).
+  'LOAN_DUE_SOON_OWNER',
   'FRIEND_REQUESTED',
   // Stage 10 (10e): без відповіді позичальника запис не рухається (виправлення дат — так само).
   'LOAN_RECORD_PROPOSED',

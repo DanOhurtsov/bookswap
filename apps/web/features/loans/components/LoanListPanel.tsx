@@ -69,7 +69,7 @@ export function LoanListPanel({ user, role }: LoanListPanelProps) {
             <LoanCard
               key={loan.id}
               loan={loan}
-              userId={user.id}
+              user={user}
               busyKey={actions.busyKey}
               onAct={actions.act}
               onConfirm={actions.setConfirmation}

@@ -21,8 +21,13 @@ import type { ViewerRole } from '../access/visibility'
  * нотатки немає.
  */
 
-const MARTA = { id: 'user-marta', displayName: 'Марта', avatarUrl: null }
-const OLES = { id: 'user-oles', displayName: 'Олесь', avatarUrl: 'https://example.com/o.png' }
+const MARTA = { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null }
+const OLES = {
+  id: 'user-oles',
+  displayName: 'Олесь',
+  handle: 'oles',
+  avatarUrl: 'https://example.com/o.png',
+}
 
 function copyRow(overrides: Partial<CopyRow> = {}): CopyRow {
   return {
@@ -88,7 +93,7 @@ function loanRow(overrides: Partial<CopyLoanRow> = {}): CopyLoanRow {
   }
 }
 
-const BOHDAN = { id: 'user-bohdan', displayName: 'Богдан', avatarUrl: null }
+const BOHDAN = { id: 'user-bohdan', displayName: 'Богдан', handle: 'bohdan', avatarUrl: null }
 
 /**
  * Типовий гість чужої полиці — друг власника.
@@ -96,10 +101,15 @@ const BOHDAN = { id: 'user-bohdan', displayName: 'Богдан', avatarUrl: null
  * Роль тут не декоративна: від неї залежить `canRequest`, а `/users/:id/library`
  * за §9 віддає бібліотеку не лише друзям.
  */
-const guest = (showHolderNames: boolean, role: ViewerRole = 'FRIEND'): Viewer => ({
+const guest = (
+  showHolderNames: boolean,
+  role: ViewerRole = 'FRIEND',
+  ownerPausedRequests = false,
+): Viewer => ({
   id: OLES.id,
   role,
   showHolderNames,
+  ownerPausedRequests,
 })
 
 describe('isHome', () => {
@@ -311,13 +321,27 @@ describe('canRequest — capability, а не здогад інтерфейсу (
 
   it('власник не може попросити сам у себе', () => {
     // Роль OWNER буває на цьому маршруті: власник бачить свою полицю завжди.
-    const own: Viewer = { id: MARTA.id, role: 'OWNER', showHolderNames: true }
+    const own: Viewer = {
+      id: MARTA.id,
+      role: 'OWNER',
+      showHolderNames: true,
+      ownerPausedRequests: false,
+    }
 
     expect(toVisibleCopy(copyRow(), own).canRequest).toBe(false)
   })
 
   it('заблокований не може', () => {
     expect(toVisibleCopy(copyRow(), guest(true, 'BLOCKED')).canRequest).toBe(false)
+  })
+
+  it('друг друга може, коли власник відкрив йому бібліотеку (BS-148)', () => {
+    expect(toVisibleCopy(copyRow(), guest(false, 'FRIEND_OF_FRIEND')).canRequest).toBe(true)
+  })
+
+  it('ніхто не може, поки власник призупинив запити (BS-148)', () => {
+    expect(toVisibleCopy(copyRow(), guest(true, 'FRIEND', true)).canRequest).toBe(false)
+    expect(toVisibleCopy(copyRow(), guest(false, 'FRIEND_OF_FRIEND', true)).canRequest).toBe(false)
   })
 
   it.each(['RESERVED', 'LENT_OUT', 'UNAVAILABLE'] as const)(

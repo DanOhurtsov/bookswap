@@ -9,18 +9,21 @@ import { FriendsList } from './FriendsList'
 const friendUser: PublicUser = {
   id: 'friend-1',
   displayName: 'Олена Коваль',
+  handle: 'olena',
   avatarUrl: null,
 }
 
 const incomingUser: PublicUser = {
   id: 'incoming-1',
   displayName: 'Марко Левченко',
+  handle: 'marko',
   avatarUrl: null,
 }
 
 const outgoingUser: PublicUser = {
   id: 'outgoing-1',
   displayName: 'Ірина Бондар',
+  handle: 'iryna',
   avatarUrl: null,
 }
 

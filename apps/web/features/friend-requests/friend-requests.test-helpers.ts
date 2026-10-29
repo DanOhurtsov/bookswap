@@ -7,10 +7,16 @@ import { ApiRequestError } from '@/app/lib/api'
  * state changes the way the server's does, so a reload shows what the server would answer.
  */
 
-export const MARTA = { id: 'user-marta', displayName: 'Марта Коваль', avatarUrl: null }
+export const MARTA = {
+  id: 'user-marta',
+  displayName: 'Марта Коваль',
+  handle: 'marta',
+  avatarUrl: null,
+}
 export const OLES = {
   id: 'user-oles',
   displayName: 'Олесь',
+  handle: 'oles',
   avatarUrl: 'https://cdn.test/oles.png',
 }
 

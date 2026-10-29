@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Friend } from '@bookswap/shared'
 import { BanIcon, BookOpenIcon, EllipsisVerticalIcon, UserMinusIcon } from 'lucide-react'
 import { formatDate } from '@/app/lib/labels'
+import { personHref } from '@/app/lib/person-href'
 import { UserAvatar } from '@/components/Friends/UserAvatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,7 +23,7 @@ interface FriendRowProps {
 }
 
 function FriendRow({ friend, busy, onRemove, onBlock }: FriendRowProps) {
-  const libraryHref = `/users/${friend.user.id}/library`
+  const libraryHref = personHref(friend.user)
 
   return (
     <li className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/50 sm:px-4">

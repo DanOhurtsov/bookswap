@@ -2,7 +2,7 @@ import type { UserSearchResult } from '@bookswap/shared'
 import { isBlankSearch, userSearchView, validateSearch } from './user-search'
 
 const olena: UserSearchResult = {
-  user: { id: 'olena', displayName: 'Олена Коваль', avatarUrl: null },
+  user: { id: 'olena', displayName: 'Олена Коваль', handle: 'olena', avatarUrl: null },
   relation: 'NONE',
 }
 

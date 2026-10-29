@@ -2,11 +2,12 @@ import { HttpStatus, Logger, ValidationPipe, type INestApplication } from '@nest
 import {
   API_ERROR_CODES,
   API_PREFIX,
+  AVATAR_RULES,
   LIBRARY_IMPORT_CONTENT_BASE64_MAX,
   type LibraryImportTooLargeDetails,
 } from '@bookswap/shared'
 import cookieParser from 'cookie-parser'
-import { json, type Express, type NextFunction, type Request, type Response } from 'express'
+import { json, raw, type Express, type NextFunction, type Request, type Response } from 'express'
 import { ApiException } from './common/api.exception'
 import { AllExceptionsFilter } from './common/all-exceptions.filter'
 
@@ -14,6 +15,12 @@ import { AllExceptionsFilter } from './common/all-exceptions.filter'
 const IMPORT_BODY_LIMIT = LIBRARY_IMPORT_CONTENT_BASE64_MAX + 1024
 
 const importBodyParser = json({ limit: IMPORT_BODY_LIMIT })
+
+/**
+ * BS-148: `POST /me/avatar` carries the photo itself as the body. Every content type is read as bytes:
+ * what the file is gets decided by its signature (`avatar-image.ts`), never by the header.
+ */
+const avatarBodyParser = raw({ type: () => true, limit: AVATAR_RULES.maxBytes })
 
 /** `http-errors` shape produced by body-parser. `body` is deliberately never read. */
 interface BodyParserError {
@@ -54,6 +61,32 @@ function bodyParserFailure(error: unknown): ApiException | undefined {
   return new ApiException(
     API_ERROR_CODES.VALIDATION_ERROR,
     'Тіло запиту не є коректним JSON',
+    HttpStatus.BAD_REQUEST,
+  )
+}
+
+/**
+ * The photo upload's body-parser rejections as the API's own errors. As with the import, nothing from
+ * the body is echoed: it is a person's photo.
+ */
+function avatarBodyFailure(error: unknown): ApiException | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+
+  const { type } = error as BodyParserError
+
+  if (type === 'entity.too.large') {
+    return new ApiException(
+      API_ERROR_CODES.AVATAR_TOO_LARGE,
+      `Файл завеликий — до ${String(AVATAR_RULES.maxBytes / 1024 / 1024)} МБ`,
+      HttpStatus.PAYLOAD_TOO_LARGE,
+    )
+  }
+
+  if (typeof type !== 'string' || !type.startsWith('entity.')) return undefined
+
+  return new ApiException(
+    API_ERROR_CODES.VALIDATION_ERROR,
+    'Не вдалося прочитати файл',
     HttpStatus.BAD_REQUEST,
   )
 }
@@ -139,6 +172,39 @@ export function configureApp(app: INestApplication, options: AppSetupOptions = {
       next: NextFunction,
     ): void {
       next(bodyParserFailure(error) ?? error)
+    },
+  )
+
+  // BS-148: the same per-route arrangement for the profile photo, POST only — `DELETE /me/avatar` has
+  // no body to read. The wrapper's own name matters for the reason given above.
+  const avatarPath = `${API_PREFIX}/me/avatar`
+
+  app.use(
+    avatarPath,
+    function avatarUploadBodyParser(
+      request: Request,
+      response: Response,
+      next: NextFunction,
+    ): void {
+      if (request.method !== 'POST') {
+        next()
+
+        return
+      }
+
+      avatarBodyParser(request, response, next)
+    },
+  )
+
+  app.use(
+    avatarPath,
+    function avatarUploadBodyError(
+      error: unknown,
+      _request: Request,
+      _response: Response,
+      next: NextFunction,
+    ): void {
+      next(avatarBodyFailure(error) ?? error)
     },
   )
 

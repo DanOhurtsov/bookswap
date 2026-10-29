@@ -26,6 +26,7 @@ describe('розділи «Моєї бібліотеки»', () => {
     '/catalog',
     '/friends',
     '/users/user-2/library',
+    '/u/marta',
     '/copies/copy-1/history',
     '/history',
     '/reading-list',

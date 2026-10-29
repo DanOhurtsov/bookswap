@@ -266,7 +266,7 @@ describe('/friends/search — searching while typing', () => {
 
     expect(within(results()).getByRole('link', { name: 'Олена Коваль' })).toHaveAttribute(
       'href',
-      '/users/olena/library',
+      '/u/olena-koval',
     )
     expect(within(results()).getByText('Ірина Бондар')).toBeInTheDocument()
     expect(within(results()).queryByRole('link', { name: 'Ірина Бондар' })).not.toBeInTheDocument()

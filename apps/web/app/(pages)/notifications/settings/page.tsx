@@ -343,7 +343,7 @@ function SettingsForm({ data, reload, notice, onNotice }: FormProps) {
         {/* §7.5: другу групу не можна надсилати негайно — активний користувач
             перетворив би бота на спам, і його вимкнули б разом із важливим. */}
         <p className="field__hint">
-          «{DIGEST_NOTIFICATION_TYPE.map((type) => NOTIFICATION_TYPE_LABELS[type]).join('» і «')}» —
+          {quotedList(DIGEST_NOTIFICATION_TYPE.map((type) => NOTIFICATION_TYPE_LABELS[type]))} —
           щоденним дайджестом: одне повідомлення на всі книжки, а не по одному на кожну.
         </p>
 
@@ -532,4 +532,14 @@ function Cell({ type, channel, checked, disabled, onToggle }: CellProps) {
       onChange={onToggle}
     />
   )
+}
+
+/** «A», «B» і «C» — the digest types, however many there are (BS-148 added a third). */
+function quotedList(items: readonly string[]): string {
+  const quoted = items.map((item) => `«${item}»`)
+  const last = quoted.pop()
+
+  if (last === undefined) return ''
+
+  return quoted.length === 0 ? last : `${quoted.join(', ')} і ${last}`
 }

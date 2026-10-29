@@ -6,6 +6,7 @@ import { Providers } from './lib/query-client'
 import { SessionProvider } from './lib/use-session'
 import { THEME_INITIALIZER_SCRIPT } from './lib/theme'
 import { NavBar } from '@/components/NavBar/NavBar'
+import { ToastProvider } from '@/components/ui/toast'
 
 export const metadata: Metadata = {
   title: 'BookSwap',
@@ -21,8 +22,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </Script>
         <SessionProvider>
           <Providers>
-            <NavBar />
-            {children}
+            <ToastProvider>
+              <NavBar />
+              {children}
+            </ToastProvider>
           </Providers>
         </SessionProvider>
       </body>

@@ -25,7 +25,9 @@ const GUARDED: Record<string, string> = {
   '/notifications': 'app/(pages)/notifications/page.tsx',
   '/notifications/settings': 'app/(pages)/notifications/settings/page.tsx',
   '/profile': 'features/profile/components/ProfileScreen.tsx',
-  '/users/[id]/library': 'app/(pages)/users/[id]/library/page.tsx',
+  '/profile/edit': 'features/profile/components/ProfileScreen.tsx',
+  '/u/[handle]': 'features/library/person-library/components/PersonScreen.tsx',
+  '/users/[id]/library': 'features/library/person-library/components/PersonScreen.tsx',
   '/wishlist': 'app/(pages)/wishlist/page.tsx',
   '/works/[id]': 'app/(pages)/works/[id]/page.tsx',
 }

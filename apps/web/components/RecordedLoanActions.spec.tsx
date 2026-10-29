@@ -12,8 +12,8 @@ const loan = {
   origin: 'RECORDED_EXISTING',
   handedAt: '2026-09-01T00:00:00.000Z',
   dueAt: '2026-10-01',
-  owner: { id: 'owner', displayName: 'Марта', avatarUrl: null },
-  borrower: { id: 'borrower', displayName: 'Олесь', avatarUrl: null },
+  owner: { id: 'owner', displayName: 'Марта', handle: 'owner', avatarUrl: null },
+  borrower: { id: 'borrower', displayName: 'Олесь', handle: 'borrower', avatarUrl: null },
 } as unknown as Loan
 
 function setup(isOwner: boolean, busy = false) {

@@ -6,6 +6,7 @@ import {
   type CatalogDiscoveryTranslation,
   type CopyStatus,
   type EditionTextKind,
+  type FriendRelation,
   type NetworkCopy,
   type NetworkOwner,
   type PublicUser,
@@ -38,6 +39,13 @@ export interface InventoryCopy {
   language: string | null
   translator: string | null
 }
+
+/** Pairs whose role is settled without asking about friends of friends. */
+const CLOSED_RELATIONS: ReadonlySet<FriendRelation> = new Set([
+  'FRIENDS',
+  'BLOCKED_BY_ME',
+  'BLOCKED_ME',
+])
 
 /**
  * Єдине місце, де «примірники, які цей глядач бачить у своїй мережі» перетворюються
@@ -79,7 +87,9 @@ export class NetworkInventory {
         editionId: true,
         status: true,
         visibility: true,
-        owner: { select: { ...PUBLIC_USER_FIELDS, libraryVisibility: true } },
+        owner: {
+          select: { ...PUBLIC_USER_FIELDS, libraryVisibility: true, loanRequestsPaused: true },
+        },
         edition: {
           select: {
             workId: true,
@@ -101,6 +111,12 @@ export class NetworkInventory {
       (ownerId) => ownerId !== viewerId,
     )
     const relations = await this.access.relationsWith(viewerId, ownerIds)
+    // BS-148: owners who are neither friends nor blocked may still have opened their library to the
+    // viewer as a friend of a friend — the same answer `AccessService.roleOf` gives, for all at once.
+    const friendsOfFriends = await this.access.friendsOfFriendsAmong(
+      viewerId,
+      ownerIds.filter((ownerId) => !CLOSED_RELATIONS.has(relations.get(ownerId) ?? 'NONE')),
+    )
     const result: InventoryCopy[] = []
 
     for (const row of rows) {
@@ -112,7 +128,9 @@ export class NetworkInventory {
             ? 'FRIEND'
             : relation === 'BLOCKED_BY_ME' || relation === 'BLOCKED_ME'
               ? 'BLOCKED'
-              : 'OTHER'
+              : friendsOfFriends.has(row.ownerId)
+                ? 'FRIEND_OF_FRIEND'
+                : 'OTHER'
 
       if (filter.scope === 'CIRCLE' && role !== 'OWNER' && role !== 'FRIEND') continue
       if (!copyVisibleTo(role, row.owner.libraryVisibility, row.visibility)) continue
@@ -127,9 +145,10 @@ export class NetworkInventory {
           translationId: row.edition.translationId,
           status,
           expectedReturnAt: expectedReturnOf({ status, loans: row.loans }),
-          canRequest: canRequestCopy(row, role, viewerId),
+          canRequest: canRequestCopy(row, role, viewerId, row.owner.loanRequestsPaused),
         },
         owner: toPublicUser(row.owner),
+        // A friend of a friend is not a friend: no «friends» counts, no friends-first ranking.
         relation: role === 'OWNER' ? 'SELF' : role === 'FRIEND' ? 'FRIEND' : 'OTHER',
         workId: row.edition.workId,
         textKind: row.edition.textKind,

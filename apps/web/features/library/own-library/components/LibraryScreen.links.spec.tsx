@@ -93,7 +93,7 @@ const BORROWED = {
           id: 'copy-7',
           status: 'LENT_OUT',
           condition: 'WORN',
-          owner: { id: 'user-2', displayName: 'Марко', avatarUrl: null },
+          owner: { id: 'user-2', displayName: 'Марко', handle: '2-user', avatarUrl: null },
           activeLoan: null,
         },
       ],

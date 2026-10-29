@@ -437,6 +437,7 @@ describe('BS-137: what my friends are reading (e2e)', () => {
     expect(item!.friend).toEqual({
       id: friend.id,
       displayName: friend.displayName,
+      handle: friendRow.handle,
       avatarUrl: 'https://avatars.example/f.png',
     })
     expect(Object.keys(item!.work as object).sort()).toEqual(['id', 'title'])

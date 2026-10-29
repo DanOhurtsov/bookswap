@@ -248,7 +248,8 @@ function isVisibleToParty(
 }
 
 /**
- * §9: історію бачать лише власник і друг.
+ * §9: історію бачать лише власник і друг. A friend of a friend (BS-148) does not — like a stranger,
+ * they get 403 (PO decision, 27.10.2026).
  *
  * Винесено окремо, бо це правило застосовується двічі й обидва рази мусить
  * означати те саме. `BLOCKED` сюди не доходить — його відсікають раніше.
@@ -274,6 +275,9 @@ function assertHistoryVisible(role: ViewerRole): void {
  * на кожного перетворив би сторінку на десяток звернень до бази. `relationsWith`
  * віддає їх усі одним запитом, а ця функція перекладає результат у ту саму
  * `ViewerRole`, якою користуються чисті функції §9.
+ *
+ * A friend of a friend (BS-148) is left as `OTHER` here on purpose: history is closed to both, so
+ * telling them apart would cost a query and change no entry.
  */
 function roleFor(
   viewerId: string,

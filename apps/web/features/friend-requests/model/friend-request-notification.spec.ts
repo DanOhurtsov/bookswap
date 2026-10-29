@@ -7,7 +7,7 @@ import {
   type IncomingRequests,
 } from './friend-request-notification'
 
-const marta = { id: 'user-marta', displayName: 'Марта', avatarUrl: null }
+const marta = { id: 'user-marta', displayName: 'Марта', handle: 'marta', avatarUrl: null }
 
 const request: FriendRequest = {
   id: 'friendship-1',

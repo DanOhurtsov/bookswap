@@ -6,18 +6,44 @@ import { createTestQueryClient } from '@/app/lib/test-query-client'
 import { USER_SEARCH_QUERY_KEY } from './model/use-user-search'
 import { USER_SEARCH_DELAY_MS } from './model/user-search'
 
-export const OLENA: PublicUser = { id: 'olena', displayName: 'Олена Коваль', avatarUrl: null }
-export const OLHA: PublicUser = { id: 'olha', displayName: 'Ольга Мельник', avatarUrl: null }
-export const MARKO: PublicUser = { id: 'marko', displayName: 'Марко Левченко', avatarUrl: null }
-export const IRA: PublicUser = { id: 'ira', displayName: 'Ірина Бондар', avatarUrl: null }
+export const OLENA: PublicUser = {
+  id: 'olena',
+  displayName: 'Олена Коваль',
+  handle: 'olena-koval',
+  avatarUrl: null,
+}
+export const OLHA: PublicUser = {
+  id: 'olha',
+  displayName: 'Ольга Мельник',
+  handle: 'olha',
+  avatarUrl: null,
+}
+export const MARKO: PublicUser = {
+  id: 'marko',
+  displayName: 'Марко Левченко',
+  handle: 'marko',
+  avatarUrl: null,
+}
+export const IRA: PublicUser = {
+  id: 'ira',
+  displayName: 'Ірина Бондар',
+  handle: 'ira',
+  avatarUrl: null,
+}
 /** Five more «Ол…» people: «Ол» finds seven. */
 export const OLEKSAS: PublicUser[] = [1, 2, 3, 4, 5].map((n) => ({
   id: `oleksa-${String(n)}`,
   displayName: `Олекса ${String(n)}`,
+  handle: `oleksa-${String(n)}`,
   avatarUrl: null,
 }))
 /** A name full of characters an address must keep: `+`, `&`, `@`, spaces, Cyrillic. */
-export const TRICKY: PublicUser = { id: 'tricky', displayName: 'Ян & Co + @друзі', avatarUrl: null }
+export const TRICKY: PublicUser = {
+  id: 'tricky',
+  displayName: 'Ян & Co + @друзі',
+  handle: 'tricky',
+  avatarUrl: null,
+}
 
 const PEOPLE = [OLENA, OLHA, MARKO, IRA, ...OLEKSAS, TRICKY]
 const EMAILS: Record<string, PublicUser> = { 'olena@example.com': OLENA }
@@ -30,10 +56,16 @@ export const me = (id: string): Me => ({
   email: `${id}@example.com`,
   emailVerified: true,
   displayName: id,
+  handle: 'reader',
+  city: null,
   avatarUrl: null,
   bio: null,
   libraryVisibility: 'FRIENDS',
   showHolderNames: false,
+  friendsOfFriendsAccess: false,
+  loanRequestsPaused: false,
+  defaultLoanTermDays: null,
+  ownerDueReminders: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 })
 

@@ -2,10 +2,20 @@
 
 import {
   clearStashedInviteToken,
+  inviteLinkFor,
   readStashedInviteToken,
   stashInviteToken,
   tokenFromHash,
 } from './invite-token'
+
+describe('inviteLinkFor', () => {
+  it('puts the token in the fragment, and tokenFromHash reads it back', () => {
+    const link = inviteLinkFor('a b/c', 'https://bookswap.example')
+
+    expect(link).toBe('https://bookswap.example/invite#a%20b%2Fc')
+    expect(tokenFromHash(new URL(link).hash)).toBe('a b/c')
+  })
+})
 
 describe('tokenFromHash', () => {
   it('reads and decodes the fragment', () => {

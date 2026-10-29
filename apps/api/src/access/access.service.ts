@@ -12,6 +12,9 @@ import type { FriendshipModel } from '../generated/prisma/models'
  */
 export type FriendshipReader = Pick<PrismaService, 'friendship'>
 
+/** `roleOf` also reads the owner's friends-of-friends switch (BS-148). */
+export type AccessReader = Pick<PrismaService, 'friendship' | 'user'>
+
 /**
  * Єдине місце, де питання «а чи можна цьому це бачити» перетворюється на запит
  * до бази.
@@ -68,19 +71,80 @@ export class AccessService {
    * лишити заблокованому доступ до `PUBLIC`-бібліотеки, а §6.2 каже «не бачить
    * бібліотеку» без застережень про `Visibility`. Різниця помітна не одразу — саме
    * тому вона тут, в одному місці, а не в кожному контролері окремо.
+   *
+   * BS-148: whoever is neither may still be a friend of a friend — asked only after the block and
+   * the friendship, so a block outranks it and a friend stays a friend.
    */
   async roleOf(
     viewerId: string,
     ownerId: string,
-    client: FriendshipReader = this.prisma,
+    client: AccessReader = this.prisma,
   ): Promise<ViewerRole> {
     if (viewerId === ownerId) return 'OWNER'
 
     const friendship = await this.findPair(viewerId, ownerId, client)
 
     if (friendship?.status === 'BLOCKED') return 'BLOCKED'
+    if (friendship?.status === 'ACCEPTED') return 'FRIEND'
 
-    return friendship?.status === 'ACCEPTED' ? 'FRIEND' : 'OTHER'
+    const opened = await this.friendsOfFriendsAmong(viewerId, [ownerId], client)
+
+    return opened.has(ownerId) ? 'FRIEND_OF_FRIEND' : 'OTHER'
+  }
+
+  /**
+   * BS-148: which of `ownerIds` the viewer reaches as a friend of a friend — the owner opened the
+   * library to friends of friends, and the two share a mutual `ACCEPTED` friend. The owner's switch is
+   * checked here, not by callers: a mutual friend alone grants nothing.
+   *
+   * Says nothing about the pair itself: a caller asks only for owners who are neither friends nor
+   * blocked (`roleOf`, `NetworkInventoryService`). Three queries for the whole list, not per owner.
+   */
+  async friendsOfFriendsAmong(
+    viewerId: string,
+    ownerIds: readonly string[],
+    client: AccessReader = this.prisma,
+  ): Promise<Set<string>> {
+    const reached = new Set<string>()
+    const candidates = ownerIds.filter((ownerId) => ownerId !== viewerId)
+
+    if (candidates.length === 0) return reached
+
+    const opened = await client.user.findMany({
+      where: { id: { in: candidates }, friendsOfFriendsAccess: true },
+      select: { id: true },
+    })
+
+    if (opened.length === 0) return reached
+
+    const viewerFriends = await client.friendship.findMany({
+      where: { status: 'ACCEPTED', OR: [{ userAId: viewerId }, { userBId: viewerId }] },
+      select: { userAId: true, userBId: true },
+    })
+    const friendIds = viewerFriends.map((friendship) => otherIdOf(friendship, viewerId))
+
+    if (friendIds.length === 0) return reached
+
+    const openedIds = opened.map((owner) => owner.id)
+    const links = await client.friendship.findMany({
+      where: {
+        status: 'ACCEPTED',
+        OR: [
+          { userAId: { in: openedIds }, userBId: { in: friendIds } },
+          { userBId: { in: openedIds }, userAId: { in: friendIds } },
+        ],
+      },
+      select: { userAId: true, userBId: true },
+    })
+    const openedSet = new Set(openedIds)
+    const friendSet = new Set(friendIds)
+
+    for (const { userAId, userBId } of links) {
+      if (openedSet.has(userAId) && friendSet.has(userBId)) reached.add(userAId)
+      if (openedSet.has(userBId) && friendSet.has(userAId)) reached.add(userBId)
+    }
+
+    return reached
   }
 
   /** §6.2: блокування симетричне в частині доступу — напрямок тут не важить. */

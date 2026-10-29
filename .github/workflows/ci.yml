@@ -34,7 +34,8 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test
+      # Match gate.sh: concurrent Jest packages oversubscribe the runner and cause jsdom timeouts.
+      - run: pnpm turbo run test --concurrency=1
       - run: pnpm build
 
   # Окрема job, бо потребує PostgreSQL. Заразом це перевірка критерію «чиста

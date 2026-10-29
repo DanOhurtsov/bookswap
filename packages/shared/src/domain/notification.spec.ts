@@ -29,8 +29,22 @@ describe('§7.5: негайно vs дайджест', () => {
     expect(immediate.size + digest.size).toBe(NOTIFICATION_TYPE.length)
   })
 
-  it('дайджест — рівно LOAN_DUE_SOON і LOAN_OVERDUE', () => {
-    expect([...DIGEST_NOTIFICATION_TYPE].sort()).toEqual(['LOAN_DUE_SOON', 'LOAN_OVERDUE'])
+  it('дайджест — рівно LOAN_DUE_SOON, LOAN_OVERDUE і (BS-148) LOAN_DUE_SOON_OWNER', () => {
+    expect([...DIGEST_NOTIFICATION_TYPE].sort()).toEqual([
+      'LOAN_DUE_SOON',
+      'LOAN_DUE_SOON_OWNER',
+      'LOAN_OVERDUE',
+    ])
+  })
+
+  it('нагадування власнику має ті самі типові канали, що й нагадування позичальнику', () => {
+    for (const telegramLinked of [false, true]) {
+      for (const channel of ['IN_APP', 'EMAIL', 'TELEGRAM'] as const) {
+        expect(defaultPreferenceEnabled('LOAN_DUE_SOON_OWNER', channel, { telegramLinked })).toBe(
+          defaultPreferenceEnabled('LOAN_DUE_SOON', channel, { telegramLinked }),
+        )
+      }
+    }
   })
 
   it.each(DIGEST_NOTIFICATION_TYPE)('%s розпізнається як дайджестовий', (type) => {

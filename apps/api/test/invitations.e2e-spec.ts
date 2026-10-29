@@ -153,9 +153,12 @@ describe('Invitations (e2e)', () => {
       )
 
       expect(resolved.state).toBe('ACTIVE')
+      const inviterRow = await prisma.user.findUniqueOrThrow({ where: { id: inviter.id } })
+
       expect(resolved.inviter).toEqual({
         id: inviter.id,
         displayName: 'Запрошувачка',
+        handle: inviterRow.handle,
         avatarUrl: null,
       })
       expect(resolved.relation).toBe('NONE')
@@ -184,7 +187,7 @@ describe('Invitations (e2e)', () => {
       const { token } = await createLink(inviter)
       const body = (await resolve(invitee, token).expect(200)).body as { inviter: object }
 
-      expect(Object.keys(body.inviter).sort()).toEqual(['avatarUrl', 'displayName', 'id'])
+      expect(Object.keys(body.inviter).sort()).toEqual(['avatarUrl', 'displayName', 'handle', 'id'])
     })
 
     it('запрошувач отримує сповіщення про згоду, обидві сторони — подію FRIEND_ACCEPTED', async () => {

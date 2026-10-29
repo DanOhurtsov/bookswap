@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { FriendRelation, UserSearchResult } from '@bookswap/shared'
 import { UserPlusIcon } from 'lucide-react'
+import { personHref } from '@/app/lib/person-href'
 import { UserAvatar } from '@/components/Friends/UserAvatar'
 import { Button } from '@/components/ui/button'
 import type { FoundUserActions } from '../model/use-found-user-actions'
@@ -54,7 +55,7 @@ function FoundUserRow({ result, actions }: FoundUserRowProps) {
       <div className="min-w-0 flex-1">
         {LINKED_RELATIONS.has(relation) ? (
           <Link
-            href={`/users/${encodeURIComponent(user.id)}/library`}
+            href={personHref(user)}
             className="block truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             {user.displayName}

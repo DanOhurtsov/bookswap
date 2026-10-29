@@ -32,10 +32,16 @@ const user: Me = {
   email: 'reader@example.com',
   emailVerified: true,
   displayName: 'Reader One',
+  handle: 'reader',
+  city: null,
   avatarUrl: null,
   bio: null,
   libraryVisibility: 'FRIENDS',
   showHolderNames: false,
+  friendsOfFriendsAccess: false,
+  loanRequestsPaused: false,
+  defaultLoanTermDays: null,
+  ownerDueReminders: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 
@@ -237,6 +243,7 @@ describe('NavContent', () => {
     '/friendship',
     '/users/user-2/library',
     '/users/user-2/friends',
+    '/u/marta',
     '/copies/copy-1/history',
   ])('on %s no header entry is marked current', async (pathname) => {
     mockPathname = pathname

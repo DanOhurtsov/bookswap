@@ -12,7 +12,7 @@ import {
   type UpdateLoanRequest,
 } from '@bookswap/shared'
 import { AccessService, blocked } from '../access/access.service'
-import { copyVisibleTo } from '../access/visibility'
+import { copyVisibleTo, mayRequestLoan } from '../access/visibility'
 import { AnalyticsService } from '../analytics/analytics.service'
 import type { ProductEventType } from '../analytics/product-event.types'
 import { ApiException } from '../common/api.exception'
@@ -241,7 +241,7 @@ export class LoanService {
           status: true,
           visibility: true,
           archivedAt: true,
-          owner: { select: { libraryVisibility: true } },
+          owner: { select: { libraryVisibility: true, loanRequestsPaused: true } },
         },
       })
 
@@ -262,9 +262,9 @@ export class LoanService {
 
       if (role === 'BLOCKED') throw blocked()
 
-      // §9: «Створити запит на позичання | Власник — | Друг ✓ | Інший ✗».
-      // Саме ACCEPTED: запит у друзі дружбою не є.
-      if (role !== 'FRIEND') {
+      // §9: «Створити запит на позичання | Власник — | Друг ✓ | Інший ✗»; BS-148: друг друга — ✓,
+      // якщо власник відкрив йому бібліотеку. Саме ACCEPTED: запит у друзі дружбою не є.
+      if (!mayRequestLoan(role)) {
         throw new ApiException(
           API_ERROR_CODES.FORBIDDEN,
           'Просити книжку можна лише в друзів',
@@ -276,6 +276,16 @@ export class LoanService {
       // власної. Невидиме не існує — тому 404, а не 403.
       if (!copyVisibleTo(role, copy.owner.libraryVisibility, copy.visibility)) {
         throw notFound('Примірника не знайдено')
+      }
+
+      // BS-148: the owner paused requests. Checked only after access and visibility, so the pause is
+      // told only to someone who could otherwise ask; a stranger still gets 403/404.
+      if (copy.owner.loanRequestsPaused) {
+        throw new ApiException(
+          API_ERROR_CODES.LOAN_REQUESTS_PAUSED,
+          'Власник тимчасово не приймає запитів на позичання',
+          HttpStatus.CONFLICT,
+        )
       }
 
       // §5.1: «Copy.status = AVAILABLE». Перевірка тримача не надлишкова попри

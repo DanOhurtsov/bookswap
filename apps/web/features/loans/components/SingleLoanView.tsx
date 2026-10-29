@@ -60,7 +60,7 @@ export function SingleLoanView({ user, loanId }: SingleLoanViewProps) {
         <ul className="books">
           <LoanCard
             loan={state.data.loan}
-            userId={user.id}
+            user={user}
             busyKey={actions.busyKey}
             onAct={actions.act}
             onConfirm={actions.setConfirmation}

@@ -1284,3 +1284,181 @@ a:focus-visible > .link-underline {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Профіль (BS-148) ------------------------------------------------------ */
+/*
+ * The canvas «Profile Page» palette, only while a profile is on the page (`.profile-theme` on its
+ * <main>): the app's own tokens take the profile's values there, so the shared controls inside it —
+ * fields, switches, selects, the header above — match the profile, and every other page keeps the
+ * app palette. Plain CSS keyed on the theme class the head script sets before the first paint, so the
+ * dark profile never flashes light.
+ */
+body:has(.profile-theme) {
+  --profile-page: #faf9f6;
+  --profile-surface: #ffffff;
+  --profile-subtle: #f3f3f0;
+  --profile-border: #e5e7e2;
+  --profile-text: #18221d;
+  --profile-muted: #66716b;
+  --profile-accent: #286747;
+  --profile-accent-hover: #1f5239;
+  --profile-accent-subtle: #e7f2e9;
+  /* Light theme: the call to action is the accent itself. */
+  --profile-cta-bg: #286747;
+  --profile-cta-hover: #1f5239;
+  --profile-on-cta: #ffffff;
+  --profile-cover-shadow: 0 6px 16px rgba(20, 28, 24, 0.16);
+  --profile-cover-shadow-raised:
+    0 14px 28px rgba(20, 28, 24, 0.22), 0 4px 8px rgba(20, 28, 24, 0.08);
+  --profile-cover-shadow-pressed: 0 3px 8px rgba(20, 28, 24, 0.16);
+
+  --bg: var(--profile-page);
+  --fg: var(--profile-text);
+  --line: var(--profile-border);
+  --field-bg: var(--profile-surface);
+  --bookswap-muted: var(--profile-muted);
+  --bookswap-accent: var(--profile-accent);
+  --background: var(--profile-surface);
+  --foreground: var(--profile-text);
+  --border: var(--profile-border);
+  --input: var(--profile-border);
+  --ring: var(--profile-accent);
+  --muted: var(--profile-subtle);
+  --muted-foreground: var(--profile-muted);
+  --accent: var(--profile-subtle);
+  --accent-foreground: var(--profile-text);
+}
+
+.dark body:has(.profile-theme) {
+  --profile-page: #171b18;
+  --profile-surface: #202621;
+  --profile-subtle: #29312b;
+  --profile-border: #3b473e;
+  --profile-text: #eef2ea;
+  --profile-muted: #b0bcaf;
+  /* Dark theme: a lighter green for links and icons, the saturated one behind white text. */
+  --profile-accent: #9bc7a8;
+  --profile-accent-hover: #b6d8bf;
+  --profile-accent-subtle: #2b4032;
+  --profile-cta-bg: #286747;
+  --profile-cta-hover: #327d57;
+  --profile-on-cta: #ffffff;
+  /* Darker shadows read on a dark page; the hairline keeps a dark cover off a dark background. */
+  --profile-cover-shadow: 0 0 0 1px rgba(238, 242, 234, 0.08), 0 6px 16px rgba(0, 0, 0, 0.45);
+  --profile-cover-shadow-raised:
+    0 0 0 1px rgba(238, 242, 234, 0.12), 0 14px 28px rgba(0, 0, 0, 0.55),
+    0 4px 8px rgba(0, 0, 0, 0.35);
+  --profile-cover-shadow-pressed:
+    0 0 0 1px rgba(238, 242, 234, 0.08), 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * A cover on the profile shelf: the picture, or a cover drawn from the title and the author. The lift,
+ * the shadow and the focus ring belong to the box, so a picture gets them too; the spine and the
+ * lettering only to the drawn one.
+ */
+.profile-cover {
+  display: block;
+  aspect-ratio: 2 / 3;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px 8px 8px 4px;
+  box-shadow: var(--profile-cover-shadow);
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease-out;
+}
+
+.profile-cover > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-cover--drawn {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 8px 10px 12px;
+  background: var(--cover-light-bg);
+  color: var(--cover-light-fg);
+  box-shadow:
+    inset 4px 0 0 rgba(0, 0, 0, 0.14),
+    var(--profile-cover-shadow);
+}
+
+.dark .profile-cover--drawn {
+  background: var(--cover-dark-bg);
+  color: var(--cover-dark-fg);
+}
+
+.profile-cover__title,
+.profile-cover__author {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.profile-cover__title {
+  -webkit-line-clamp: 5;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Full strength, not the canvas's 0.85: faded, six light pairs drop under 4.5:1. */
+.profile-cover__author {
+  -webkit-line-clamp: 2;
+  font-size: 9px;
+  line-height: 11px;
+}
+
+.profile-book:focus-visible {
+  outline: none;
+}
+
+.profile-book:hover .profile-cover,
+.profile-book:focus-visible .profile-cover {
+  transform: translateY(-4px);
+  box-shadow: var(--profile-cover-shadow-raised);
+}
+
+.profile-book:hover .profile-cover--drawn,
+.profile-book:focus-visible .profile-cover--drawn {
+  box-shadow:
+    inset 4px 0 0 rgba(0, 0, 0, 0.14),
+    var(--profile-cover-shadow-raised);
+}
+
+.profile-book:focus-visible .profile-cover {
+  outline: 2px solid var(--profile-accent);
+  outline-offset: 3px;
+}
+
+.profile-book:active .profile-cover {
+  transform: translateY(0);
+  box-shadow: var(--profile-cover-shadow-pressed);
+  transition-duration: 0.08s;
+}
+
+.profile-book:active .profile-cover--drawn {
+  box-shadow:
+    inset 4px 0 0 rgba(0, 0, 0, 0.14),
+    var(--profile-cover-shadow-pressed);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-cover {
+    transition: none;
+  }
+
+  .profile-book:hover .profile-cover,
+  .profile-book:focus-visible .profile-cover,
+  .profile-book:active .profile-cover {
+    transform: none;
+  }
+}

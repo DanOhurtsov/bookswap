@@ -69,6 +69,45 @@ function digestSubject(view: NotificationView): string {
   return count === 1 ? book(view.bookTitle) : books(count)
 }
 
+/** Genitive month names: «2 листопада». */
+const MONTHS_GENITIVE = [
+  'січня',
+  'лютого',
+  'березня',
+  'квітня',
+  'травня',
+  'червня',
+  'липня',
+  'серпня',
+  'вересня',
+  'жовтня',
+  'листопада',
+  'грудня',
+] as const
+
+/** `YYYY-MM-DD` → «2 листопада»; anything else — `null`, and the sentence goes without a date. */
+function dayAndMonth(date: string | undefined): string | null {
+  const match = /^\d{4}-(\d{2})-(\d{2})$/.exec(date ?? '')
+  const month = MONTHS_GENITIVE[Number(match?.[1]) - 1]
+
+  return match === null || month === undefined ? null : `${String(Number(match[2]))} ${month}`
+}
+
+/**
+ * BS-148: «Люба має повернути „1984“ до 2 листопада» — one book; «Скоро мають повернути 3 книжки» —
+ * several. The borrower is named only when the payload has one (`actorId`); a guest never is.
+ */
+function ownerReminderHeadline(view: NotificationView): string {
+  const count = digestCount(view.payload)
+
+  if (count > 1) return `Скоро мають повернути ${books(count)}`
+
+  const due = dayAndMonth(view.payload.dueDate)
+  const until = due === null ? '' : ` до ${due}`
+
+  return `${view.actorName ?? 'Позичальник'} має повернути ${book(view.bookTitle)}${until}`
+}
+
 function loanLink(view: NotificationView): string | null {
   // Stage 10 (10i.3): відповідь гостя веде на екран гостьових позик власника (запит, а не зареєстрована позика).
   if (isGuestResponseNotificationType(view.type)) {
@@ -81,9 +120,14 @@ function loanLink(view: NotificationView): string | null {
 
   const loanId = view.payload.loanId
 
-  return loanId === undefined
-    ? null
-    : `${view.webOrigin}/loans?loanId=${encodeURIComponent(loanId)}`
+  if (loanId === undefined) return null
+
+  // BS-148: an owner's reminder about a guest loan — guest loans have their own screen.
+  if (view.payload.guestLoan === 'true') {
+    return `${view.webOrigin}/loans/guest?loanId=${encodeURIComponent(loanId)}`
+  }
+
+  return `${view.webOrigin}/loans?loanId=${encodeURIComponent(loanId)}`
 }
 
 /**
@@ -140,6 +184,8 @@ function headline(view: NotificationView): string {
       return `Скоро повертати ${digestSubject(view)}`
     case 'LOAN_OVERDUE':
       return `Час повертати ${digestSubject(view)}: термін минув`
+    case 'LOAN_DUE_SOON_OWNER':
+      return ownerReminderHeadline(view)
     case 'FRIEND_REQUESTED':
       return `${who} хоче додати вас у друзі`
     case 'FRIEND_ACCEPTED':
@@ -192,6 +238,8 @@ function callToAction(view: NotificationView): string {
       return 'Книжка тепер позначена як передана гостю з підтвердженням гостя.'
     case 'GUEST_LOAN_DENIED':
       return 'Це розбіжність, а не повернення: примірник лишається недоступним, доки ви не вирішите, що з нею робити.'
+    // BS-148: the owner's reminder is for their information; returning is the borrower's move.
+    case 'LOAN_DUE_SOON_OWNER':
     case 'LOAN_RECORD_WITHDRAWN':
     case 'LOAN_REJECTED':
     case 'LOAN_CANCELLED':
@@ -209,7 +257,10 @@ function link(view: NotificationView): string {
   // Дайджест на кілька книжок веде до списку, а не до першої з них: посилання на
   // один лоан із п'яти виглядало б як «ось воно» і сховало б решту.
   if (isDigestNotificationType(view.type) && digestCount(view.payload) > 1) {
-    return `${view.webOrigin}/loans?role=borrower`
+    // BS-148: the owner's reminder lists the books lent out, not the ones borrowed.
+    const role = view.type === 'LOAN_DUE_SOON_OWNER' ? 'owner' : 'borrower'
+
+    return `${view.webOrigin}/loans?role=${role}`
   }
 
   return loanLink(view) ?? `${view.webOrigin}/notifications`

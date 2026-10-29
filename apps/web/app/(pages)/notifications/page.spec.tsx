@@ -17,10 +17,16 @@ const mockState: SessionState = {
     email: 'owner@example.com',
     emailVerified: true,
     displayName: 'Owner',
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: false,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
   features: { guestLoans: true },
@@ -44,6 +50,13 @@ const NOTIFICATIONS = [
     payload: { loanId: 'loan-g2', copyId: 'copy-2', confirmationId: 'conf-2' },
     readAt: null,
     createdAt: '2026-09-29T11:00:00.000Z',
+  },
+  {
+    id: 'n-owner-guest',
+    type: 'LOAN_DUE_SOON_OWNER',
+    payload: { loanId: 'loan-g3', copyId: 'copy-4', count: '1', guestLoan: 'true' },
+    readAt: null,
+    createdAt: '2026-09-29T11:30:00.000Z',
   },
   {
     id: 'n-loan',
@@ -101,6 +114,16 @@ describe('NotificationsPage: відповіді гостя (Stage 10, 10i.3)', (
     expect(
       within(row('У вас просять книжку')).getByRole('link', { name: 'Відкрити позичання' }),
     ).toHaveAttribute('href', '/loans?loanId=loan-r1')
+  })
+
+  it('нагадування власнику про гостьову позику веде на екран гостьових позик (BS-148)', () => {
+    render(withQueryClient(<NotificationsPage />))
+
+    expect(
+      within(row('Скоро мають повернути вашу книжку')).getByRole('link', {
+        name: 'Відкрити позичання',
+      }),
+    ).toHaveAttribute('href', '/loans/guest?loanId=loan-g3')
   })
 })
 

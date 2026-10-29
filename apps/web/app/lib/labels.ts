@@ -120,6 +120,8 @@ export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>
   // Stage 10 (10i.3): відповіді гостя. IN_APP змістовно, EMAIL лише загальний лист; без нікнейма й email гостя.
   GUEST_LOAN_RECEIVED: 'Гість підтвердив отримання книжки',
   GUEST_LOAN_DENIED: 'Гість заперечує отримання книжки',
+  // BS-148: the owner's reminder three days before a lent book is due.
+  LOAN_DUE_SOON_OWNER: 'Скоро мають повернути вашу книжку',
 }
 
 /**

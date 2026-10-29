@@ -37,6 +37,7 @@ interface RequestOptions<T> {
   // клітинок матриці, а не інструкцію їх змінити, і повторний однаковий запит
   // нічого не змінює.
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** JSON, or a file (`Blob`) sent as its own bytes — BS-148: `POST /me/avatar`. */
   body?: unknown
   /** Схема з `@bookswap/shared`, якою розбирається успішна відповідь. */
   schema?: ZodType<T>
@@ -76,8 +77,7 @@ export async function apiRequestWithRedirect<T = void>(
     credentials: 'include',
     cache: 'no-store',
     signal,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...encodeBody(body),
   })
 
   const redirected = response.redirected
@@ -106,6 +106,17 @@ export async function apiRequestWithRedirect<T = void>(
   }
 
   return { data: parsed.data, redirected }
+}
+
+/**
+ * A file goes as it is: `fetch` sends a `Blob` with the blob's own type, and JSON-encoding it would
+ * send `{}`.
+ */
+function encodeBody(body: unknown): Pick<RequestInit, 'headers' | 'body'> {
+  if (body === undefined) return {}
+  if (body instanceof Blob) return { body }
+
+  return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
 }
 
 /** The common case: the body is all the caller wants. */

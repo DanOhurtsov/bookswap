@@ -27,10 +27,16 @@ function me(id: string): Me {
     email: `${id}@example.com`,
     emailVerified: true,
     displayName: id,
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: true,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2024-01-01T00:00:00.000Z',
   }
 }

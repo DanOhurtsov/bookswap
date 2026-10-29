@@ -7,7 +7,12 @@ const item = (
   workId: string,
   coverUrl: string | null = null,
 ): FriendsReadingItem => ({
-  friend: { id: friendId, displayName: `Друг ${friendId}`, avatarUrl: null },
+  friend: {
+    id: friendId,
+    displayName: `Друг ${friendId}`,
+    handle: `${friendId}-handle`,
+    avatarUrl: null,
+  },
   work: { id: workId, title: `Твір ${workId}` },
   authors: [{ id: 'a-1', name: 'Авторка', nameLatin: null, role: 'AUTHOR', position: 0 }],
   coverUrl,
@@ -84,13 +89,13 @@ describe('toFriendsReadingView (BS-137)', () => {
           coverUrl: 'https://covers.example/1.jpg',
           coverAlt: 'Обкладинка «Твір w-1»',
           authors: item('f-2', 'w-1').authors,
-          friend: { id: 'f-2', displayName: 'Друг f-2', avatarUrl: null },
-          friendHref: '/users/f-2/library',
+          friend: { id: 'f-2', displayName: 'Друг f-2', handle: 'f-2-handle', avatarUrl: null },
+          friendHref: '/u/f-2-handle',
         },
         expect.objectContaining({
           key: 'f-1:w-1',
           coverUrl: null,
-          friendHref: '/users/f-1/library',
+          friendHref: '/u/f-1-handle',
         }),
       ],
     })

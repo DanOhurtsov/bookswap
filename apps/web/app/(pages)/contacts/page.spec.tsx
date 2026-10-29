@@ -34,10 +34,16 @@ const user = {
   email: 'reader@example.com',
   emailVerified: true,
   displayName: 'Reader',
+  handle: 'reader',
+  city: null,
   avatarUrl: null,
   bio: null,
   libraryVisibility: 'FRIENDS' as const,
   showHolderNames: false,
+  friendsOfFriendsAccess: false,
+  loanRequestsPaused: false,
+  defaultLoanTermDays: null,
+  ownerDueReminders: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 

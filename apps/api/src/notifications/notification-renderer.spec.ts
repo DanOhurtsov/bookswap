@@ -270,3 +270,52 @@ describe('§7.5: дайджест агрегує', () => {
     expect(digest(1, 'LOAN_DUE_SOON').actions).toEqual([])
   })
 })
+
+describe('BS-148: нагадування власнику (LOAN_DUE_SOON_OWNER)', () => {
+  const reminder = (payload: Record<string, string>, actorName: string | null = 'Люба') =>
+    renderNotification({
+      ...base,
+      type: 'LOAN_DUE_SOON_OWNER',
+      payload: { loanId: 'loan-1', copyId: 'copy-1', count: '1', ...payload },
+      actorName,
+      bookTitle: '1984',
+    })
+
+  it('одна книжка зареєстрованому позичальнику: хто, що й до якого дня; посилання на позику', () => {
+    const rendered = reminder({ actorId: 'user-liuba', dueDate: '2026-11-02' })
+
+    expect(rendered.subject).toBe('BookSwap: Люба має повернути «1984» до 2 листопада')
+    expect(rendered.body).toContain('https://bookswap.example/loans?loanId=loan-1')
+    expect(rendered.actions).toEqual([])
+  })
+
+  it('гостьова позика: гостя не названо, посилання — на екран гостьових позик', () => {
+    const rendered = reminder({ guestLoan: 'true', dueDate: '2026-01-31' }, null)
+
+    expect(rendered.subject).toBe('BookSwap: Позичальник має повернути «1984» до 31 січня')
+    expect(rendered.body).toContain('https://bookswap.example/loans/guest?loanId=loan-1')
+  })
+
+  it('кілька книжок: кількість без назв, посилання на список «Я позичив(-ла)»', () => {
+    const rendered = reminder({ count: '3', dueDate: '2026-11-02' }, null)
+
+    expect(rendered.subject).toBe('BookSwap: Скоро мають повернути 3 книжки')
+    expect(rendered.body).toContain('https://bookswap.example/loans?role=owner')
+    expect(rendered.body).not.toContain('1984')
+  })
+
+  it('зіпсована дата не ламає речення — воно йде без дати', () => {
+    expect(reminder({ dueDate: '2026-13-02' }).subject).toBe('BookSwap: Люба має повернути «1984»')
+    expect(reminder({}).subject).toBe('BookSwap: Люба має повернути «1984»')
+  })
+
+  it('нагадування позичальнику не змінилося: веде на його список', () => {
+    const rendered = renderNotification({
+      ...base,
+      type: 'LOAN_DUE_SOON',
+      payload: { loanId: 'loan-1', copyId: 'copy-1', count: '2' },
+    })
+
+    expect(rendered.body).toContain('/loans?role=borrower')
+  })
+})

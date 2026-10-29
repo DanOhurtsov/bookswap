@@ -35,10 +35,16 @@ function me(id: string): Me {
     email: `${id}@example.com`,
     emailVerified: true,
     displayName: id,
+    handle: 'reader',
+    city: null,
     avatarUrl: null,
     bio: null,
     libraryVisibility: 'FRIENDS',
     showHolderNames: true,
+    friendsOfFriendsAccess: false,
+    loanRequestsPaused: false,
+    defaultLoanTermDays: null,
+    ownerDueReminders: true,
     createdAt: '2024-01-01T00:00:00.000Z',
   }
 }
@@ -48,7 +54,12 @@ const FEEDS: Record<string, FriendsReadingResponse> = {
     hasFriends: true,
     items: [
       {
-        friend: { id: 'friend-of-a', displayName: 'Друг А', avatarUrl: null },
+        friend: {
+          id: 'friend-of-a',
+          displayName: 'Друг А',
+          handle: 'friend-of-a',
+          avatarUrl: null,
+        },
         work: { id: 'w-a', title: 'Книжка, яку читає друг А' },
         authors: [],
         coverUrl: null,

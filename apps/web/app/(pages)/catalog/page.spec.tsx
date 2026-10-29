@@ -62,7 +62,7 @@ const candidate: CatalogDiscoveryResult = {
   matchedOn: 'TITLE',
   locations: [
     {
-      owner: { id: 'friend-1', displayName: 'Олена', avatarUrl: null },
+      owner: { id: 'friend-1', displayName: 'Олена', handle: 'olena', avatarUrl: null },
       relation: 'FRIEND',
       availableCopies: 1,
       copies: [
@@ -106,10 +106,7 @@ it('searches available copies in my circle by default and never calls external c
   renderAt()
 
   expect(await screen.findByRole('link', { name: 'Тигролови' })).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'У Олена' })).toHaveAttribute(
-    'href',
-    '/users/friend-1/library',
-  )
+  expect(screen.getByRole('link', { name: 'У Олена' })).toHaveAttribute('href', '/u/olena')
   expect(screen.getByRole('combobox', { name: 'Показувати книжки' })).toHaveTextContent(
     'Мої та друзів',
   )
@@ -138,7 +135,7 @@ it('explains public copies are not borrowable until friendship is accepted', asy
           ...candidate,
           locations: [
             {
-              owner: { id: 'other-1', displayName: 'Тарас', avatarUrl: null },
+              owner: { id: 'other-1', displayName: 'Тарас', handle: 'other-1', avatarUrl: null },
               relation: 'OTHER',
               availableCopies: 1,
               copies: [

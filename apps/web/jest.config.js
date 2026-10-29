@@ -13,6 +13,12 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
   testRegex: '.*\\.spec\\.tsx?$',
+  // Memory, not cores, is the limit. Each ts-jest worker holds its own TypeScript program plus jsdom
+  // (~330 MB). Jest's default of (cores - 1) gave 15 workers on a 16-core WSL with ~10 GB RAM: ~5 GB
+  // of workers next to the dev servers exhausted swap, and jsdom tests that take ~1s timed out at 5s
+  // in whichever suites happened to be swapped out. Measured on that machine: 15 workers — 409 s and
+  // 45 failures; 4 workers — 43 s, all green.
+  maxWorkers: 4,
   // jest-haste-map crawls the whole rootDir to build its module map before any
   // test file is even selected — testPathIgnorePatterns runs too late to help.
   // Without this, a concurrent `next build` writing to apps/web/.next races the

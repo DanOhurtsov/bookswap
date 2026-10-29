@@ -39,6 +39,13 @@ model User {
   emailVerified Boolean  @default(false)
   passwordHash  String
   displayName   String
+  // BS-148: the public nickname and the person's address (`/u/<handle>`). The database generates it
+  // (`user` + 8 digits, function `generate_user_handle()` in migration `…_profile_handle_city`), so
+  // every insert — registration, seeds, tests, an older build — gets one; the user may change it
+  // later. The format is a CHECK in the same migration (`user_handle_format`), the rules are
+  // `HANDLE_RULES` in packages/shared.
+  handle        String   @unique @default(dbgenerated("generate_user_handle()"))
+  city          String?
   avatarUrl     String?
   bio           String?
   createdAt     DateTime @default(now())
@@ -46,6 +53,17 @@ model User {
   // Видимість
   libraryVisibility Visibility @default(FRIENDS)
   showHolderNames   Boolean    @default(true)
+
+  // BS-148: lending settings (migration `…_profile_lending_settings`).
+  // Friends of friends — people with a mutual ACCEPTED friend — see and borrow like friends.
+  friendsOfFriendsAccess Boolean @default(false)
+  // New loan requests are refused (409 LOAN_REQUESTS_PAUSED); open ones are left as they are.
+  loanRequestsPaused     Boolean @default(false)
+  // 14, 21 or 30 (`LOAN_TERM_OPTIONS`, CHECK `user_default_loan_term_days`); the web app fills the
+  // due date of an approval with it. The server never applies it on its own.
+  defaultLoanTermDays    Int?
+  // `LOAN_DUE_SOON_OWNER`: the owner's reminder three days before a lent book is due.
+  ownerDueReminders      Boolean @default(true)
 
   // Канали сповіщень
   telegramChatId String? @unique
@@ -989,6 +1007,8 @@ enum NotificationType {
   /// Stage 10 (10i.3): відповідь гостя на запит підтвердження. Лише in-app (технічна пропозиція).
   GUEST_LOAN_RECEIVED
   GUEST_LOAN_DENIED
+  /// BS-148: the owner's reminder three days before a lent book is due (`User.ownerDueReminders`).
+  LOAN_DUE_SOON_OWNER
 }
 
 enum Channel {

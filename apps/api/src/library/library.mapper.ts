@@ -23,7 +23,7 @@ import {
   type WorkAuthorRow,
   type WorkRow,
 } from '../catalog/catalog.mapper'
-import type { ViewerRole } from '../access/visibility'
+import { mayRequestLoan, type ViewerRole } from '../access/visibility'
 import { toPublicUser, type PublicUserRow } from '../users/user.mapper'
 import type { CopyModel, LoanModel } from '../generated/prisma/models'
 
@@ -183,8 +183,8 @@ export function expectedReturnOf(
  * Рахується на сервері, бо це авторизаційне питання. `/users/:id/library`
  * доступний не лише другові: §9 віддає `PUBLIC`-полицю будь-кому, а власнику —
  * його власну завжди. Малювати кнопку за `status === 'AVAILABLE'` означало б
- * показувати її тому, хто гарантовано отримає 403 `FORBIDDEN`, 400 `LOAN_SELF`
- * або 409 `LOAN_DUPLICATE_REQUEST`.
+ * показувати її тому, хто гарантовано отримає 403 `FORBIDDEN`, 400 `LOAN_SELF`,
+ * 409 `LOAN_REQUESTS_PAUSED` (BS-148) або 409 `LOAN_DUPLICATE_REQUEST`.
  *
  * Умови — рівно ті, що перевіряє `LoanService.request()`, і в тому самому
  * порядку. Це свідоме дублювання **предиката**, а не правил: правила лишаються
@@ -197,9 +197,11 @@ export function canRequestCopy(
   },
   role: ViewerRole,
   viewerId: string,
+  ownerPausedRequests: boolean,
 ): boolean {
-  if (role !== 'FRIEND') return false
+  if (!mayRequestLoan(role)) return false
   if (copy.ownerId === viewerId) return false
+  if (ownerPausedRequests) return false
   if (copy.status !== 'AVAILABLE') return false
   if (!isHome(copy)) return false
 
@@ -263,6 +265,8 @@ export interface Viewer {
   role: ViewerRole
   /** §6.6: чи дозволено показувати імена тримачів. Рішення вже ухвалене. */
   showHolderNames: boolean
+  /** BS-148: the shelf's owner paused loan requests (`User.loanRequestsPaused`). */
+  ownerPausedRequests: boolean
 }
 
 export function toVisibleCopy(copy: CopyRow, viewer: Viewer): VisibleCopy {
@@ -281,7 +285,7 @@ export function toVisibleCopy(copy: CopyRow, viewer: Viewer): VisibleCopy {
     // Тільки свій лоан. Чиї ще запити висять на цьому примірнику — не справа
     // гостя бібліотеки: `pendingRequestCount` існує лише у власника.
     myActiveLoan: viewerLoanOf(copy, viewer.id),
-    canRequest: canRequestCopy(copy, viewer.role, viewer.id),
+    canRequest: canRequestCopy(copy, viewer.role, viewer.id, viewer.ownerPausedRequests),
     expectedReturnAt: expectedReturnOf(copy),
   }
 }
