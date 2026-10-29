@@ -1,10 +1,10 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Me } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { resendEmailVerification } from '../api/profile-requests'
 import { ProfileEditForm } from './ProfileEditForm'
@@ -15,13 +15,10 @@ import { ProfileView } from './ProfileView'
  * nothing renders an editor before there is an owner to edit.
  */
 export function ProfileScreen() {
-  const router = useRouter()
   const { state, setUser } = useSession()
 
   // Захист сторінки: гостя відправляємо на логін, щойно це стало відомо.
-  useEffect(() => {
-    if (state.status === 'guest') router.replace('/login')
-  }, [state.status, router])
+  useGuestRedirect(state.status)
 
   if (state.status === 'loading') {
     return (

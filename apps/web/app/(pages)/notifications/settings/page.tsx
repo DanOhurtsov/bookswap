@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   DIGEST_NOTIFICATION_TYPE,
@@ -31,6 +30,7 @@ import {
 import { displayDecision } from '../../../lib/resource-state'
 import { useNotificationPreferences } from '../../../lib/use-notification-preferences'
 import { useSession } from '../../../lib/use-session'
+import { useGuestRedirect } from '../../../lib/use-login-redirect'
 
 /**
  * §7.6 і §7.4: матриця «тип події × канал», стан каналів і прив'язка Telegram.
@@ -40,12 +40,9 @@ import { useSession } from '../../../lib/use-session'
  * `app/lib`, і злиття дефолтів із збереженим станом мусить бути перевіреним.
  */
 export default function NotificationSettingsPage() {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

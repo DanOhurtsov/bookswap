@@ -433,11 +433,12 @@ describe('ProfileScreen: сесія', () => {
 
   it('гостя переадресовує на логін', async () => {
     apiRequest.mockRejectedValue(new ApiRequestError(401, { code: 'UNAUTHORIZED', message: '' }))
+    window.history.replaceState(null, '', '/profile')
     renderProfile()
 
     expect(await screen.findByText('Потрібен вхід. Переадресовую…')).toBeInTheDocument()
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith('/login')
+      expect(mockReplace).toHaveBeenCalledWith('/login?returnTo=%2Fprofile')
     })
     expect(screen.queryByRole('button', { name: 'Редагувати профіль' })).not.toBeInTheDocument()
   })

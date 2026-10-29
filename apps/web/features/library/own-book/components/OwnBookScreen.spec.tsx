@@ -280,10 +280,11 @@ describe('OwnBookScreen: other states', () => {
 
   it('sends a guest to the login page and asks for no copy', async () => {
     useSession.mockReturnValue({ state: { status: 'guest' }, reload: jest.fn() })
+    window.history.replaceState(null, '', '/library/copy-1#note')
     renderScreen()
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith('/login')
+      expect(mockReplace).toHaveBeenCalledWith('/login?returnTo=%2Flibrary%2Fcopy-1%23note')
     })
     expect(apiRequest).not.toHaveBeenCalled()
   })

@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useParams } from 'next/navigation'
+import { useState, type ReactNode } from 'react'
 import type { VisibleCopy, VisibleLibraryGroup } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
 import { RequestCopyForm } from '@/components/RequestCopyForm'
@@ -11,6 +11,7 @@ import { ApiRequestError, apiRequest, describeError } from '../../../../lib/api'
 import { CONDITION_LABELS, COPY_STATUS_LABELS, formatDate } from '../../../../lib/labels'
 import { useFriendLibrary } from '../../../../lib/use-library'
 import { useSession } from '../../../../lib/use-session'
+import { LoginLink, useGuestRedirect } from '../../../../lib/use-login-redirect'
 
 /**
  * §6.5: бібліотека іншої людини.
@@ -27,15 +28,12 @@ import { useSession } from '../../../../lib/use-session'
  */
 export default function FriendLibraryPage() {
   const parameters = useParams<{ id: string }>()
-  const router = useRouter()
   const { state: session, reload: reloadSession } = useSession()
   const { state, reload } = useFriendLibrary(parameters.id)
   const [failure, setFailure] = useState<unknown>()
   const [busyKey, setBusyKey] = useState<string>()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   async function requestCopy(copyId: string, body: Record<string, unknown>): Promise<void> {
     setFailure(undefined)
@@ -72,7 +70,7 @@ export default function FriendLibraryPage() {
           <button type="button" onClick={reloadSession}>
             Спробувати ще раз
           </button>{' '}
-          · <Link href="/login">Увійти</Link>
+          · <LoginLink>Увійти</LoginLink>
         </p>
       </Shell>
     )

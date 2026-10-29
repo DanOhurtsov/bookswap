@@ -21,6 +21,7 @@ import {
 import { readSearchAddress, type SearchAddress } from '@/app/lib/search-page'
 import { discoveryNextPage, useCatalogDiscovery } from '@/app/lib/use-catalog'
 import { useSession } from '@/app/lib/use-session'
+import { useGuestRedirect } from '@/app/lib/use-login-redirect'
 import { FieldErrors, validate } from '@/app/lib/validation'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { SelectField, TextField, labelledOptions } from '@/components/Form/FormFields'
@@ -71,12 +72,9 @@ const TRANSLATION_OPTIONS = labelledOptions(CATALOG_DISCOVERY_TRANSLATION, TRANS
 
 /** The session guard: the search below needs the viewer, whose cached pages it reads. */
 function CatalogDiscovery() {
-  const router = useRouter()
   const { state: session } = useSession()
 
-  useEffect(() => {
-    if (session.status === 'guest') router.replace('/login')
-  }, [session.status, router])
+  useGuestRedirect(session.status)
 
   if (session.status === 'loading') {
     return (

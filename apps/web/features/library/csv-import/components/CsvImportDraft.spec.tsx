@@ -701,9 +701,13 @@ it('sends the person to log in on 401', async () => {
     new ApiRequestError(401, { code: 'UNAUTHORIZED', message: 'Потрібен вхід' }),
   )
 
+  window.history.replaceState(null, '', '/library/imports/import-1?rows=skipped')
   renderDraft()
 
-  expect(await screen.findByRole('link', { name: 'Увійти' })).toHaveAttribute('href', '/login')
+  expect(await screen.findByRole('link', { name: 'Увійти' })).toHaveAttribute(
+    'href',
+    '/login?returnTo=%2Flibrary%2Fimports%2Fimport-1%3Frows%3Dskipped',
+  )
 })
 
 it('offers a manual retry when the network is down', async () => {

@@ -86,21 +86,26 @@ describe('ворота сесії', () => {
 
   it('гість: повідомлення, перехід на вхід і жодних запитів', () => {
     mockSession = { status: 'guest' }
+    window.history.replaceState(null, '', '/catalog/new')
     renderScreen()
 
     expect(screen.getByText('Потрібен вхід. Переадресовую…')).toBeInTheDocument()
     expect(mockRouter.replace).toHaveBeenCalledTimes(1)
-    expect(mockRouter.replace).toHaveBeenCalledWith('/login')
+    expect(mockRouter.replace).toHaveBeenCalledWith('/login?returnTo=%2Fcatalog%2Fnew')
     expect(mockApiRequest).not.toHaveBeenCalled()
   })
 
   it('гість із зіпсованою сторінкою в адресі: адресу не чіпають, лише ведуть на вхід', () => {
     mockSession = { status: 'guest' }
     mockSearchParams = new URLSearchParams('q=кобзар&page=abc')
+    window.history.replaceState(null, '', '/catalog/new?q=кобзар&page=abc')
     renderScreen()
 
+    // The address goes along untouched: correcting it is the screen's job once signed in.
     expect(mockRouter.replace).toHaveBeenCalledTimes(1)
-    expect(mockRouter.replace).toHaveBeenCalledWith('/login')
+    expect(mockRouter.replace).toHaveBeenCalledWith(
+      `/login?returnTo=${encodeURIComponent('/catalog/new?q=%D0%BA%D0%BE%D0%B1%D0%B7%D0%B0%D1%80&page=abc')}`,
+    )
   })
 
   it('автентифікований: екран пошуку й запит за адресою', async () => {
