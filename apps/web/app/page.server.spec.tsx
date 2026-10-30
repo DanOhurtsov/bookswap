@@ -20,8 +20,8 @@ jest.mock('@/features/reading-status/index.client', () => ({
   ),
 }))
 
-jest.mock('@/features/friends-reading/index.client', () => ({
-  FriendsReading: () => <p>Friends reading</p>,
+jest.mock('@/features/friends-new-books/index.client', () => ({
+  FriendsNewBooks: () => <p>Friends new books</p>,
 }))
 
 jest.mock('@/features/home/index.client', () => ({
@@ -73,14 +73,14 @@ describe('page composition', () => {
     },
   )
 
-  it('orders the page: greeting, reading stats, «what my friends are reading» (BS-137, BS-147)', async () => {
+  it('orders the page: greeting, reading stats, «new in my friends’ libraries» (BS-147)', async () => {
     mockFetch.mockResolvedValue({ status: 'ready' })
 
     render(await HomePage())
 
     const greeting = screen.getByText(/Greeting, known guest/)
     const stats = screen.getByText('Stats seed: ready')
-    const friends = screen.getByText('Friends reading')
+    const friends = screen.getByText('Friends new books')
 
     expect(greeting.nextElementSibling).toBe(stats)
     expect(stats.nextElementSibling).toBe(friends)

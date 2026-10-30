@@ -78,6 +78,12 @@ beforeAll(async () => {
   edition = await createLongTitleCopy(viewer.account)
 }, 240_000)
 
+// Each test's pages are closed when it ends: left open to `afterAll`, the contexts of every width and
+// theme pile up in one Chromium for the whole file.
+afterEach(async () => {
+  for (const context of contexts.splice(0)) await context.close().catch(() => undefined)
+})
+
 afterAll(async () => {
   for (const context of contexts) await context.close().catch(() => undefined)
 

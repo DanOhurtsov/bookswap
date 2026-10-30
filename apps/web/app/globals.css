@@ -1463,35 +1463,44 @@ body:has(.canvas-theme) {
   line-height: 11px;
 }
 
-.profile-book:focus-visible {
+/* A book on a canvas shelf is one link: the cover lifts on hover and carries the focus ring. */
+.profile-book:focus-visible,
+.friend-new-book:focus-visible {
   outline: none;
 }
 
 .profile-book:hover .shelf-cover,
-.profile-book:focus-visible .shelf-cover {
+.profile-book:focus-visible .shelf-cover,
+.friend-new-book:hover .shelf-cover,
+.friend-new-book:focus-visible .shelf-cover {
   transform: translateY(-4px);
   box-shadow: var(--canvas-cover-shadow-raised);
 }
 
 .profile-book:hover .shelf-cover--drawn,
-.profile-book:focus-visible .shelf-cover--drawn {
+.profile-book:focus-visible .shelf-cover--drawn,
+.friend-new-book:hover .shelf-cover--drawn,
+.friend-new-book:focus-visible .shelf-cover--drawn {
   box-shadow:
     inset 4px 0 0 rgba(0, 0, 0, 0.14),
     var(--canvas-cover-shadow-raised);
 }
 
-.profile-book:focus-visible .shelf-cover {
+.profile-book:focus-visible .shelf-cover,
+.friend-new-book:focus-visible .shelf-cover {
   outline: 2px solid var(--canvas-accent);
   outline-offset: 3px;
 }
 
-.profile-book:active .shelf-cover {
+.profile-book:active .shelf-cover,
+.friend-new-book:active .shelf-cover {
   transform: translateY(0);
   box-shadow: var(--canvas-cover-shadow-pressed);
   transition-duration: 0.08s;
 }
 
-.profile-book:active .shelf-cover--drawn {
+.profile-book:active .shelf-cover--drawn,
+.friend-new-book:active .shelf-cover--drawn {
   box-shadow:
     inset 4px 0 0 rgba(0, 0, 0, 0.14),
     var(--canvas-cover-shadow-pressed);
@@ -1504,7 +1513,10 @@ body:has(.canvas-theme) {
 
   .profile-book:hover .shelf-cover,
   .profile-book:focus-visible .shelf-cover,
-  .profile-book:active .shelf-cover {
+  .profile-book:active .shelf-cover,
+  .friend-new-book:hover .shelf-cover,
+  .friend-new-book:focus-visible .shelf-cover,
+  .friend-new-book:active .shelf-cover {
     transform: none;
   }
 }

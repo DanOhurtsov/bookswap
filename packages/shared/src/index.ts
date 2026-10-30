@@ -740,6 +740,13 @@ export {
   type VerifyGuestCodeResponse,
 } from './contracts/guest-loan-response'
 export {
+  FRIENDS_NEW_BOOKS_LIMITS,
+  friendsNewBookSchema,
+  friendsNewBooksResponseSchema,
+  type FriendsNewBook,
+  type FriendsNewBooksResponse,
+} from './contracts/friends-new-books'
+export {
   FRIENDS_READING_LIMITS,
   READING_LIST_LIMITS,
   READING_STATUS_BATCH_LIMITS,

@@ -22,6 +22,7 @@ const KNOWN_FEATURES = [
   'features/friend-requests',
   'features/user-search',
   'features/friends-reading',
+  'features/friends-new-books',
   'features/home',
 ]
 
