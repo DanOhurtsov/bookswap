@@ -386,15 +386,17 @@ describe('BS-137: «Що читають мої друзі» на головні�
     expect(new Set(feedRequests)).toEqual(new Set([`GET ${FEED_PATH}`]))
   })
 
+  // BS-147: from 1440 up the home page holds its sections in the canvas's 1120 px container, where the
+  // grid fits three columns — as at 1024. Sub-stage D replaces the grid with a rail.
   const WIDTHS: [number, number][] = [
     [375, 1],
     [768, 2],
     [1024, 3],
-    [1440, 4],
+    [1440, 3],
   ]
 
   for (const theme of THEMES) {
-    it(`сітка 1–4 колонки (375/768/1024/1440), ${theme} тема: картки в межах, довга назва переноситься, однакова обкладинка`, async () => {
+    it(`сітка 1–3 колонки (375/768/1024/1440), ${theme} тема: картки в межах, довга назва переноситься, однакова обкладинка`, async () => {
       const { viewer, friends, works } = await feedOfFive(`bs137-grid-${theme}`)
       const [shared, long, bare] = [works[0]!, works[1]!, works[2]!]
 

@@ -7,7 +7,8 @@ import HomePage from './page'
 
 /**
  * BS-145: the home page stays a server component that only composes — the stats are read on the
- * server and handed to their client leaf, and the rest of the page is what it was.
+ * server and handed to their client leaf. BS-147: the greeting tops the page and learns from the same
+ * snapshot whether the server saw a guest; the DEV health block is no longer on it.
  */
 jest.mock('@/features/reading-status', () => ({
   fetchReadingStatsSnapshot: jest.fn(),
@@ -23,8 +24,10 @@ jest.mock('@/features/friends-reading/index.client', () => ({
   FriendsReading: () => <p>Friends reading</p>,
 }))
 
-jest.mock('@/components/DEV/HealthStatus', () => ({
-  HealthStatus: () => <p>Health boundary</p>,
+jest.mock('@/features/home/index.client', () => ({
+  HomeGreeting: ({ knownGuest }: { knownGuest: boolean }) => (
+    <p>Greeting, known guest: {String(knownGuest)}</p>
+  ),
 }))
 
 const { fetchReadingStatsSnapshot: mockFetch } = jest.requireMock<{
@@ -42,6 +45,10 @@ describe('the / route stays routing-only', () => {
   it('holds no stats UI or state of its own', () => {
     expect(source).not.toMatch(/useState|useQuery|Не читав|Прочитано/)
   })
+
+  it('no longer shows the DEV health block (BS-147)', () => {
+    expect(source).not.toContain('HealthStatus')
+  })
 })
 
 describe('page composition', () => {
@@ -49,30 +56,34 @@ describe('page composition', () => {
     mockFetch.mockReset()
   })
 
-  it.each(['ready', 'guest', 'error'])(
-    'reads the stats once on the server and hands the %s snapshot to the block, keeping the rest',
-    async (status) => {
+  it.each([
+    ['ready', false],
+    ['guest', true],
+    ['error', false],
+  ])(
+    'reads the stats once on the server, hands the %s snapshot to the block and tells the greeting',
+    async (status, knownGuest) => {
       mockFetch.mockResolvedValue({ status })
 
       render(await HomePage())
 
       expect(mockFetch).toHaveBeenCalledTimes(1)
       expect(screen.getByText(`Stats seed: ${status}`)).toBeInTheDocument()
-      expect(screen.getByRole('heading', { level: 1, name: 'BookSwap' })).toBeInTheDocument()
-      expect(screen.getByText(/Сервіс обміну фізичними книжками/)).toBeInTheDocument()
-      expect(screen.getByText('Health boundary')).toBeInTheDocument()
+      expect(screen.getByText(`Greeting, known guest: ${String(knownGuest)}`)).toBeInTheDocument()
     },
   )
 
-  it('places «what my friends are reading» right after the reading stats and before HealthStatus (BS-137)', async () => {
+  it('orders the page: greeting, reading stats, «what my friends are reading» (BS-137, BS-147)', async () => {
     mockFetch.mockResolvedValue({ status: 'ready' })
 
     render(await HomePage())
 
+    const greeting = screen.getByText(/Greeting, known guest/)
     const stats = screen.getByText('Stats seed: ready')
     const friends = screen.getByText('Friends reading')
 
+    expect(greeting.nextElementSibling).toBe(stats)
     expect(stats.nextElementSibling).toBe(friends)
-    expect(friends.nextElementSibling).toBe(screen.getByText('Health boundary'))
+    expect(friends.nextElementSibling).toBeNull()
   })
 })

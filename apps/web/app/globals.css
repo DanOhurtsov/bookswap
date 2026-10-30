@@ -1204,9 +1204,7 @@ a:focus-visible > .link-underline {
   height: 0.5rem;
 }
 
-/* The home page's reading stats lead to the library with the same call to action (BS-145). */
-.activation__cta,
-.reading-stats__cta {
+.activation__cta {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
@@ -1230,59 +1228,106 @@ a:focus-visible > .link-underline {
   font-size: 1.05rem;
 }
 
-/* --- Статистика читання на головній (BS-145) ------------------------------ */
-.reading-stats {
-  margin: 0 0 2rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-}
-
-.reading-stats__title {
-  margin: 0 0 0.6rem;
-  font-size: 1.05rem;
-}
-
-/* Phone width: one row per status, label and count on one line. Wider: three tiles side by side. */
+/* --- Статистика читання на головній (BS-145, вигляд — BS-147) --------------- */
+/*
+ * Canvas «Main Page», «Ваше читання»: one card of three rows on a phone, three cards side by side from
+ * a tablet up. The app's tokens, which a `.canvas-theme` page maps to the canvas palette.
+ */
 .reading-stats__list {
   display: grid;
-  gap: 0.5rem;
-  margin: 0 0 0.6rem;
+  margin: 0;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--canvas-card-shadow, none);
 }
 
 .reading-stats__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
+  gap: 16px;
+  padding: 14px 16px;
 }
 
-@media (min-width: 40rem) {
-  .reading-stats__list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .reading-stats__item {
-    display: block;
-  }
-
-  .reading-stats__count {
-    margin-top: 0.15rem;
-  }
+.reading-stats__item + .reading-stats__item,
+.reading-stats__placeholder + .reading-stats__placeholder {
+  border-top: 1px solid var(--line);
 }
 
 .reading-stats__item dt {
-  color: var(--bookswap-muted);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
 }
 
 .reading-stats__count {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
+}
+
+/* While the counts load, the placeholders stand where the rows or the cards will be. */
+.reading-stats__placeholder {
+  height: 60px;
+  border-radius: 0;
+}
+
+.reading-stats__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--bookswap-muted);
+}
+
+@media (min-width: 48rem) {
+  .reading-stats__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .reading-stats__item,
+  .reading-stats__placeholder {
+    border-radius: 12px;
+  }
+
+  .reading-stats__item {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 18px 20px;
+    background: var(--field-bg);
+    border: 1px solid var(--line);
+    box-shadow: var(--canvas-card-shadow, none);
+  }
+
+  .reading-stats__item + .reading-stats__item {
+    border-top: 1px solid var(--line);
+  }
+
+  .reading-stats__item dt {
+    font-size: 14px;
+  }
+
+  .reading-stats__count {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .reading-stats__placeholder {
+    height: 82px;
+  }
+
+  .reading-stats__placeholder + .reading-stats__placeholder {
+    border-top: 0;
+  }
 }
 
 /* --- Палітра канви: профіль (BS-148), головна (BS-147) ------------------------ */
@@ -1461,5 +1506,152 @@ body:has(.canvas-theme) {
   .profile-book:focus-visible .shelf-cover,
   .profile-book:active .shelf-cover {
     transform: none;
+  }
+}
+
+/* --- Головна (BS-147) ------------------------------------------------------ */
+/* The canvas «Main Page» rhythm: its own top and bottom space inside the app's gutters. */
+.home-page {
+  padding-block: 20px 32px;
+}
+
+/*
+ * Plain CSS, not utilities: the global `h1` rule above sits outside any cascade layer, so it would win
+ * over a Tailwind class on the heading.
+ */
+.home-greeting__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.home-greeting__lede {
+  margin: 8px 0 0;
+  color: var(--bookswap-muted);
+}
+
+/* A section of the home page: its heading, then its content. */
+.home-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-section__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+/* `SectionNotice`: a compact row instead of an empty card. The action drops below on a narrow phone. */
+.section-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  padding: 14px 20px;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.section-notice__icon {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  color: var(--bookswap-muted);
+  background: var(--muted);
+}
+
+.section-notice__icon > svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75;
+}
+
+.section-notice__body {
+  display: flex;
+  flex: 1 1 14rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.section-notice__title,
+.section-notice__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.section-notice__title {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.section-notice__text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--bookswap-muted);
+}
+
+.section-notice__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bookswap-accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.section-notice__button {
+  height: 44px;
+  padding-inline: 18px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media (min-width: 48rem) {
+  .home-page {
+    padding-block: 32px 48px;
+  }
+
+  .home-section {
+    gap: 12px;
+  }
+
+  .home-section__title {
+    font-size: 22px;
+    line-height: 30px;
+  }
+
+  .home-greeting__title {
+    font-size: 32px;
+    line-height: 40px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .home-page {
+    padding-block: 40px 80px;
+  }
+
+  .home-section {
+    gap: 16px;
+  }
+
+  .home-greeting__title {
+    font-size: 36px;
+    line-height: 44px;
   }
 }
