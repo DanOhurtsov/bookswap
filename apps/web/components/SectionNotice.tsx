@@ -13,6 +13,7 @@ export function SectionNotice({
   text,
   action,
   role,
+  tone,
 }: {
   icon: LucideIcon
   title: ReactNode
@@ -21,9 +22,14 @@ export function SectionNotice({
   action?: ReactNode
   /** `alert` for a failure the reader must hear about. */
   role?: AriaRole
+  /** `done`: nothing is left to do — the icon in the accent, as the canvas marks «Усе опрацьовано». */
+  tone?: 'done'
 }) {
   return (
-    <div className="section-notice" role={role}>
+    <div
+      className={tone === 'done' ? 'section-notice section-notice--done' : 'section-notice'}
+      role={role}
+    >
       <span className="section-notice__icon" aria-hidden="true">
         <Icon />
       </span>

@@ -1352,8 +1352,14 @@ body:has(.canvas-theme) {
   --canvas-cta-bg: #286747;
   --canvas-cta-hover: #1f5239;
   --canvas-on-cta: #ffffff;
-  /* The canvas card's shadow, the same in both themes. */
+  /* What waits for the reader's answer: «Новий запит» and the count of requests (canvas `.b-wait`). */
+  --canvas-warning-subtle: #fff1d9;
+  --canvas-warning-text: #8a4f00;
+  --canvas-warning-dot: #e0951f;
+  /* The canvas card's shadow, the same in both themes, and its border and shadow under the pointer. */
   --canvas-card-shadow: 0 1px 2px rgba(20, 28, 24, 0.04), 0 2px 8px rgba(20, 28, 24, 0.04);
+  --canvas-card-shadow-raised: 0 2px 4px rgba(20, 28, 24, 0.05), 0 8px 20px rgba(20, 28, 24, 0.07);
+  --canvas-card-hover-border: #c8d3cb;
   --canvas-cover-shadow: 0 6px 16px rgba(20, 28, 24, 0.16);
   --canvas-cover-shadow-raised:
     0 14px 28px rgba(20, 28, 24, 0.22), 0 4px 8px rgba(20, 28, 24, 0.08);
@@ -1390,6 +1396,11 @@ body:has(.canvas-theme) {
   --canvas-cta-bg: #286747;
   --canvas-cta-hover: #327d57;
   --canvas-on-cta: #ffffff;
+  /* The design system's dark warning (`tokens.json`: warning-50, warning-text, warning-500). */
+  --canvas-warning-subtle: #3a2c12;
+  --canvas-warning-text: #f5c06e;
+  --canvas-warning-dot: #f2b04f;
+  --canvas-card-hover-border: #4b594e;
   /* Darker shadows read on a dark page; the hairline keeps a dark cover off a dark background. */
   --canvas-cover-shadow: 0 0 0 1px rgba(238, 242, 234, 0.08), 0 6px 16px rgba(0, 0, 0, 0.45);
   --canvas-cover-shadow-raised:
@@ -1665,5 +1676,505 @@ body:has(.canvas-theme) {
   .home-greeting__title {
     font-size: 36px;
     line-height: 44px;
+  }
+}
+
+/* `SectionNotice` with nothing left to do: the icon in the accent (canvas «Усе опрацьовано»). */
+.section-notice--done .section-notice__icon {
+  color: var(--canvas-accent, var(--bookswap-accent));
+  background: var(--canvas-accent-subtle, var(--muted));
+}
+
+/* --- «Потребує вашої дії» на головній (BS-147) ------------------------------- */
+/*
+ * Canvas «Main Page»: on a phone a rail of 300 px cards running to the screen's edges; on a tablet one
+ * row per request — cover, text, the two answers; from a desktop up three cards side by side. The
+ * card's parts are laid out by grid areas on a tablet only, so the same markup serves all three.
+ */
+.incoming-requests__count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  background: var(--canvas-warning-subtle);
+  color: var(--canvas-warning-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.incoming-requests__list {
+  display: flex;
+  gap: 12px;
+  margin: 0 calc(-1 * var(--page-gutter));
+  padding: 4px var(--page-gutter) 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--page-gutter);
+  scrollbar-width: none;
+  list-style: none;
+}
+
+.incoming-requests__list::-webkit-scrollbar {
+  display: none;
+}
+
+.incoming-requests__item,
+.incoming-requests__placeholder {
+  display: flex;
+  flex: 0 0 300px;
+  scroll-snap-align: start;
+}
+
+.incoming-requests__placeholder {
+  height: 236px;
+  border-radius: 12px;
+}
+
+.incoming-request {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  padding: 16px;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--canvas-card-shadow, none);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.incoming-request__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.incoming-request__avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The initials follow the avatar's own size in px, not the fallback's rem: larger text keeps them inside. */
+.incoming-request__avatar > [data-slot='avatar-fallback'] {
+  font-size: inherit;
+}
+
+.incoming-request__who {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.incoming-request__name {
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incoming-request__time {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--bookswap-muted);
+}
+
+.incoming-request__badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--canvas-warning-subtle);
+  color: var(--canvas-warning-text);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.incoming-request__badge::before {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--canvas-warning-dot);
+  content: '';
+}
+
+.incoming-request__book {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.incoming-request__cover {
+  flex: 0 0 48px;
+  width: 48px;
+}
+
+/* A cover this small: the title in the canvas's tiny caps, the spine a little narrower. */
+.incoming-request__cover .shelf-cover {
+  border-radius: 3px 5px 5px 3px;
+}
+
+.incoming-request__cover .shelf-cover--drawn {
+  padding: 6px 4px 5px 7px;
+  box-shadow:
+    inset 3px 0 0 rgba(0, 0, 0, 0.14),
+    var(--canvas-cover-shadow);
+}
+
+.incoming-request__cover .shelf-cover__title {
+  -webkit-line-clamp: 2;
+  font-size: 5px;
+  line-height: 6px;
+  letter-spacing: 0.02em;
+}
+
+.incoming-request__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.incoming-request__title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.incoming-request__title:hover {
+  color: var(--bookswap-accent);
+}
+
+.incoming-request__authors {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--bookswap-muted);
+  overflow-wrap: anywhere;
+}
+
+.incoming-request__due {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.incoming-request__due > svg {
+  display: none;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--bookswap-muted);
+  stroke-width: 1.75;
+}
+
+.incoming-request__message {
+  /* The canvas shows the borrower's words on a desktop only; narrower, the card keeps to the request. */
+  display: none;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.incoming-request > .alert {
+  margin: 0;
+}
+
+.incoming-request__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: auto;
+}
+
+.incoming-request__fields {
+  display: grid;
+  gap: 12px;
+}
+
+.incoming-request__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.incoming-request__actions > :first-child {
+  flex: 1 1 auto;
+}
+
+@media (hover: hover) {
+  .incoming-request:hover {
+    border-color: var(--canvas-card-hover-border, var(--line));
+    box-shadow: var(--canvas-card-shadow-raised, none);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .incoming-request {
+    transition: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .incoming-requests__count {
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  .incoming-requests__list {
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .incoming-requests__item,
+  .incoming-requests__placeholder {
+    flex: 0 0 auto;
+  }
+
+  .incoming-requests__placeholder {
+    height: 104px;
+  }
+
+  .incoming-request__badge {
+    gap: 7px;
+    padding: 4px 10px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .incoming-request__badge::before {
+    flex-basis: 7px;
+    width: 7px;
+    height: 7px;
+  }
+
+  .incoming-request__time {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .incoming-request__title {
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+/* Tablet: one row per request. The head and the book's text share the middle column. */
+@media (min-width: 48rem) and (max-width: 63.999rem) {
+  .incoming-request {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 296px;
+    grid-template-areas:
+      'cover head actions'
+      'cover text actions'
+      'alert alert alert'
+      'form form form';
+    column-gap: 16px;
+    row-gap: 0;
+    align-items: center;
+    padding: 16px 20px;
+  }
+
+  /* Answering, the form takes the row below and the text the whole width above it. */
+  .incoming-request.is-approving {
+    grid-template-areas:
+      'cover head head'
+      'cover text text'
+      'alert alert alert'
+      'form form form';
+  }
+
+  .incoming-request__book {
+    display: contents;
+  }
+
+  .incoming-request__head {
+    grid-area: head;
+    flex-wrap: wrap;
+    align-self: end;
+  }
+
+  .incoming-request__cover {
+    grid-area: cover;
+    align-self: start;
+  }
+
+  .incoming-request__text {
+    grid-area: text;
+    display: block;
+    align-self: start;
+    margin-top: 4px;
+  }
+
+  .incoming-request__avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .incoming-request__who {
+    flex: 0 1 auto;
+    flex-direction: row;
+    align-items: baseline;
+  }
+
+  .incoming-request__name {
+    font-size: 14px;
+  }
+
+  .incoming-request__time {
+    white-space: nowrap;
+  }
+
+  .incoming-request__time::before {
+    content: '\00a0·\00a0';
+  }
+
+  .incoming-request__title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .incoming-request__authors,
+  .incoming-request__due {
+    display: inline;
+    margin: 0;
+  }
+
+  .incoming-request__authors + .incoming-request__due::before {
+    content: ' · ';
+  }
+
+  .incoming-request > .alert {
+    grid-area: alert;
+    margin-top: 12px;
+  }
+
+  .incoming-request__form {
+    grid-area: form;
+    margin-top: 12px;
+  }
+
+  /* Side by side, the two inputs line up even though only the date has a hint above it. */
+  .incoming-request__fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+  }
+
+  .incoming-request > .incoming-request__actions {
+    grid-area: actions;
+  }
+
+  .incoming-request__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+  }
+
+  /* The form's answers stand where the row's answers stood: the right-hand 296 px. */
+  .incoming-request__form .incoming-request__actions {
+    align-self: flex-end;
+    width: 296px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .incoming-requests__list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .incoming-requests__placeholder {
+    height: 268px;
+  }
+
+  .incoming-request {
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .incoming-request__head {
+    gap: 10px;
+  }
+
+  .incoming-request__avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .incoming-request__book {
+    gap: 14px;
+  }
+
+  .incoming-request__cover {
+    flex-basis: 56px;
+    width: 56px;
+  }
+
+  .incoming-request__cover .shelf-cover--drawn {
+    padding: 7px 5px 6px 8px;
+  }
+
+  .incoming-request__cover .shelf-cover__title {
+    -webkit-line-clamp: 4;
+    font-size: 7px;
+    line-height: 9px;
+  }
+
+  .incoming-request__authors {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .incoming-request__due {
+    margin-top: 6px;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .incoming-request__due > svg {
+    display: block;
+  }
+
+  .incoming-request__message {
+    display: block;
   }
 }

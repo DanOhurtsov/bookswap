@@ -8,7 +8,8 @@ import HomePage from './page'
 /**
  * BS-145: the home page stays a server component that only composes — the stats are read on the
  * server and handed to their client leaf. BS-147: the greeting tops the page and learns from the same
- * snapshot whether the server saw a guest; the DEV health block is no longer on it.
+ * snapshot whether the server saw a guest, and the requests waiting for an answer follow it; the DEV
+ * health block is no longer on it.
  */
 jest.mock('@/features/reading-status', () => ({
   fetchReadingStatsSnapshot: jest.fn(),
@@ -22,6 +23,10 @@ jest.mock('@/features/reading-status/index.client', () => ({
 
 jest.mock('@/features/friends-new-books/index.client', () => ({
   FriendsNewBooks: () => <p>Friends new books</p>,
+}))
+
+jest.mock('@/features/loans/index.client', () => ({
+  IncomingRequests: () => <p>Incoming requests</p>,
 }))
 
 jest.mock('@/features/home/index.client', () => ({
@@ -73,16 +78,18 @@ describe('page composition', () => {
     },
   )
 
-  it('orders the page: greeting, reading stats, «new in my friends’ libraries» (BS-147)', async () => {
+  it('orders the page: greeting, requests, reading stats, «new in my friends’ libraries» (BS-147)', async () => {
     mockFetch.mockResolvedValue({ status: 'ready' })
 
     render(await HomePage())
 
     const greeting = screen.getByText(/Greeting, known guest/)
+    const requests = screen.getByText('Incoming requests')
     const stats = screen.getByText('Stats seed: ready')
     const friends = screen.getByText('Friends new books')
 
-    expect(greeting.nextElementSibling).toBe(stats)
+    expect(greeting.nextElementSibling).toBe(requests)
+    expect(requests.nextElementSibling).toBe(stats)
     expect(stats.nextElementSibling).toBe(friends)
     expect(friends.nextElementSibling).toBeNull()
   })
