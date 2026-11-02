@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 /** The white card the profile is built of (canvas «Profile Page»). */
 export const PROFILE_CARD =
-  'rounded-xl border border-(--line) bg-(--field-bg) shadow-[0_1px_2px_rgba(20,28,24,.04),0_2px_8px_rgba(20,28,24,.04)]'
+  'rounded-xl border border-(--line) bg-(--field-bg) shadow-(--canvas-card-shadow)'
 
 /** The profile's action button (canvas `.btn`): 44 px, 15 px semibold. */
 export const PROFILE_ACTION = 'h-11 gap-2 px-[18px] text-[15px] font-semibold'
@@ -18,14 +18,14 @@ export const PROFILE_ACTION = 'h-11 gap-2 px-[18px] text-[15px] font-semibold'
  * (PO decision, 28.10.2026). Saturated green with white text in both themes — the dark theme's light
  * accent is for links and icons only.
  */
-export const PROFILE_CTA = `${PROFILE_ACTION} bg-(--profile-cta-bg) text-(--profile-on-cta) hover:bg-(--profile-cta-hover) active:bg-(--profile-cta-hover)`
+export const PROFILE_CTA = `${PROFILE_ACTION} bg-(--canvas-cta-bg) text-(--canvas-on-cta) hover:bg-(--canvas-cta-hover) active:bg-(--canvas-cta-hover)`
 
 /**
  * An action that is only an icon (the profile card's «Редагувати профіль», «Запросити друзів»): a
  * 44 px target, the accent icon, a tint on hover and press, the focus ring and a dimmed disabled look.
  */
 export const PROFILE_ICON_ACTION =
-  'size-11 rounded-lg text-(--profile-accent) hover:bg-(--profile-accent-subtle) hover:text-(--profile-accent-hover) active:bg-(--profile-accent-subtle) aria-disabled:cursor-default aria-disabled:opacity-80 focus-visible:ring-(--profile-accent)/50 [&_svg:not([class*=size-])]:size-5'
+  'size-11 rounded-lg text-(--canvas-accent) hover:bg-(--canvas-accent-subtle) hover:text-(--canvas-accent-hover) active:bg-(--canvas-accent-subtle) aria-disabled:cursor-default aria-disabled:opacity-80 focus-visible:ring-(--canvas-accent)/50 [&_svg:not([class*=size-])]:size-5'
 
 /** A card that is a section of its own, named by its heading or `aria-label`. */
 export function ProfileCard({ className, ...props }: ComponentProps<'section'>) {
@@ -86,7 +86,7 @@ export function ProfileAvatar({
       {user.avatarUrl !== null && <AvatarImage src={user.avatarUrl} alt="" />}
       <AvatarFallback
         className={cn(
-          'bg-(--profile-accent-subtle) font-semibold text-(--profile-accent)',
+          'bg-(--canvas-accent-subtle) font-semibold text-(--canvas-accent)',
           fallbackClassName,
         )}
       >

@@ -1204,9 +1204,7 @@ a:focus-visible > .link-underline {
   height: 0.5rem;
 }
 
-/* The home page's reading stats lead to the library with the same call to action (BS-145). */
-.activation__cta,
-.reading-stats__cta {
+.activation__cta {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
@@ -1230,153 +1228,212 @@ a:focus-visible > .link-underline {
   font-size: 1.05rem;
 }
 
-/* --- Статистика читання на головній (BS-145) ------------------------------ */
-.reading-stats {
-  margin: 0 0 2rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-}
-
-.reading-stats__title {
-  margin: 0 0 0.6rem;
-  font-size: 1.05rem;
-}
-
-/* Phone width: one row per status, label and count on one line. Wider: three tiles side by side. */
+/* --- Статистика читання на головній (BS-145, вигляд — BS-147) --------------- */
+/*
+ * Canvas «Main Page», «Ваше читання»: one card of three rows on a phone, three cards side by side from
+ * a tablet up. The app's tokens, which a `.canvas-theme` page maps to the canvas palette.
+ */
 .reading-stats__list {
   display: grid;
-  gap: 0.5rem;
-  margin: 0 0 0.6rem;
+  margin: 0;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--canvas-card-shadow, none);
 }
 
 .reading-stats__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
+  gap: 16px;
+  padding: 14px 16px;
 }
 
-@media (min-width: 40rem) {
-  .reading-stats__list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .reading-stats__item {
-    display: block;
-  }
-
-  .reading-stats__count {
-    margin-top: 0.15rem;
-  }
+.reading-stats__item + .reading-stats__item,
+.reading-stats__placeholder + .reading-stats__placeholder {
+  border-top: 1px solid var(--line);
 }
 
 .reading-stats__item dt {
-  color: var(--bookswap-muted);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
 }
 
 .reading-stats__count {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Профіль (BS-148) ------------------------------------------------------ */
-/*
- * The canvas «Profile Page» palette, only while a profile is on the page (`.profile-theme` on its
- * <main>): the app's own tokens take the profile's values there, so the shared controls inside it —
- * fields, switches, selects, the header above — match the profile, and every other page keeps the
- * app palette. Plain CSS keyed on the theme class the head script sets before the first paint, so the
- * dark profile never flashes light.
- */
-body:has(.profile-theme) {
-  --profile-page: #faf9f6;
-  --profile-surface: #ffffff;
-  --profile-subtle: #f3f3f0;
-  --profile-border: #e5e7e2;
-  --profile-text: #18221d;
-  --profile-muted: #66716b;
-  --profile-accent: #286747;
-  --profile-accent-hover: #1f5239;
-  --profile-accent-subtle: #e7f2e9;
-  /* Light theme: the call to action is the accent itself. */
-  --profile-cta-bg: #286747;
-  --profile-cta-hover: #1f5239;
-  --profile-on-cta: #ffffff;
-  --profile-cover-shadow: 0 6px 16px rgba(20, 28, 24, 0.16);
-  --profile-cover-shadow-raised:
-    0 14px 28px rgba(20, 28, 24, 0.22), 0 4px 8px rgba(20, 28, 24, 0.08);
-  --profile-cover-shadow-pressed: 0 3px 8px rgba(20, 28, 24, 0.16);
-
-  --bg: var(--profile-page);
-  --fg: var(--profile-text);
-  --line: var(--profile-border);
-  --field-bg: var(--profile-surface);
-  --bookswap-muted: var(--profile-muted);
-  --bookswap-accent: var(--profile-accent);
-  --background: var(--profile-surface);
-  --foreground: var(--profile-text);
-  --border: var(--profile-border);
-  --input: var(--profile-border);
-  --ring: var(--profile-accent);
-  --muted: var(--profile-subtle);
-  --muted-foreground: var(--profile-muted);
-  --accent: var(--profile-subtle);
-  --accent-foreground: var(--profile-text);
+/* While the counts load, the placeholders stand where the rows or the cards will be. */
+.reading-stats__placeholder {
+  height: 60px;
+  border-radius: 0;
 }
 
-.dark body:has(.profile-theme) {
-  --profile-page: #171b18;
-  --profile-surface: #202621;
-  --profile-subtle: #29312b;
-  --profile-border: #3b473e;
-  --profile-text: #eef2ea;
-  --profile-muted: #b0bcaf;
+.reading-stats__note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--bookswap-muted);
+}
+
+@media (min-width: 48rem) {
+  .reading-stats__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    background: none;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .reading-stats__item,
+  .reading-stats__placeholder {
+    border-radius: 12px;
+  }
+
+  .reading-stats__item {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 18px 20px;
+    background: var(--field-bg);
+    border: 1px solid var(--line);
+    box-shadow: var(--canvas-card-shadow, none);
+  }
+
+  .reading-stats__item + .reading-stats__item {
+    border-top: 1px solid var(--line);
+  }
+
+  .reading-stats__item dt {
+    font-size: 14px;
+  }
+
+  .reading-stats__count {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .reading-stats__placeholder {
+    height: 82px;
+  }
+
+  .reading-stats__placeholder + .reading-stats__placeholder {
+    border-top: 0;
+  }
+}
+
+/* --- Палітра канви: профіль (BS-148), головна (BS-147) ------------------------ */
+/*
+ * The design canvas palette, only while a page drawn from the canvas is shown (`.canvas-theme` on its
+ * <main>): the app's own tokens take the canvas values there, so the shared controls inside it —
+ * fields, switches, selects, the header above — match the page, and every other page keeps the app
+ * palette. Plain CSS keyed on the theme class the head script sets before the first paint, so a dark
+ * canvas page never flashes light.
+ */
+body:has(.canvas-theme) {
+  --canvas-page: #faf9f6;
+  --canvas-surface: #ffffff;
+  --canvas-subtle: #f3f3f0;
+  --canvas-border: #e5e7e2;
+  --canvas-text: #18221d;
+  --canvas-muted: #66716b;
+  --canvas-accent: #286747;
+  --canvas-accent-hover: #1f5239;
+  --canvas-accent-subtle: #e7f2e9;
+  /* Light theme: the call to action is the accent itself. */
+  --canvas-cta-bg: #286747;
+  --canvas-cta-hover: #1f5239;
+  --canvas-on-cta: #ffffff;
+  /* What waits for the reader's answer: «Новий запит» and the count of requests (canvas `.b-wait`). */
+  --canvas-warning-subtle: #fff1d9;
+  --canvas-warning-text: #8a4f00;
+  --canvas-warning-dot: #e0951f;
+  /* The canvas card's shadow, the same in both themes, and its border and shadow under the pointer. */
+  --canvas-card-shadow: 0 1px 2px rgba(20, 28, 24, 0.04), 0 2px 8px rgba(20, 28, 24, 0.04);
+  --canvas-card-shadow-raised: 0 2px 4px rgba(20, 28, 24, 0.05), 0 8px 20px rgba(20, 28, 24, 0.07);
+  --canvas-card-hover-border: #c8d3cb;
+  --canvas-cover-shadow: 0 6px 16px rgba(20, 28, 24, 0.16);
+  --canvas-cover-shadow-raised:
+    0 14px 28px rgba(20, 28, 24, 0.22), 0 4px 8px rgba(20, 28, 24, 0.08);
+  --canvas-cover-shadow-pressed: 0 3px 8px rgba(20, 28, 24, 0.16);
+
+  --bg: var(--canvas-page);
+  --fg: var(--canvas-text);
+  --line: var(--canvas-border);
+  --field-bg: var(--canvas-surface);
+  --bookswap-muted: var(--canvas-muted);
+  --bookswap-accent: var(--canvas-accent);
+  --background: var(--canvas-surface);
+  --foreground: var(--canvas-text);
+  --border: var(--canvas-border);
+  --input: var(--canvas-border);
+  --ring: var(--canvas-accent);
+  --muted: var(--canvas-subtle);
+  --muted-foreground: var(--canvas-muted);
+  --accent: var(--canvas-subtle);
+  --accent-foreground: var(--canvas-text);
+}
+
+.dark body:has(.canvas-theme) {
+  --canvas-page: #171b18;
+  --canvas-surface: #202621;
+  --canvas-subtle: #29312b;
+  --canvas-border: #3b473e;
+  --canvas-text: #eef2ea;
+  --canvas-muted: #b0bcaf;
   /* Dark theme: a lighter green for links and icons, the saturated one behind white text. */
-  --profile-accent: #9bc7a8;
-  --profile-accent-hover: #b6d8bf;
-  --profile-accent-subtle: #2b4032;
-  --profile-cta-bg: #286747;
-  --profile-cta-hover: #327d57;
-  --profile-on-cta: #ffffff;
+  --canvas-accent: #9bc7a8;
+  --canvas-accent-hover: #b6d8bf;
+  --canvas-accent-subtle: #2b4032;
+  --canvas-cta-bg: #286747;
+  --canvas-cta-hover: #327d57;
+  --canvas-on-cta: #ffffff;
+  /* The design system's dark warning (`tokens.json`: warning-50, warning-text, warning-500). */
+  --canvas-warning-subtle: #3a2c12;
+  --canvas-warning-text: #f5c06e;
+  --canvas-warning-dot: #f2b04f;
+  --canvas-card-hover-border: #4b594e;
   /* Darker shadows read on a dark page; the hairline keeps a dark cover off a dark background. */
-  --profile-cover-shadow: 0 0 0 1px rgba(238, 242, 234, 0.08), 0 6px 16px rgba(0, 0, 0, 0.45);
-  --profile-cover-shadow-raised:
+  --canvas-cover-shadow: 0 0 0 1px rgba(238, 242, 234, 0.08), 0 6px 16px rgba(0, 0, 0, 0.45);
+  --canvas-cover-shadow-raised:
     0 0 0 1px rgba(238, 242, 234, 0.12), 0 14px 28px rgba(0, 0, 0, 0.55),
     0 4px 8px rgba(0, 0, 0, 0.35);
-  --profile-cover-shadow-pressed:
-    0 0 0 1px rgba(238, 242, 234, 0.08), 0 3px 8px rgba(0, 0, 0, 0.45);
+  --canvas-cover-shadow-pressed: 0 0 0 1px rgba(238, 242, 234, 0.08), 0 3px 8px rgba(0, 0, 0, 0.45);
 }
 
 /*
- * A cover on the profile shelf: the picture, or a cover drawn from the title and the author. The lift,
+ * A cover on a shelf of books: the picture, or a cover drawn from the title and the author. The lift,
  * the shadow and the focus ring belong to the box, so a picture gets them too; the spine and the
  * lettering only to the drawn one.
  */
-.profile-cover {
+.shelf-cover {
   display: block;
   aspect-ratio: 2 / 3;
   width: 100%;
   overflow: hidden;
   border-radius: 4px 8px 8px 4px;
-  box-shadow: var(--profile-cover-shadow);
+  box-shadow: var(--canvas-cover-shadow);
   transition:
     transform 0.2s ease-out,
     box-shadow 0.2s ease-out;
 }
 
-.profile-cover > img {
+.shelf-cover > img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.profile-cover--drawn {
+.shelf-cover--drawn {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1386,23 +1443,23 @@ body:has(.profile-theme) {
   color: var(--cover-light-fg);
   box-shadow:
     inset 4px 0 0 rgba(0, 0, 0, 0.14),
-    var(--profile-cover-shadow);
+    var(--canvas-cover-shadow);
 }
 
-.dark .profile-cover--drawn {
+.dark .shelf-cover--drawn {
   background: var(--cover-dark-bg);
   color: var(--cover-dark-fg);
 }
 
-.profile-cover__title,
-.profile-cover__author {
+.shelf-cover__title,
+.shelf-cover__author {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
 
-.profile-cover__title {
+.shelf-cover__title {
   -webkit-line-clamp: 5;
   font-size: 11px;
   line-height: 14px;
@@ -1411,54 +1468,778 @@ body:has(.profile-theme) {
 }
 
 /* Full strength, not the canvas's 0.85: faded, six light pairs drop under 4.5:1. */
-.profile-cover__author {
+.shelf-cover__author {
   -webkit-line-clamp: 2;
   font-size: 9px;
   line-height: 11px;
 }
 
-.profile-book:focus-visible {
+/* A book on a canvas shelf is one link: the cover lifts on hover and carries the focus ring. */
+.profile-book:focus-visible,
+.friend-new-book:focus-visible {
   outline: none;
 }
 
-.profile-book:hover .profile-cover,
-.profile-book:focus-visible .profile-cover {
+.profile-book:hover .shelf-cover,
+.profile-book:focus-visible .shelf-cover,
+.friend-new-book:hover .shelf-cover,
+.friend-new-book:focus-visible .shelf-cover {
   transform: translateY(-4px);
-  box-shadow: var(--profile-cover-shadow-raised);
+  box-shadow: var(--canvas-cover-shadow-raised);
 }
 
-.profile-book:hover .profile-cover--drawn,
-.profile-book:focus-visible .profile-cover--drawn {
+.profile-book:hover .shelf-cover--drawn,
+.profile-book:focus-visible .shelf-cover--drawn,
+.friend-new-book:hover .shelf-cover--drawn,
+.friend-new-book:focus-visible .shelf-cover--drawn {
   box-shadow:
     inset 4px 0 0 rgba(0, 0, 0, 0.14),
-    var(--profile-cover-shadow-raised);
+    var(--canvas-cover-shadow-raised);
 }
 
-.profile-book:focus-visible .profile-cover {
-  outline: 2px solid var(--profile-accent);
+.profile-book:focus-visible .shelf-cover,
+.friend-new-book:focus-visible .shelf-cover {
+  outline: 2px solid var(--canvas-accent);
   outline-offset: 3px;
 }
 
-.profile-book:active .profile-cover {
+.profile-book:active .shelf-cover,
+.friend-new-book:active .shelf-cover {
   transform: translateY(0);
-  box-shadow: var(--profile-cover-shadow-pressed);
+  box-shadow: var(--canvas-cover-shadow-pressed);
   transition-duration: 0.08s;
 }
 
-.profile-book:active .profile-cover--drawn {
+.profile-book:active .shelf-cover--drawn,
+.friend-new-book:active .shelf-cover--drawn {
   box-shadow:
     inset 4px 0 0 rgba(0, 0, 0, 0.14),
-    var(--profile-cover-shadow-pressed);
+    var(--canvas-cover-shadow-pressed);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .profile-cover {
+  .shelf-cover {
     transition: none;
   }
 
-  .profile-book:hover .profile-cover,
-  .profile-book:focus-visible .profile-cover,
-  .profile-book:active .profile-cover {
+  .profile-book:hover .shelf-cover,
+  .profile-book:focus-visible .shelf-cover,
+  .profile-book:active .shelf-cover,
+  .friend-new-book:hover .shelf-cover,
+  .friend-new-book:focus-visible .shelf-cover,
+  .friend-new-book:active .shelf-cover {
     transform: none;
+  }
+}
+
+/* --- Головна (BS-147) ------------------------------------------------------ */
+/* The canvas «Main Page» rhythm: its own top and bottom space inside the app's gutters. */
+.home-page {
+  padding-block: 20px 32px;
+}
+
+/*
+ * Plain CSS, not utilities: the global `h1` rule above sits outside any cascade layer, so it would win
+ * over a Tailwind class on the heading.
+ */
+.home-greeting__title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.home-greeting__lede {
+  margin: 8px 0 0;
+  color: var(--bookswap-muted);
+}
+
+/* A section of the home page: its heading, then its content. */
+.home-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-section__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+/* `SectionNotice`: a compact row instead of an empty card. The action drops below on a narrow phone. */
+.section-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  padding: 14px 20px;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.section-notice__icon {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  color: var(--bookswap-muted);
+  background: var(--muted);
+}
+
+.section-notice__icon > svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75;
+}
+
+.section-notice__body {
+  display: flex;
+  flex: 1 1 14rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.section-notice__title,
+.section-notice__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.section-notice__title {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.section-notice__text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--bookswap-muted);
+}
+
+.section-notice__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bookswap-accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.section-notice__button {
+  height: 44px;
+  padding-inline: 18px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media (min-width: 48rem) {
+  .home-page {
+    padding-block: 32px 48px;
+  }
+
+  .home-section {
+    gap: 12px;
+  }
+
+  .home-section__title {
+    font-size: 22px;
+    line-height: 30px;
+  }
+
+  .home-greeting__title {
+    font-size: 32px;
+    line-height: 40px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .home-page {
+    padding-block: 40px 80px;
+  }
+
+  .home-section {
+    gap: 16px;
+  }
+
+  .home-greeting__title {
+    font-size: 36px;
+    line-height: 44px;
+  }
+}
+
+/* `SectionNotice` with nothing left to do: the icon in the accent (canvas «Усе опрацьовано»). */
+.section-notice--done .section-notice__icon {
+  color: var(--canvas-accent, var(--bookswap-accent));
+  background: var(--canvas-accent-subtle, var(--muted));
+}
+
+/*
+ * «Нове в бібліотеках друзів»: the canvas sizes the drawn cover's words to the card — 116 px on a phone,
+ * 140 px on a tablet, a sixth of the row from a desktop up. The profile's shelf keeps the shared sizes.
+ */
+.friend-new-book .shelf-cover--drawn {
+  padding: 10px 8px 9px 11px;
+}
+
+.friend-new-book .shelf-cover__title {
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.friend-new-book .shelf-cover__author {
+  font-size: 8px;
+  line-height: 10px;
+}
+
+@media (min-width: 48rem) {
+  .friend-new-book .shelf-cover--drawn {
+    padding: 12px 9px 10px 13px;
+  }
+
+  .friend-new-book .shelf-cover__title {
+    font-size: 12px;
+    line-height: 15px;
+  }
+
+  .friend-new-book .shelf-cover__author {
+    font-size: 9px;
+    line-height: 11px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .friend-new-book .shelf-cover--drawn {
+    padding: 14px 10px 12px 14px;
+  }
+
+  .friend-new-book .shelf-cover__title {
+    font-size: 13px;
+    line-height: 16px;
+    letter-spacing: 0.01em;
+  }
+
+  .friend-new-book .shelf-cover__author {
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 500;
+  }
+}
+
+/* --- «Потребує вашої дії» на головній (BS-147) ------------------------------- */
+/*
+ * Canvas «Main Page»: on a phone a rail of 300 px cards running to the screen's edges; on a tablet one
+ * row per request — cover, text, the two answers; from a desktop up three cards side by side. The
+ * card's parts are laid out by grid areas on a tablet only, so the same markup serves all three.
+ */
+.incoming-requests__count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  background: var(--canvas-warning-subtle);
+  color: var(--canvas-warning-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.incoming-requests__list {
+  display: flex;
+  gap: 12px;
+  /* The canvas's 4 px above and 12 px below, plus room for a card's shadow, raised on hover too: a
+     scroller clips whatever spills out of its padding. The margins give the extra room back. */
+  margin: -8px calc(-1 * var(--page-gutter)) -16px;
+  padding: 12px var(--page-gutter) 28px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--page-gutter);
+  scrollbar-width: none;
+  list-style: none;
+}
+
+.incoming-requests__list::-webkit-scrollbar {
+  display: none;
+}
+
+/* `min-width: 0`: otherwise a name that does not wrap sets the card's minimum, and the card outgrows 300 px. */
+.incoming-requests__item,
+.incoming-requests__placeholder {
+  display: flex;
+  flex: 0 0 300px;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.incoming-requests__placeholder {
+  height: 236px;
+  border-radius: 12px;
+}
+
+.incoming-request {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  padding: 16px;
+  background: var(--field-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--canvas-card-shadow, none);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.incoming-request__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.incoming-request__avatar {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The initials follow the avatar's own size in px, not the fallback's rem: larger text keeps them inside. */
+.incoming-request__avatar > [data-slot='avatar-fallback'] {
+  font-size: inherit;
+}
+
+.incoming-request__who {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.incoming-request__name {
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incoming-request__time {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--bookswap-muted);
+}
+
+.incoming-request__badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--canvas-warning-subtle);
+  color: var(--canvas-warning-text);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.incoming-request__badge::before {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--canvas-warning-dot);
+  content: '';
+}
+
+.incoming-request__book {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.incoming-request__cover {
+  flex: 0 0 48px;
+  width: 48px;
+}
+
+/* A cover this small: the title in the canvas's tiny caps, the spine a little narrower. */
+.incoming-request__cover .shelf-cover {
+  border-radius: 3px 5px 5px 3px;
+}
+
+.incoming-request__cover .shelf-cover--drawn {
+  padding: 6px 4px 5px 7px;
+  box-shadow:
+    inset 3px 0 0 rgba(0, 0, 0, 0.14),
+    var(--canvas-cover-shadow);
+}
+
+.incoming-request__cover .shelf-cover__title {
+  -webkit-line-clamp: 2;
+  font-size: 5px;
+  line-height: 6px;
+  letter-spacing: 0.02em;
+}
+
+.incoming-request__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.incoming-request__title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.incoming-request__title:hover {
+  color: var(--bookswap-accent);
+}
+
+.incoming-request__authors {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--bookswap-muted);
+  overflow-wrap: anywhere;
+}
+
+.incoming-request__due {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.incoming-request__due > svg {
+  display: none;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--bookswap-muted);
+  stroke-width: 1.75;
+}
+
+.incoming-request__message {
+  /* The canvas shows the borrower's words on a desktop only; narrower, the card keeps to the request. */
+  display: none;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.incoming-request > .alert {
+  margin: 0;
+}
+
+.incoming-request__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: auto;
+}
+
+.incoming-request__fields {
+  display: grid;
+  gap: 12px;
+}
+
+.incoming-request__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.incoming-request__actions > :first-child {
+  flex: 1 1 auto;
+}
+
+@media (hover: hover) {
+  .incoming-request:hover {
+    border-color: var(--canvas-card-hover-border, var(--line));
+    box-shadow: var(--canvas-card-shadow-raised, none);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .incoming-request {
+    transition: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .incoming-requests__count {
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  .incoming-requests__list {
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .incoming-requests__item,
+  .incoming-requests__placeholder {
+    flex: 0 0 auto;
+  }
+
+  .incoming-requests__placeholder {
+    height: 104px;
+  }
+
+  .incoming-request__badge {
+    gap: 7px;
+    padding: 4px 10px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .incoming-request__badge::before {
+    flex-basis: 7px;
+    width: 7px;
+    height: 7px;
+  }
+
+  .incoming-request__time {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .incoming-request__title {
+    font-size: 16px;
+    line-height: 22px;
+  }
+}
+
+/* Tablet: one row per request. The head and the book's text share the middle column. */
+@media (min-width: 48rem) and (max-width: 63.999rem) {
+  .incoming-request {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 296px;
+    grid-template-areas:
+      'cover head actions'
+      'cover text actions'
+      'alert alert alert'
+      'form form form';
+    column-gap: 16px;
+    row-gap: 0;
+    align-items: center;
+    padding: 16px 20px;
+  }
+
+  /* Answering, the form takes the row below and the text the whole width above it. */
+  .incoming-request.is-approving {
+    grid-template-areas:
+      'cover head head'
+      'cover text text'
+      'alert alert alert'
+      'form form form';
+  }
+
+  .incoming-request__book {
+    display: contents;
+  }
+
+  .incoming-request__head {
+    grid-area: head;
+    flex-wrap: wrap;
+    align-self: end;
+  }
+
+  .incoming-request__cover {
+    grid-area: cover;
+    align-self: start;
+  }
+
+  .incoming-request__text {
+    grid-area: text;
+    display: block;
+    align-self: start;
+    margin-top: 4px;
+  }
+
+  .incoming-request__avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .incoming-request__who {
+    flex: 0 1 auto;
+    flex-direction: row;
+    align-items: baseline;
+  }
+
+  .incoming-request__name {
+    font-size: 14px;
+  }
+
+  .incoming-request__time {
+    white-space: nowrap;
+  }
+
+  .incoming-request__time::before {
+    content: '\00a0·\00a0';
+  }
+
+  .incoming-request__title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .incoming-request__authors,
+  .incoming-request__due {
+    display: inline;
+    margin: 0;
+  }
+
+  .incoming-request__authors + .incoming-request__due::before {
+    content: ' · ';
+  }
+
+  .incoming-request > .alert {
+    grid-area: alert;
+    margin-top: 12px;
+  }
+
+  .incoming-request__form {
+    grid-area: form;
+    margin-top: 12px;
+  }
+
+  /* Side by side, the two inputs line up even though only the date has a hint above it. */
+  .incoming-request__fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+  }
+
+  .incoming-request > .incoming-request__actions {
+    grid-area: actions;
+  }
+
+  .incoming-request__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+  }
+
+  /* The form's answers stand where the row's answers stood: the right-hand 296 px. */
+  .incoming-request__form .incoming-request__actions {
+    align-self: flex-end;
+    width: 296px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .incoming-requests__list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .incoming-requests__placeholder {
+    height: 268px;
+  }
+
+  .incoming-request {
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .incoming-request__head {
+    gap: 10px;
+  }
+
+  .incoming-request__avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .incoming-request__book {
+    gap: 14px;
+  }
+
+  .incoming-request__cover {
+    flex-basis: 56px;
+    width: 56px;
+  }
+
+  .incoming-request__cover .shelf-cover--drawn {
+    padding: 7px 5px 6px 8px;
+  }
+
+  .incoming-request__cover .shelf-cover__title {
+    -webkit-line-clamp: 4;
+    font-size: 7px;
+    line-height: 9px;
+  }
+
+  /* Three lines at most keeps the three cards level. The whole title stays in the DOM, so it is still
+     the link's name and the card's label; the loan's page shows it in full. */
+  .incoming-request__title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .incoming-request__authors {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .incoming-request__due {
+    margin-top: 6px;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .incoming-request__due > svg {
+    display: block;
+  }
+
+  .incoming-request__message {
+    display: block;
   }
 }

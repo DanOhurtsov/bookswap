@@ -17,7 +17,11 @@ export interface Confirmation {
  * Both views — the list and one loan — do the same things to a card and differ only in where the
  * data came from. Two sets of `busyKey`, `failure` and `ConfirmDialog` would one day drift apart.
  */
-export function useLoanActions(reload: () => Promise<void>) {
+export function useLoanActions(
+  reload: () => Promise<void>,
+  /** Optional: what to do about a failure besides showing it — the home page re-reads on a conflict. */
+  onFailure?: (failure: Error) => Promise<void> | undefined,
+) {
   const [failure, setFailure] = useState<unknown>()
   const [busyKey, setBusyKey] = useState<string>()
   const [confirmation, setConfirmation] = useState<Confirmation>()
@@ -32,7 +36,10 @@ export function useLoanActions(reload: () => Promise<void>) {
       // same action could be pressed a second time on an already stale card.
       await reload()
     } catch (error) {
-      setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
+      const shown = error instanceof ApiRequestError ? error : new Error(describeError(error))
+      setFailure(shown)
+      // Awaited for the same reason as `reload`: the card stays busy while the caller reacts.
+      await onFailure?.(shown)
     } finally {
       setBusyKey(undefined)
       setConfirmation(undefined)

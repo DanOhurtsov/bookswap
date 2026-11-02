@@ -2,9 +2,13 @@
 
 import Link from 'next/link'
 import { useId } from 'react'
+import { BookOpenIcon, CircleAlertIcon } from 'lucide-react'
 import type { ReadingStatsResponse } from '@bookswap/shared'
 import { assertNever } from '@/app/lib/assert-never'
 import { useSession } from '@/app/lib/use-session'
+import { SECTION_NOTICE_LINK, SectionNotice } from '@/components/SectionNotice'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { ReadingStatsSnapshot, ReadingStatsView } from '../model/reading-stats-view'
 import { useReadingStats } from '../model/use-reading-stats'
 
@@ -61,11 +65,11 @@ function ReadingStatsSection({ view, onRetry }: { view: ReadingStatsView; onRetr
 
   return (
     <section
-      className="reading-stats"
+      className="home-section reading-stats"
       aria-labelledby={headingId}
       aria-busy={view.kind === 'loading'}
     >
-      <h2 id={headingId} className="reading-stats__title">
+      <h2 id={headingId} className="home-section__title">
         Моє читання
       </h2>
       <ReadingStatsBody view={view} onRetry={onRetry} />
@@ -82,35 +86,50 @@ function ReadingStatsBody({
 }) {
   switch (view.kind) {
     case 'loading':
-      return <p className="status status--pending">Рахую ваші статуси читання…</p>
+      // The placeholders hold the cards' places; the text says the same to a screen reader.
+      return (
+        <>
+          <p className="sr-only">Рахую ваші статуси читання…</p>
+          <div className="reading-stats__list" aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <Skeleton key={index} className="reading-stats__placeholder" />
+            ))}
+          </div>
+        </>
+      )
 
     case 'error':
       return (
-        <div className="status status--error" role="alert">
-          <p>{view.message}</p>
-          {onRetry !== undefined && (
-            <button type="button" className="button--ghost" onClick={onRetry}>
-              Спробувати ще раз
-            </button>
-          )}
-        </div>
+        <SectionNotice
+          role="alert"
+          icon={CircleAlertIcon}
+          title={view.message}
+          action={
+            onRetry !== undefined && (
+              <Button variant="outline" className="section-notice__button" onClick={onRetry}>
+                Спробувати ще раз
+              </Button>
+            )
+          }
+        />
       )
 
     case 'empty':
       return (
-        <>
-          <p>
-            Ви ще не позначили жодного твору. Статус читання можна вказати на картках у бібліотеці.
-          </p>
-          <p className="actions">
-            <Link className="reading-stats__cta" href="/library">
+        <SectionNotice
+          icon={BookOpenIcon}
+          title="Ви ще не позначили жодного твору."
+          text="Статус читання можна вказати на картках у бібліотеці."
+          action={
+            <Link className={SECTION_NOTICE_LINK} href="/library">
               Перейти до бібліотеки
             </Link>
-          </p>
-        </>
+          }
+        />
       )
 
     case 'ready':
+      // Three cards from a tablet up, one card of three rows on a phone (canvas «Main Page»).
       return (
         <>
           <dl className="reading-stats__list">
@@ -121,7 +140,7 @@ function ReadingStatsBody({
               </div>
             ))}
           </dl>
-          <p className="form__aside">Кількість творів. Статистику бачите лише ви.</p>
+          <p className="reading-stats__note">Кількість творів. Статистику бачите лише ви.</p>
         </>
       )
 

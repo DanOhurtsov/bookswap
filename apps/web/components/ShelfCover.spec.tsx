@@ -2,7 +2,7 @@
 
 import { fireEvent, render } from '@testing-library/react'
 import '@testing-library/jest-dom'
-import { coverColoursFor } from '../model/cover-palette'
+import { coverColoursFor } from './cover-palette'
 import { ShelfCover } from './ShelfCover'
 
 const COVER = 'https://covers.openlibrary.org/b/id/42-M.jpg'
@@ -65,7 +65,7 @@ describe('ShelfCover', () => {
   it('leaves the foot of the cover empty when the book has no author', () => {
     const { container } = render(<ShelfCover {...BOOK} url={null} authors="" />)
 
-    expect(container.querySelector('.profile-cover__author')).toBeNull()
+    expect(container.querySelector('.shelf-cover__author')).toBeNull()
     expect(drawn(container)).toHaveTextContent('Тигролови')
   })
 

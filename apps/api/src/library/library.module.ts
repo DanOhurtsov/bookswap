@@ -12,6 +12,8 @@ import { AddSearchService } from './add-search/add-search.service'
 import { ActivationController } from './activation.controller'
 import { ActivationService } from './activation.service'
 import { CopyWriter } from './copy-writer'
+import { FriendsNewBooksController } from './friends-new-books.controller'
+import { FriendsNewBooksService } from './friends-new-books.service'
 import { LibraryController } from './library.controller'
 import { LibraryService } from './library.service'
 import { CatalogChainWriter } from './quick-add/catalog-chain.writer'
@@ -36,7 +38,13 @@ import { QuickAddService } from './quick-add/quick-add.service'
     LocalMatchesModule,
     NotificationsModule,
   ],
-  controllers: [LibraryController, QuickAddController, AddSearchController, ActivationController],
+  controllers: [
+    LibraryController,
+    QuickAddController,
+    AddSearchController,
+    ActivationController,
+    FriendsNewBooksController,
+  ],
   providers: [
     LibraryService,
     QuickAddService,
@@ -46,6 +54,7 @@ import { QuickAddService } from './quick-add/quick-add.service'
     AddSearchService,
     CopyWriter,
     ActivationService,
+    FriendsNewBooksService,
   ],
 })
 export class LibraryModule {}

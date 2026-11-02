@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { Loan, LoanAction, LoanTermDays } from '@bookswap/shared'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { RecordedLoanActions } from '@/components/RecordedLoanActions'
 import { TextField } from '@/components/Form/FormFields'
 import { LOAN_ACTION_LABELS } from '@/app/lib/labels'
-import { initialDueDate } from '../model/approve-due-date'
+import { useApproveForm, type ApproveFormState } from '../model/use-approve-form'
 import type { Confirmation, LoanActionsState } from '../model/use-loan-actions'
 
 type LoanActionsProps = {
@@ -178,11 +178,20 @@ type ApproveFormProps = {
  * the request. That is why the field lives inside this action and not on its own.
  */
 function ApproveForm({ loan, defaultLoanTermDays, busy, label, onAct }: ApproveFormProps) {
-  const [dueAt, setDueAt] = useState(() =>
-    initialDueDate(loan.dueAt, defaultLoanTermDays, new Date()),
-  )
-  const [note, setNote] = useState('')
+  const form = useApproveForm(loan, defaultLoanTermDays)
 
+  return (
+    <>
+      <ApproveFields loan={loan} form={form} />
+      <button type="button" disabled={busy} onClick={() => void onAct(loan, 'approve', form.body)}>
+        {label}
+      </button>
+    </>
+  )
+}
+
+/** The approval's fields, the same on `/loans` and on the home page (BS-147). */
+export function ApproveFields({ loan, form }: { loan: Loan; form: ApproveFormState }) {
   return (
     <>
       <TextField
@@ -190,32 +199,20 @@ function ApproveForm({ loan, defaultLoanTermDays, busy, label, onAct }: ApproveF
         label="Повернути до"
         type="date"
         hint={loan.dueAt === null ? undefined : 'Позичальник просив саме цю дату.'}
-        value={dueAt}
+        value={form.dueAt}
         onChange={(event) => {
-          setDueAt(event.target.value)
+          form.setDueAt(event.target.value)
         }}
       />
       <TextField
         id={`note-${loan.id}`}
         label="Відповідь"
         autoComplete="off"
-        value={note}
+        value={form.note}
         onChange={(event) => {
-          setNote(event.target.value)
+          form.setNote(event.target.value)
         }}
       />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() =>
-          void onAct(loan, 'approve', {
-            ...(dueAt === '' ? {} : { dueAt }),
-            ...(note.trim() === '' ? {} : { note }),
-          })
-        }
-      >
-        {label}
-      </button>
     </>
   )
 }

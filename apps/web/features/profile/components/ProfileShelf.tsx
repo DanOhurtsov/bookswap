@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import type { PlaceTone, ProfileBookCard } from '../model/profile-view'
 import { EmptySection, SeeAllLink } from './ProfileParts'
-import { ShelfCover } from './ShelfCover'
+import { ShelfCover } from '@/components/ShelfCover'
 
 /** The dot repeats the text's meaning in colour; the text alone already says it. */
 const DOT: Record<PlaceTone, string> = {

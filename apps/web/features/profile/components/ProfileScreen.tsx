@@ -23,7 +23,7 @@ export type ProfileMode = 'view' | 'edit'
 /**
  * `/profile` and `/profile/edit`: the signed-in user's own profile. The guard lives here, the profile
  * below it, so nothing reads a summary, saves a setting or checks a nickname before there is an owner.
- * Every state is a `.profile-theme` page, the loading one too: the profile palette (globals.css) holds
+ * Every state is a `.canvas-theme` page, the loading one too: the canvas palette (globals.css) holds
  * from the first paint on.
  */
 export function ProfileScreen({ mode = 'view' }: { mode?: ProfileMode }) {
@@ -34,7 +34,7 @@ export function ProfileScreen({ mode = 'view' }: { mode?: ProfileMode }) {
 
   if (state.status === 'loading') {
     return (
-      <main className="page profile-theme">
+      <main className="page canvas-theme">
         <h1>Профіль</h1>
         <p className="status status--pending">Завантажую профіль…</p>
       </main>
@@ -43,7 +43,7 @@ export function ProfileScreen({ mode = 'view' }: { mode?: ProfileMode }) {
 
   if (state.status === 'error') {
     return (
-      <main className="page profile-theme">
+      <main className="page canvas-theme">
         <h1>Профіль</h1>
         <FormStatus error={new Error(state.message)} />
       </main>
@@ -52,7 +52,7 @@ export function ProfileScreen({ mode = 'view' }: { mode?: ProfileMode }) {
 
   if (state.status === 'guest') {
     return (
-      <main className="page profile-theme">
+      <main className="page canvas-theme">
         <h1>Профіль</h1>
         <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
       </main>
@@ -89,7 +89,7 @@ function ProfileContent({ mode, user, updateUser }: ProfileContentProps) {
 
   return (
     // The canvas container is 1120 px; `.page` keeps the app's gutters around it.
-    <main className="page profile-theme">
+    <main className="page canvas-theme">
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-8">
         {mode === 'edit' ? (
           <ProfileEditForm user={user} stats={stats} onSaved={onSaved} />
