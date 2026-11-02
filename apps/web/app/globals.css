@@ -1685,6 +1685,58 @@ body:has(.canvas-theme) {
   background: var(--canvas-accent-subtle, var(--muted));
 }
 
+/*
+ * «Нове в бібліотеках друзів»: the canvas sizes the drawn cover's words to the card — 116 px on a phone,
+ * 140 px on a tablet, a sixth of the row from a desktop up. The profile's shelf keeps the shared sizes.
+ */
+.friend-new-book .shelf-cover--drawn {
+  padding: 10px 8px 9px 11px;
+}
+
+.friend-new-book .shelf-cover__title {
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.friend-new-book .shelf-cover__author {
+  font-size: 8px;
+  line-height: 10px;
+}
+
+@media (min-width: 48rem) {
+  .friend-new-book .shelf-cover--drawn {
+    padding: 12px 9px 10px 13px;
+  }
+
+  .friend-new-book .shelf-cover__title {
+    font-size: 12px;
+    line-height: 15px;
+  }
+
+  .friend-new-book .shelf-cover__author {
+    font-size: 9px;
+    line-height: 11px;
+  }
+}
+
+@media (min-width: 64rem) {
+  .friend-new-book .shelf-cover--drawn {
+    padding: 14px 10px 12px 14px;
+  }
+
+  .friend-new-book .shelf-cover__title {
+    font-size: 13px;
+    line-height: 16px;
+    letter-spacing: 0.01em;
+  }
+
+  .friend-new-book .shelf-cover__author {
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 500;
+  }
+}
+
 /* --- «Потребує вашої дії» на головній (BS-147) ------------------------------- */
 /*
  * Canvas «Main Page»: on a phone a rail of 300 px cards running to the screen's edges; on a tablet one
@@ -1710,8 +1762,10 @@ body:has(.canvas-theme) {
 .incoming-requests__list {
   display: flex;
   gap: 12px;
-  margin: 0 calc(-1 * var(--page-gutter));
-  padding: 4px var(--page-gutter) 12px;
+  /* The canvas's 4 px above and 12 px below, plus room for a card's shadow, raised on hover too: a
+     scroller clips whatever spills out of its padding. The margins give the extra room back. */
+  margin: -8px calc(-1 * var(--page-gutter)) -16px;
+  padding: 12px var(--page-gutter) 28px;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scroll-padding-inline: var(--page-gutter);
@@ -1723,10 +1777,12 @@ body:has(.canvas-theme) {
   display: none;
 }
 
+/* `min-width: 0`: otherwise a name that does not wrap sets the card's minimum, and the card outgrows 300 px. */
 .incoming-requests__item,
 .incoming-requests__placeholder {
   display: flex;
   flex: 0 0 300px;
+  min-width: 0;
   scroll-snap-align: start;
 }
 
@@ -2157,6 +2213,15 @@ body:has(.canvas-theme) {
     -webkit-line-clamp: 4;
     font-size: 7px;
     line-height: 9px;
+  }
+
+  /* Three lines at most keeps the three cards level. The whole title stays in the DOM, so it is still
+     the link's name and the card's label; the loan's page shows it in full. */
+  .incoming-request__title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
   }
 
   .incoming-request__authors {

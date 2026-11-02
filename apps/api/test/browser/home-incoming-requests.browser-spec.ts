@@ -702,6 +702,93 @@ describe('BS-147: «Потребує вашої дії» на головній (
     }
   })
 
+  it('довге ім’я й назва на 120 літер: картка не ширшає, обидві відповіді в її межах; на desktop назва — максимум три рядки, повна — у DOM і в імені посилання; аватар — пастель за першою літерою', async () => {
+    const owner = await registerReader('bs147-req-long-o', 'Власниця')
+    const borrower = await registerReader(
+      'bs147-req-long-b',
+      'Олександра-Вікторія Шевченко-Коваленко-Підгірна',
+    )
+
+    await befriend(app, owner, borrower)
+
+    const title =
+      'Неймовірно довга назва книжки про подорож крізь усі області України від Ужгорода до Харкова й назад через Карпати bs147'.slice(
+        0,
+        120,
+      )
+
+    await ask(borrower, await addBook(owner, title), title, 2)
+
+    for (const layout of LAYOUTS) {
+      const page = await newPage(layout.width, 'light')
+
+      await login(page, owner.email)
+      await ready(page)
+      await screenshot(page, `bs147-requests-long-${String(layout.width)}-light`)
+
+      const shown = await layoutOf(page)
+      const answersInside = await cards(page)
+        .first()
+        .evaluate((article) => {
+          const outer = article.getBoundingClientRect()
+
+          return [...article.querySelectorAll('button')].every((button) => {
+            const box = button.getBoundingClientRect()
+
+            return box.left >= outer.left && box.right <= outer.right + 0.5
+          })
+        })
+
+      expect({
+        width: layout.width,
+        pageOverflow: shown.pageOverflow,
+        cardWidths: shown.cardWidths,
+        overflowingCards: shown.overflowingCards,
+        answersInside,
+      }).toEqual({
+        width: layout.width,
+        pageOverflow: 0,
+        cardWidths: [layout.card],
+        overflowingCards: 0,
+        answersInside: true,
+      })
+
+      // Clipped on a desktop only, never cut from the page: the link and the card are named by all of it.
+      const titleShown = await cards(page)
+        .first()
+        .locator('.incoming-request__title')
+        .evaluate((link) => {
+          const style = getComputedStyle(link)
+
+          return {
+            lines: Math.round(link.getBoundingClientRect().height / parseFloat(style.lineHeight)),
+            clipped: link.scrollHeight > link.clientHeight + 1,
+            text: link.textContent,
+          }
+        })
+
+      expect({ width: layout.width, ...titleShown }).toEqual({
+        width: layout.width,
+        lines: layout.width === 1440 ? 3 : (expect.any(Number) as number),
+        clipped: layout.width === 1440,
+        text: title,
+      })
+      expect(await section(page).getByRole('link', { name: title, exact: true }).count()).toBe(1)
+      expect(await section(page).getByRole('article', { name: title, exact: true }).count()).toBe(1)
+
+      // «Олександра…» — «О», the canvas's lavender.
+      expect(
+        await cards(page)
+          .first()
+          .locator('[data-slot="avatar-fallback"]')
+          .evaluate((fallback) => {
+            const style = getComputedStyle(fallback)
+            return [style.backgroundColor, style.color]
+          }),
+      ).toEqual(['rgb(236, 226, 242)', 'rgb(94, 59, 120)'])
+    }
+  })
+
   it('A → вихід → B у тій самій вкладці: B ніколи не бачить запитів на книжки A', async () => {
     const a = await inboxOf('bs147-req-switch', 2)
     const b = await registerReader('bs147-req-switch-b', 'Інша людина')

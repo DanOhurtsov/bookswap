@@ -286,7 +286,9 @@ function IncomingRequestCard({
       <div className="incoming-request__head">
         <Avatar className="incoming-request__avatar">
           {card.borrower.avatarUrl !== null && <AvatarImage src={card.borrower.avatarUrl} alt="" />}
-          <AvatarFallback>{getInitials(card.borrower.displayName)}</AvatarFallback>
+          <AvatarFallback variant="pastel" name={card.borrower.displayName}>
+            {getInitials(card.borrower.displayName)}
+          </AvatarFallback>
         </Avatar>
         <span className="incoming-request__who">
           <span className="incoming-request__name">{card.borrower.displayName}</span>

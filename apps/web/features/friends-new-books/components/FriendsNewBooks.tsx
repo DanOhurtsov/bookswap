@@ -161,16 +161,20 @@ function NewBooksCarousel({
       aria-labelledby={headingId}
       opts={{ align: 'start', slidesToScroll: 'auto', ...(reducedMotion && { duration: 0 }) }}
     >
-      <div className="flex items-center justify-between gap-4">
+      {/* Above the viewport, whose room for a lifted cover reaches up under the arrows: they stay
+          clickable. */}
+      <div className="relative z-10 flex items-center justify-between gap-4">
         <SectionTitle id={headingId} />
         <CarouselArrows trackId={trackId} />
       </div>
       {/* The viewport clips: its padding is room for a lifted cover, its shadow and its focus ring,
-          and the negative margin gives that room back to the page. Below a desktop the rail runs to
-          the screen's edges, as on the canvas: the room is the page's gutter. */}
+          and the negative margin gives that room back to the page. Above, 20 px: the raised shadow
+          (blur 28 at 14 down) reaches 14 px over the cover, and the cover is 4 px up. Sideways Embla
+          still clips; below a desktop the rail runs to the screen's edges, as on the canvas, and the
+          room is the page's gutter. */}
       <CarouselContent
         id={trackId}
-        viewportClassName="-mx-(--page-gutter) -mt-3 -mb-4 px-(--page-gutter) pt-3 pb-4 lg:-mx-2 lg:px-2"
+        viewportClassName="-mx-(--page-gutter) -mt-5 -mb-4 px-(--page-gutter) pt-5 pb-4 lg:-mx-2 lg:px-2"
         className="-ml-4 md:-ml-5"
       >
         {cards.map((card) => (
@@ -226,7 +230,9 @@ function NewBookCard({ card }: { card: FriendsNewBookCard }) {
         authors={card.authors}
       />
       <span className="flex min-w-0 flex-col gap-0.5 pt-0.5 lg:pt-1">
-        <span className="line-clamp-2 text-sm leading-[19px] font-semibold wrap-anywhere md:text-[15px] md:leading-5 lg:leading-[21px]">
+        {/* 14/19 on a phone as a ratio: the size is in rem, so a larger browser font must not stack
+            the two lines over each other. */}
+        <span className="line-clamp-2 text-sm leading-[1.36] font-semibold wrap-anywhere md:text-[15px] md:leading-5 lg:leading-[21px]">
           {card.title}
         </span>
         {card.authors !== '' && (
@@ -237,7 +243,7 @@ function NewBookCard({ card }: { card: FriendsNewBookCard }) {
         <span className="flex min-w-0 items-center gap-1.5 text-xs leading-4 text-(--bookswap-muted) lg:mt-1 lg:text-[13px] lg:leading-[18px]">
           <Avatar className="hidden size-5 lg:flex">
             {card.friend.avatarUrl !== null && <AvatarImage src={card.friend.avatarUrl} alt="" />}
-            <AvatarFallback className="text-[10px]">
+            <AvatarFallback variant="pastel" name={card.friend.displayName} className="text-[10px]">
               {getInitials(card.friend.displayName)}
             </AvatarFallback>
           </Avatar>

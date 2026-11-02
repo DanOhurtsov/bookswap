@@ -557,6 +557,173 @@ describe('BS-147: «Нове в бібліотеках друзів» на го�
     await page.getByRole('heading', { name: books[2]!.title, level: 1 }).waitFor()
   })
 
+  // The raised shadow (`0 14px 28px`) reaches 14 px above the cover, which itself rises 4 px; the ring
+  // is 2 px at 3 px off. The viewport clips, so the room above a raised cover must hold all of it.
+  const SHADOW_ABOVE = 14
+  const SECTION_GAP = { 1440: 16, 834: 12, 390: 8 } as const
+
+  it('піднята обкладинка першої й останньої карток (hover і фокус з клавіатури): тінь і кільце вгорі не обрізані, бічне обрізання Embla лишається, картки на місці, стрілки клікабельні', async () => {
+    const { viewer, books } = await feedOf('bs147-lift', 12)
+    const firstHref = `/works/${books[0]!.workId}`
+    const lastHref = `/works/${books[11]!.workId}`
+
+    for (const width of [1440, 834, 390] as const) {
+      // A mouse on every width: the hover is what is measured, and the layout does not depend on touch.
+      const page = await newPage(width, 'light', { isMobile: false, hasTouch: false })
+
+      await login(page, viewer.email)
+      await ready(page)
+
+      /** Waits for the cover of the card linking to `href` to finish rising, then measures its room. */
+      const expectRoom = async (href: string, card: string) => {
+        await page.waitForFunction((target) => {
+          const cover = document.querySelector(`a[href="${target}"] .shelf-cover`)
+          return cover !== null && getComputedStyle(cover).transform.endsWith(', -4)')
+        }, href)
+        await page.waitForTimeout(250)
+
+        const { roomAbove, raised } = await page.evaluate((target) => {
+          const viewport = document.querySelector('[data-slot="carousel-content"]')!
+          const cover = document.querySelector(`a[href="${target}"] .shelf-cover`)!
+
+          return {
+            roomAbove: Math.round(
+              cover.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
+            ),
+            raised: getComputedStyle(cover).boxShadow.includes('14px 28px'),
+          }
+        }, href)
+
+        expect({ width, card, raised, roomAbove, enough: roomAbove >= SHADOW_ABOVE }).toMatchObject(
+          {
+            width,
+            card,
+            raised: true,
+            enough: true,
+          },
+        )
+      }
+
+      // The cards sit where they did: the room is given back, the gap under the heading is the canvas's.
+      const placed = await page.evaluate(() => {
+        const row = document
+          .querySelector('[aria-roledescription="карусель"] .home-section__title')!
+          .parentElement!.getBoundingClientRect()
+        const cover = document
+          .querySelector('[data-slot="carousel-item"] .shelf-cover')!
+          .getBoundingClientRect()
+        const viewport = document.querySelector('[data-slot="carousel-content"]')!
+
+        return {
+          gap: Math.round(cover.top - row.bottom),
+          clipsSideways: getComputedStyle(viewport).overflowX,
+          pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        }
+      })
+
+      expect({ width, ...placed }).toEqual({
+        width,
+        gap: SECTION_GAP[width],
+        clipsSideways: 'hidden',
+        pageOverflow: 0,
+      })
+
+      // The viewport's room reaches up under the arrows; they stay on top of it.
+      if (width !== 390) {
+        const box = (await section(page)
+          .getByRole('button', { name: 'Наступні книжки' })
+          .boundingBox())!
+        const hit = await page.evaluate(
+          ({ x, y }) =>
+            document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'),
+          { x: box.x + box.width / 2, y: box.y + box.height - 2 },
+        )
+
+        expect({ width, hit }).toEqual({ width, hit: 'Наступні книжки' })
+      }
+
+      await page.locator(`a[href="${firstHref}"]`).hover()
+      await expectRoom(firstHref, 'first, hover')
+
+      // Real Tab presses from the top of the page: a programmatic focus would not be `:focus-visible`.
+      await page.mouse.move(0, 0)
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      })
+
+      for (let step = 0; step < 60; step += 1) {
+        await page.keyboard.press('Tab')
+
+        if ((await page.evaluate(() => document.activeElement?.getAttribute('href'))) === firstHref)
+          break
+      }
+
+      await expectRoom(firstHref, 'first, focus')
+
+      for (let step = 0; step < 11; step += 1) await page.keyboard.press('Tab')
+      await settled(page)
+      expect(await page.evaluate(() => document.activeElement?.getAttribute('href'))).toBe(lastHref)
+      await expectRoom(lastHref, 'last, focus')
+
+      // The rail is now at its end: hover the last card with the mouse.
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      })
+      await page.locator(`a[href="${lastHref}"]`).hover()
+      await expectRoom(lastHref, 'last, hover')
+      await screenshot(page, `bs147-lift-last-${String(width)}-light`)
+    }
+  })
+
+  it('аватари друзів — пастель макета за першою літерою, в обох темах; аватар у меню профілю лишається нейтральним', async () => {
+    const { viewer } = await feedOf('bs147-avatars', 4)
+    // Марта → «М» green, Олесь → «О» lavender: the canvas's own letters.
+    const expected = {
+      light: {
+        М: ['rgb(227, 239, 230)', 'rgb(40, 103, 71)'],
+        О: ['rgb(236, 226, 242)', 'rgb(94, 59, 120)'],
+      },
+      dark: {
+        М: ['rgb(36, 74, 54)', 'rgb(227, 239, 230)'],
+        О: ['rgb(66, 50, 81)', 'rgb(236, 226, 242)'],
+      },
+    } as const
+
+    for (const theme of THEMES) {
+      const page = await newPage(1440, theme)
+
+      await login(page, viewer.email)
+      await ready(page)
+
+      const avatars = await page.evaluate(() => {
+        const colours = (element: Element) => {
+          const style = getComputedStyle(element)
+          return [style.backgroundColor, style.color]
+        }
+
+        return {
+          cards: [...document.querySelectorAll('.friend-new-book [data-slot="avatar-fallback"]')]
+            .slice(0, 2)
+            .map((fallback) => ({ text: fallback.textContent, colours: colours(fallback) })),
+          // Everything outside the page's content: the profile menu's avatar.
+          menu: [...document.querySelectorAll('[data-slot="avatar-fallback"]')]
+            .filter((fallback) => fallback.closest('main') === null)
+            .map((fallback) => fallback.getAttribute('data-variant')),
+        }
+      })
+
+      expect({ theme, cards: avatars.cards }).toEqual({
+        theme,
+        cards: [
+          { text: expect.stringMatching(/^М/) as string, colours: [...expected[theme].М] },
+          { text: expect.stringMatching(/^О/) as string, colours: [...expected[theme].О] },
+        ],
+      })
+      expect(avatars.menu.length).toBeGreaterThan(0)
+      expect(avatars.menu.every((variant) => variant === null)).toBe(true)
+    }
+  })
+
   it('мало карток — нічого гортати: стрілок немає', async () => {
     const { viewer } = await feedOf('bs147-few', 3)
     const page = await newPage(1440)
@@ -628,6 +795,34 @@ describe('BS-147: «Нове в бібліотеках друзів» на го�
 
     expect(rail.pageOverflow).toBeLessThanOrEqual(0)
     expect(rail.overflowingCards).toBe(0)
+  })
+
+  it('текст 200 % на телефоні й планшеті: рядки назви не накладаються, без горизонтального скролу', async () => {
+    const { viewer } = await feedOf('bs147-zoom-narrow', 4)
+
+    for (const width of [834, 390]) {
+      const page = await newPage(width, 'light')
+
+      await login(page, viewer.email)
+      await ready(page)
+      await page.addStyleTag({ content: 'html { font-size: 200% !important; }' })
+      await page.waitForLoadState('networkidle')
+      await screenshot(page, `bs147-text200-${String(width)}-light`)
+
+      const shown = await page.evaluate(() => ({
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        // A line shorter than its letters stacks a two-line title over itself.
+        stackedTitles: [...document.querySelectorAll('.friend-new-book .line-clamp-2')].filter(
+          (title) => {
+            const style = getComputedStyle(title)
+
+            return parseFloat(style.lineHeight) < parseFloat(style.fontSize)
+          },
+        ).length,
+      }))
+
+      expect({ width, ...shown }).toEqual({ width, pageOverflow: 0, stackedTitles: 0 })
+    }
   })
 
   it('A → вихід → B у тій самій вкладці: B ніколи не бачить стрічки A', async () => {
