@@ -1,19 +1,27 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Me, ProfileSummary, UpdateProfileRequest } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import { SessionProvider, useSession } from '@/app/lib/use-session'
 import { ToastProvider } from '@/components/ui/toast'
+import { SAVE_TIMEOUT_MS } from '../model/profile-form'
 import { ProfileScreen } from './ProfileScreen'
 
 /**
  * BS-148, sub-stage G: `/profile/edit` by role, label and text. `apiRequest` is a small in-memory
  * server: the session reads what the last successful PATCH or photo upload stored.
  */
+
+// jsdom has no object URLs; the photo preview needs one per chosen file.
+let previewCount = 0
+const createObjectURL = jest.fn(() => `blob:preview-${String((previewCount += 1))}`)
+const revokeObjectURL = jest.fn()
+
+Object.assign(URL, { createObjectURL, revokeObjectURL })
 
 // jsdom has no `PointerEvent`; Base UI builds one when a select is opened (as in `SelectField.spec`).
 window.PointerEvent ??= class PointerEvent extends MouseEvent {} as typeof window.PointerEvent
@@ -35,6 +43,7 @@ const { apiRequest } = jest.requireMock<{ apiRequest: jest.Mock }>('@/app/lib/ap
 interface RequestOptions {
   method?: string
   body?: unknown
+  signal?: AbortSignal
 }
 
 const saved: Me = {
@@ -73,7 +82,7 @@ let availabilityAnswer: ((handle: string) => Promise<{ available: boolean }>) | 
 /** The upload's refusal, when the server should refuse it. */
 let avatarRefusal: ApiRequestError | undefined
 /** Replaces the photo answers; the default stores the change like the API does. */
-let avatarAnswer: ((method: 'POST' | 'DELETE') => Promise<Me>) | undefined
+let avatarAnswer: ((method: 'POST' | 'DELETE', signal?: AbortSignal) => Promise<Me>) | undefined
 
 /** An answer held back until the test lets it land — in the order the test chooses. */
 function deferred<T>() {
@@ -113,7 +122,7 @@ function serve(): void {
       return Promise.resolve(stored)
     }
     if (path === '/me/avatar' && avatarAnswer !== undefined) {
-      return avatarAnswer(options.method === 'DELETE' ? 'DELETE' : 'POST')
+      return avatarAnswer(options.method === 'DELETE' ? 'DELETE' : 'POST', options.signal)
     }
     if (path === '/me/avatar' && options.method === 'POST') {
       if (avatarRefusal !== undefined) return Promise.reject(avatarRefusal)
@@ -211,6 +220,7 @@ const handleField = () => screen.getByRole('textbox', { name: 'Нік' })
 
 beforeEach(() => {
   jest.clearAllMocks()
+  previewCount = 0
   window.history.replaceState(null, '', '/profile/edit')
   stored = saved
   patchAnswer = undefined
@@ -513,26 +523,197 @@ describe('/profile/edit: скасування', () => {
   })
 })
 
+function photoFile(name = 'me.jpg'): File {
+  return new File([new Uint8Array([0xff, 0xd8, 0xff])], name, { type: 'image/jpeg' })
+}
+
+function photoRequests(): RequestOptions[] {
+  return [...requests('/me/avatar', 'POST'), ...requests('/me/avatar', 'DELETE')]
+}
+
 describe('/profile/edit: фото', () => {
-  it('зберігається одразу після вибору, окремо від форми; «Видалити фото» прибирає його', async () => {
+  it('вибір фото лише показує прев’ю: жодного запиту запису, збережене фото те саме', async () => {
     const user = await renderEdit()
-    const photo = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'me.jpg', { type: 'image/jpeg' })
+    const photo = photoFile()
 
     expect(screen.queryByRole('button', { name: 'Видалити фото' })).not.toBeInTheDocument()
 
     await user.upload(screen.getByLabelText('Фото профілю'), photo)
 
+    expect(createObjectURL).toHaveBeenCalledWith(photo)
     expect(await screen.findByRole('button', { name: 'Видалити фото' })).toBeInTheDocument()
-    expect(requests('/me/avatar', 'POST')[0]?.body).toBe(photo)
+    expect(photoRequests()).toEqual([])
+    expect(patches()).toEqual([])
+    expect(sessionUser().avatarUrl).toBeNull()
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it('повторний вибір замінює лише прев’ю: попереднє звільняється, «Зберегти» надсилає останнє', async () => {
+    const user = await renderEdit()
+    const first = photoFile('first.jpg')
+    const second = photoFile('second.jpg')
+
+    await user.upload(screen.getByLabelText('Фото профілю'), first)
+    await user.upload(screen.getByLabelText('Фото профілю'), second)
+
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-1')
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:preview-2')
+    expect(photoRequests()).toEqual([])
+
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(requests('/me/avatar', 'POST').map((options) => options.body)).toEqual([second])
+  })
+
+  it('«Скасувати» з вибраним фото питає підтвердження; скасовані зміни лишають збережене фото', async () => {
+    stored = { ...saved, avatarUrl: PHOTO_URL }
+    const user = await renderEdit()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photoFile())
+    await user.click(screen.getByRole('button', { name: 'Скасувати' }))
+
+    const question = screen.getByRole('alertdialog', { name: 'Скасувати зміни?' })
+
+    await user.click(within(question).getByRole('button', { name: 'Скасувати зміни' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    expect(mockReplace).toHaveBeenCalledWith('/profile')
+    expect(photoRequests()).toEqual([])
     expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
-    expect(saveButton()).toBeDisabled()
+
+    // The page is left: the preview goes with the form.
+    cleanup()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-1')
+  })
+
+  it('«Зберегти» завантажує вибране фото, і лише тоді воно в профілі; поля без змін не надсилаються', async () => {
+    const user = await renderEdit()
+    const photo = photoFile()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photo)
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(requests('/me/avatar', 'POST').map((options) => options.body)).toEqual([photo])
+    expect(patches()).toEqual([])
+    expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
+    expect(await screen.findByText('Профіль оновлено')).toBeInTheDocument()
+  })
+
+  it('поки фото зберігається, форма заблокована й повторно не надсилає', async () => {
+    const photo = deferred<Me>()
+
+    avatarAnswer = () => photo.promise
+    const user = await renderEdit()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photoFile())
+    await user.click(saveButton())
+
+    const saving = await screen.findByRole('button', { name: 'Зберігаємо…' })
+
+    expect(saving).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Завантажую фото…' })).toBeDisabled()
+    await user.click(saving)
+    expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+
+    await act(async () => {
+      photo.resolve({ ...saved, avatarUrl: PHOTO_URL })
+      await photo.promise
+    })
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+  })
+
+  it('збій завантаження: без успіху, збережене фото те саме, вибране лишається для повтору', async () => {
+    let attempts = 0
+
+    avatarAnswer = () => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(
+          new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Недоступно' }),
+        )
+      }
+
+      stored = { ...stored, avatarUrl: PHOTO_URL }
+
+      return Promise.resolve(stored)
+    }
+    const user = await renderEdit()
+    const photo = photoFile()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photo)
+    await user.click(saveButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Недоступно')
+    expect(sessionUser().avatarUrl).toBeNull()
+    expect(mockReplace).not.toHaveBeenCalled()
+    expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Видалити фото' })).toBeInTheDocument()
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(requests('/me/avatar', 'POST').map((options) => options.body)).toEqual([photo, photo])
+    expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
+  })
+
+  it('збереження без зміни фото не завантажує його знову', async () => {
+    stored = { ...saved, avatarUrl: PHOTO_URL }
+    const user = await renderEdit()
+
+    await user.type(screen.getByRole('textbox', { name: 'Ім’я' }), ' К')
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(patches()).toEqual([{ displayName: 'Марта К' }])
+    expect(photoRequests()).toEqual([])
+    expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
+  })
+
+  it('«Видалити фото» прибирає його лише з форми; видаляє «Зберегти»', async () => {
+    stored = { ...saved, avatarUrl: PHOTO_URL }
+    const user = await renderEdit()
 
     await user.click(screen.getByRole('button', { name: 'Видалити фото' }))
+
+    expect(screen.queryByRole('button', { name: 'Видалити фото' })).not.toBeInTheDocument()
+    expect(photoRequests()).toEqual([])
+    expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
+
+    await user.click(saveButton())
 
     await waitFor(() => {
       expect(sessionUser().avatarUrl).toBeNull()
     })
     expect(requests('/me/avatar', 'DELETE')).toHaveLength(1)
+    expect(mockReplace).toHaveBeenCalledWith('/profile')
+  })
+
+  it('видалити щойно вибране фото — повернутися до збереженого: надсилати нічого', async () => {
+    const user = await renderEdit()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photoFile())
+    await user.click(await screen.findByRole('button', { name: 'Видалити фото' }))
+
+    expect(screen.queryByRole('button', { name: 'Видалити фото' })).not.toBeInTheDocument()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-1')
+    expect(saveButton()).toBeDisabled()
+    expect(photoRequests()).toEqual([])
   })
 
   it('завеликий файл не надсилається — словами макета', async () => {
@@ -556,75 +737,277 @@ describe('/profile/edit: фото', () => {
       screen.getByLabelText('Фото профілю'),
       new File([new Uint8Array([1])], 'tiny.png', { type: 'image/png' }),
     )
+    await user.click(saveButton())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Фото замале: потрібно щонайменше 256×256 пікселів',
     )
     expect(sessionUser().avatarUrl).toBeNull()
+    expect(mockReplace).not.toHaveBeenCalled()
   })
 })
 
 /**
- * The photo, the form and the settings each answer with the whole profile, and their answers may land
- * in any order. Each answer below is what a real server could send: formed before the other request
- * was applied, so it carries the other field's OLD value. Only the fields a request changed may reach
- * the session.
+ * «Зберегти» with both the fields and the photo changed: `PATCH /me` first, the photo only after it
+ * succeeded (PO decision, 03.11.2026), so a refused form never replaces the stored photo.
  */
-describe('/profile/edit: паралельні запити', () => {
+describe('/profile/edit: поля й фото', () => {
   const renamed = 'Марта К'
 
-  async function startPhotoAndForm() {
-    const photo = deferred<Me>()
-    const form = deferred<Me>()
-
-    avatarAnswer = () => photo.promise
-    patchAnswer = () => form.promise
+  async function changeBoth() {
     const user = await renderEdit()
 
-    await user.upload(
-      screen.getByLabelText('Фото профілю'),
-      new File([new Uint8Array([0xff, 0xd8, 0xff])], 'me.jpg', { type: 'image/jpeg' }),
-    )
+    await user.upload(screen.getByLabelText('Фото профілю'), photoFile())
     await user.type(screen.getByRole('textbox', { name: 'Ім’я' }), ' К')
     await user.click(saveButton())
-    expect(await screen.findByRole('button', { name: 'Зберігаємо…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Завантажую фото…' })).toBeDisabled()
 
-    return { photo, form }
+    return user
   }
 
-  it('фото відповідає пізніше за форму — нове імʼя лишається', async () => {
-    const { photo, form } = await startPhotoAndForm()
+  it('спершу поля, потім фото; «Профіль оновлено» — лише після обох', async () => {
+    const form = deferred<Me>()
+    const photo = deferred<Me>()
 
-    form.resolve({ ...saved, displayName: renamed, avatarUrl: PHOTO_URL })
+    patchAnswer = () => form.promise
+    avatarAnswer = () => photo.promise
+    await changeBoth()
+
+    expect(await screen.findByRole('button', { name: 'Зберігаємо…' })).toBeDisabled()
+    expect(patches()).toEqual([{ displayName: renamed }])
+    expect(photoRequests()).toEqual([])
+
+    form.resolve({ ...saved, displayName: renamed })
+    await waitFor(() => {
+      expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+    })
+    expect(sessionUser().displayName).toBe(renamed)
+    expect(screen.getByRole('button', { name: 'Зберігаємо…' })).toBeDisabled()
+    expect(mockReplace).not.toHaveBeenCalled()
+
+    photo.resolve({ ...saved, displayName: renamed, avatarUrl: PHOTO_URL })
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith('/profile')
-    })
-    // Formed before the PATCH: the old name.
-    photo.resolve({ ...saved, avatarUrl: PHOTO_URL })
-
-    await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Завантажую фото…' })).not.toBeInTheDocument()
     })
     expect(sessionUser()).toEqual({ ...saved, displayName: renamed, avatarUrl: PHOTO_URL })
     expect(await screen.findByText('Профіль оновлено')).toBeInTheDocument()
   })
 
-  it('форма відповідає пізніше за фото — нове фото лишається', async () => {
-    const { photo, form } = await startPhotoAndForm()
+  it('поля не збереглися — фото не надсилається, вибране лишається', async () => {
+    patchAnswer = () =>
+      Promise.reject(new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Недоступно' }))
+    await changeBoth()
 
-    photo.resolve({ ...saved, avatarUrl: PHOTO_URL })
-    await waitFor(() => {
-      expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
-    })
-    // Formed before the upload: no photo yet.
-    form.resolve({ ...saved, displayName: renamed })
+    expect(await screen.findByText(/Не вдалося зберегти\. Перевірте з’єднання/)).toBeInTheDocument()
+    expect(photoRequests()).toEqual([])
+    expect(sessionUser()).toEqual(saved)
+    expect(screen.getByRole('button', { name: 'Видалити фото' })).toBeInTheDocument()
+    expect(mockReplace).not.toHaveBeenCalled()
+  })
+
+  it('поля збереглися, фото — ні: поля в сесії, форма відкрита, повтор надсилає лише фото', async () => {
+    let attempts = 0
+
+    avatarAnswer = () => {
+      attempts += 1
+      if (attempts === 1) {
+        return Promise.reject(
+          new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Недоступно' }),
+        )
+      }
+
+      stored = { ...stored, avatarUrl: PHOTO_URL }
+
+      return Promise.resolve(stored)
+    }
+    const user = await changeBoth()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Недоступно')
+    expect(sessionUser()).toEqual({ ...saved, displayName: renamed })
+    expect(mockReplace).not.toHaveBeenCalled()
+    expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
+
+    await user.click(saveButton())
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith('/profile')
     })
+    expect(patches()).toEqual([{ displayName: renamed }])
+    expect(requests('/me/avatar', 'POST')).toHaveLength(2)
     expect(sessionUser()).toEqual({ ...saved, displayName: renamed, avatarUrl: PHOTO_URL })
   })
+
+  /** «Зберегти» after the fields were saved and the photo was not: the form starts from the saved fields. */
+  async function saveFieldsNotPhoto() {
+    avatarAnswer = () =>
+      Promise.reject(new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Недоступно' }))
+    const user = await changeBoth()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Недоступно')
+    expect(sessionUser()).toEqual({ ...saved, displayName: renamed })
+
+    return user
+  }
+
+  it('після часткового збереження зміни рахуються від збережених полів: ім’я назад — це зміна', async () => {
+    const user = await saveFieldsNotPhoto()
+
+    await user.click(screen.getByRole('button', { name: 'Видалити фото' }))
+    await user.clear(screen.getByRole('textbox', { name: 'Ім’я' }))
+    await user.type(screen.getByRole('textbox', { name: 'Ім’я' }), saved.displayName)
+
+    expect(saveButton()).toBeEnabled()
+
+    avatarAnswer = undefined
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(patches()).toEqual([{ displayName: renamed }, { displayName: saved.displayName }])
+    expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+    expect(sessionUser()).toEqual(saved)
+  })
+
+  it('після часткового збереження без фото змін немає: «Зберегти» неактивна, «Скасувати» не питає', async () => {
+    const user = await saveFieldsNotPhoto()
+
+    await user.click(screen.getByRole('button', { name: 'Видалити фото' }))
+
+    expect(saveButton()).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Скасувати' }))
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(mockReplace).toHaveBeenCalledWith('/profile')
+    expect(sessionUser()).toEqual({ ...saved, displayName: renamed })
+  })
+})
+
+/**
+ * A photo request that never answers: `AbortSignal.timeout` is the test's own controller, so the test
+ * decides when the save's time is up. A timeout proves nothing about the server: the draft stays for
+ * a retry by hand, and nothing is retried on its own.
+ */
+describe('/profile/edit: фото без відповіді', () => {
+  let timeouts: { ms: number; controller: AbortController }[]
+
+  beforeEach(() => {
+    timeouts = []
+    jest.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController()
+
+      timeouts.push({ ms, controller })
+
+      return controller.signal
+    })
+    // Pending until its signal is aborted, as `fetch` is.
+    avatarAnswer = (_method, signal) =>
+      new Promise((_done, fail) => {
+        signal?.addEventListener('abort', () => {
+          fail(signal.reason)
+        })
+      })
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  /** The photo request's own time limit runs out. */
+  async function timeOut(request: RequestOptions | undefined) {
+    const timeout = timeouts.find(({ controller }) => controller.signal === request?.signal)
+
+    expect(timeout?.ms).toBe(SAVE_TIMEOUT_MS)
+    await act(async () => {
+      timeout?.controller.abort(new DOMException('signal timed out', 'TimeoutError'))
+      await Promise.resolve()
+    })
+  }
+
+  it('завантаження: після таймауту форма розблокована, поля збережені, фото лишається для повтору', async () => {
+    const user = await renderEdit()
+    const photo = photoFile()
+
+    await user.upload(screen.getByLabelText('Фото профілю'), photo)
+    await user.type(screen.getByRole('textbox', { name: 'Ім’я' }), ' К')
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+    })
+    expect(screen.getByRole('button', { name: 'Зберігаємо…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Скасувати' })).toBeDisabled()
+
+    await timeOut(requests('/me/avatar', 'POST')[0])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Сервер не відповів вчасно — невідомо, чи збереглося фото. Натисніть «Зберегти», щоб спробувати ще раз.',
+    )
+    expect(saveButton()).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Скасувати' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Видалити фото' })).toBeInTheDocument()
+    expect(revokeObjectURL).not.toHaveBeenCalled()
+    expect(sessionUser()).toEqual({ ...saved, displayName: 'Марта К' })
+    expect(mockReplace).not.toHaveBeenCalled()
+    expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
+    // Nothing is sent again on its own.
+    expect(requests('/me/avatar', 'POST')).toHaveLength(1)
+
+    avatarAnswer = undefined
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(patches()).toEqual([{ displayName: 'Марта К' }])
+    expect(requests('/me/avatar', 'POST').map((options) => options.body)).toEqual([photo, photo])
+    expect(sessionUser()).toEqual({ ...saved, displayName: 'Марта К', avatarUrl: PHOTO_URL })
+  })
+
+  it('видалення: після таймауту форма розблокована, намір видалити лишається для повтору', async () => {
+    stored = { ...saved, avatarUrl: PHOTO_URL }
+    const user = await renderEdit()
+
+    await user.click(screen.getByRole('button', { name: 'Видалити фото' }))
+    expect(requests('/me/avatar', 'DELETE')).toEqual([])
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(requests('/me/avatar', 'DELETE')).toHaveLength(1)
+    })
+    expect(screen.getByRole('button', { name: 'Скасувати' })).toBeDisabled()
+
+    await timeOut(requests('/me/avatar', 'DELETE')[0])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Сервер не відповів вчасно — невідомо, чи видалилося фото. Натисніть «Зберегти», щоб спробувати ще раз.',
+    )
+    expect(saveButton()).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Скасувати' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Видалити фото' })).not.toBeInTheDocument()
+    expect(sessionUser().avatarUrl).toBe(PHOTO_URL)
+    expect(mockReplace).not.toHaveBeenCalled()
+    expect(requests('/me/avatar', 'DELETE')).toHaveLength(1)
+
+    avatarAnswer = undefined
+    await user.click(saveButton())
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/profile')
+    })
+    expect(requests('/me/avatar', 'DELETE')).toHaveLength(2)
+    expect(sessionUser().avatarUrl).toBeNull()
+  })
+})
+
+/**
+ * The form and the settings each answer with the whole profile, and their answers may land in any
+ * order. Each answer below is what a real server could send: formed before the other request was
+ * applied, so it carries the other field's OLD value. Only the fields a request changed may reach
+ * the session.
+ */
+describe('/profile/edit: паралельні запити', () => {
+  const renamed = 'Марта К'
 
   async function startFormAndSetting() {
     const form = deferred<Me>()
@@ -693,9 +1076,10 @@ describe('/profile/edit: паралельні запити', () => {
 })
 
 /**
- * A logout or another account's login while the photo, the form and a setting are all in flight. The
- * answers that land afterwards are about the old account: none of them may change the session, and
- * the form that is gone shows no toast and leads nowhere.
+ * A logout or another account's login while the form and a setting are in flight and a photo removal
+ * waits for the form. The answers that land afterwards are about the old account: none of them may
+ * change the session, the form that is gone shows no toast and leads nowhere, and its photo removal
+ * is never sent — it would reach whoever is signed in now.
  */
 describe('/profile/edit: сесія змінилася до відповіді', () => {
   async function startEverything() {
@@ -713,7 +1097,7 @@ describe('/profile/edit: сесія змінилася до відповіді',
     await user.type(screen.getByRole('textbox', { name: 'Ім’я' }), ' К')
     await user.click(saveButton())
     await screen.findByRole('button', { name: 'Зберігаємо…' })
-    expect(requests('/me/avatar', 'DELETE')).toHaveLength(1)
+    expect(requests('/me/avatar', 'DELETE')).toEqual([])
     expect(patches()).toEqual([{ loanRequestsPaused: true }, { displayName: 'Марта К' }])
 
     const old = stored
@@ -745,6 +1129,7 @@ describe('/profile/edit: сесія змінилася до відповіді',
     expect(screen.getByText('Потрібен вхід. Переадресовую…')).toBeInTheDocument()
     expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
     expect(mockReplace.mock.calls).toEqual([['/login?returnTo=%2Fprofile%2Fedit']])
+    expect(requests('/me/avatar', 'DELETE')).toEqual([])
   })
 
   it('вхід в інший акаунт: відповіді для старого не змінюють нову сесію', async () => {
@@ -760,5 +1145,6 @@ describe('/profile/edit: сесія змінилася до відповіді',
     expect(screen.getByRole('switch', { name: 'Пауза для запитів' })).not.toBeChecked()
     expect(screen.queryByText('Профіль оновлено')).not.toBeInTheDocument()
     expect(mockReplace).not.toHaveBeenCalled()
+    expect(requests('/me/avatar', 'DELETE')).toEqual([])
   })
 })

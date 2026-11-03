@@ -7,8 +7,8 @@ import type { AvatarUpload } from '../model/use-avatar-upload'
 import { ProfileAvatar } from './ProfileParts'
 
 /**
- * The photo in the edit card. Saved the moment a file is chosen, apart from the form's «Зберегти»
- * (canvas spec); the server squares and re-encodes it, so what is shown is the stored photo.
+ * The photo in the edit card. A chosen file is only previewed, as it is; the form's «Зберегти» sends it,
+ * and the server squares and re-encodes it, so the stored photo may be cropped unlike the preview.
  */
 export function AvatarPicker({ user, avatar }: { user: Me; avatar: AvatarUpload }) {
   const fileInput = useRef<HTMLInputElement>(null)
@@ -16,7 +16,11 @@ export function AvatarPicker({ user, avatar }: { user: Me; avatar: AvatarUpload 
 
   return (
     <div className="flex shrink-0 flex-col items-start gap-2 md:w-36 md:items-center">
-      <ProfileAvatar user={user} className="size-24" fallbackClassName="text-[34px] font-bold" />
+      <ProfileAvatar
+        user={{ displayName: user.displayName, avatarUrl: avatar.shownUrl }}
+        className="size-24"
+        fallbackClassName="text-[34px] font-bold"
+      />
       {/* Opened by «Змінити фото»: a file input cannot be styled as the canvas's button. */}
       <input
         ref={fileInput}
@@ -42,7 +46,7 @@ export function AvatarPicker({ user, avatar }: { user: Me; avatar: AvatarUpload 
       >
         {avatar.busy === 'upload' ? 'Завантажую фото…' : 'Змінити фото'}
       </Button>
-      {user.avatarUrl !== null && (
+      {avatar.shownUrl !== null && (
         <button type="button" className="button--link m-0" disabled={busy} onClick={avatar.remove}>
           {avatar.busy === 'remove' ? 'Видаляю фото…' : 'Видалити фото'}
         </button>

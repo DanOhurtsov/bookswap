@@ -21,7 +21,8 @@ export const checkHandleAvailability = (handle: string, signal?: AbortSignal) =>
   })
 
 /** BS-148: the photo itself is the body; the answer is the profile with its new address. */
-export const uploadAvatar = (photo: Blob) =>
-  apiRequest('/me/avatar', { method: 'POST', body: photo, schema: meSchema })
+export const uploadAvatar = (photo: Blob, signal?: AbortSignal) =>
+  apiRequest('/me/avatar', { method: 'POST', body: photo, schema: meSchema, signal })
 
-export const removeAvatar = () => apiRequest('/me/avatar', { method: 'DELETE', schema: meSchema })
+export const removeAvatar = (signal?: AbortSignal) =>
+  apiRequest('/me/avatar', { method: 'DELETE', schema: meSchema, signal })
