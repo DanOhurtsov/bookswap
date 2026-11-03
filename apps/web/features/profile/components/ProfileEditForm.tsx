@@ -43,8 +43,8 @@ const PROFILE_HREF = '/profile'
  * `/profile/edit` (BS-148, canvas «режим редагування»): the profile card turns into the form; the rest
  * of the page stays as it is.
  *
- * The draft lives only in this form's React Hook Form state: nothing outside sees it until the server
- * has accepted it. The photo is the exception — it is saved the moment it is chosen (`AvatarPicker`).
+ * The draft lives only in this form's state — the fields in React Hook Form, the photo in
+ * `useAvatarUpload`: nothing outside sees it until the server has accepted it on «Зберегти».
  * The form is left with `replace`, so Back from the profile does not reopen a finished edit.
  */
 export function ProfileEditForm({
@@ -61,6 +61,7 @@ export function ProfileEditForm({
     control,
     register,
     handleSubmit,
+    reset,
     setError,
     clearErrors,
     formState: { errors, isDirty },
@@ -78,15 +79,20 @@ export function ProfileEditForm({
     router.replace(PROFILE_HREF)
   }
   const handleCheck = useHandleAvailability(user.id, user.handle, handle)
+  const avatar = useAvatarUpload(user.avatarUrl, onSaved)
   const save = useProfileSave({
     onSaved,
     leave,
     onHandleTaken: (message) => {
       setError('handle', { type: 'server', message }, { shouldFocus: true })
     },
+    rebase: (saved) => {
+      reset(toProfileFormValues({ ...user, ...saved }))
+    },
+    photo: avatar,
   })
-  const unsaved = useUnsavedChanges({ dirty: isDirty, locked: save.saving, leave })
-  const avatar = useAvatarUpload(onSaved)
+  const changed = isDirty || avatar.changed
+  const unsaved = useUnsavedChanges({ dirty: changed, locked: save.saving, leave })
 
   const handleError = errors.handle?.message
   // Only a problem is shown under the nickname: the quiet states («поточний», «перевіряємо», «вільний»)
@@ -100,8 +106,8 @@ export function ProfileEditForm({
 
     const changes = profileChanges(values, user)
 
-    // Only spaces were added, or a field was typed back: there is nothing to send.
-    if (changes === null) leave()
+    // Only spaces were added, or a field was typed back, and the photo is as stored: nothing to send.
+    if (changes === null && !avatar.changed) leave()
     else save.save(changes)
   })
 
@@ -119,7 +125,7 @@ export function ProfileEditForm({
           void submit(event)
         }}
       >
-        {/* The whole form is locked while PATCH /me is in flight, not only its buttons: an edit made
+        {/* The whole form is locked while the save is in flight, not only its buttons: an edit made
             after «Зберегти» would not be in the request, and the answer closes the form — the edit
             would vanish silently. A disabled <fieldset>, not RHF's own `disabled`: that one drops the
             values from submit. */}
@@ -261,7 +267,7 @@ export function ProfileEditForm({
               >
                 Скасувати
               </Button>
-              <Button type="submit" disabled={!isDirty || blocked} className={PROFILE_CTA}>
+              <Button type="submit" disabled={!changed || blocked} className={PROFILE_CTA}>
                 {save.saving && (
                   <LoaderCircle aria-hidden="true" className="size-[18px] animate-spin" />
                 )}
