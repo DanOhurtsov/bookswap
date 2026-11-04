@@ -81,17 +81,25 @@ API **не стартує без бази**: `DATABASE_URL` і `DIRECT_DATABASE_
 
 Усі команди запускаються з кореня і розкладаються Turborepo по пакетах.
 
-| Команда                             | Що робить                                                 |
-| ----------------------------------- | --------------------------------------------------------- |
-| `pnpm dev`                          | API у watch-режимі + Next.js dev-сервер                   |
-| `pnpm build`                        | збірка `shared` → `api` → `web`                           |
-| `pnpm lint`                         | ESLint, нуль попереджень (`--max-warnings=0`)             |
-| `pnpm typecheck`                    | `tsc --noEmit` по всіх пакетах                            |
-| `pnpm test`                         | Jest: unit у `shared`, `api` та `web`. Бази не потребує   |
-| `pnpm test:db`                      | e2e + тести обмежень БД. **Потрібна запущена PostgreSQL** |
-| `pnpm format` / `pnpm format:check` | Prettier                                                  |
+| Команда                                    | Що робить                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------- |
+| `pnpm dev`                                 | API у watch-режимі + Next.js dev-сервер                                         |
+| `pnpm build`                               | збірка `shared` → `api` → `web`                                                 |
+| `pnpm lint`                                | ESLint, нуль попереджень (`--max-warnings=0`)                                   |
+| `pnpm typecheck`                           | `tsc --noEmit` по всіх пакетах                                                  |
+| `pnpm test:fast`                           | лише unit-тести, яких торкаються зміни гілки (Fast)                             |
+| `pnpm test`                                | Jest: усі unit у `shared`, `api` та `web` (Standard)                            |
+| `pnpm test:full`                           | Standard + e2e, БД і браузерні тести (Full). **Потрібні PostgreSQL і Chromium** |
+| `pnpm test:db`                             | e2e + тести обмежень БД. **Потрібна запущена PostgreSQL**                       |
+| `./gate.sh [--level fast\|standard\|full]` | повна read-only перевірка; рівень тестів — за замовчуванням `standard`          |
+| `pnpm format` / `pnpm format:check`        | Prettier                                                                        |
 
-Команди бази — в окремому розділі [нижче](#база-даних).
+Для автоматичної перевірки Standard перед комітом виконайте `pnpm hooks:install` у кожному checkout.
+Хук версіонується в `.githooks/pre-commit`, не потребує нової залежності й запускає тести без кешу Turbo.
+
+Команди бази — в окремому розділі [нижче](#база-даних). Рівні тестування, вибір бази для Fast, ліміти
+воркерів (`BOOKSWAP_JEST_WORKERS`, `BOOKSWAP_TEST_CONCURRENCY`, `BOOKSWAP_TURBO_CONCURRENCY`) і обов'язковий
+Full перед merge — у [BS-152](docs/plan/bs-152-three-tier-testing.md).
 
 `build`, `typecheck`, `lint`, `test` і `dev` залежать від `^build` і від таски `generate`, тож `packages/shared` збирається, а Prisma Client генерується автоматично. З чистого клону нічого попередньо збирати вручну не треба.
 

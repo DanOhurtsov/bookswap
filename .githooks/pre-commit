@@ -1,0 +1,7 @@
+#!/bin/sh
+# A commit gets every unit suite; Full remains the required CI check before merge.
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+exec pnpm test:standard --force

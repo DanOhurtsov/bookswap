@@ -3,6 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# New commits supersede older runs of the same event and branch/PR, not other branches.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   # §12.2: у репозиторії немає `.env`, тож змінні задаються тут. Для `verify`
@@ -11,10 +20,16 @@ env:
   DATABASE_URL: postgresql://bookswap:dev@localhost:5432/bookswap?schema=public
   DIRECT_DATABASE_URL: postgresql://bookswap:dev@localhost:5432/bookswap?schema=public
   TEST_DATABASE_URL: postgresql://bookswap:dev@localhost:5432/bookswap_test?schema=public
+  # Separate runners isolate job memory; within each runner use the tested bounded profile.
+  # limits.mjs validates these values before any tier runs. Override them here for CI tuning.
+  BOOKSWAP_JEST_WORKERS: '2'
+  BOOKSWAP_TEST_CONCURRENCY: '1'
+  BOOKSWAP_TURBO_CONCURRENCY: '2'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -31,12 +46,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Ліміти Turbo для перевірок якості
+        run: |
+          concurrency="$(node tools/test-tiers/limits.mjs turboConcurrency)"
+          echo "BOOKSWAP_CI_TURBO_CONCURRENCY=$concurrency" >> "$GITHUB_ENV"
+
       - run: pnpm format:check
-      - run: pnpm lint
-      - run: pnpm typecheck
-      # Match gate.sh: concurrent Jest packages oversubscribe the runner and cause jsdom timeouts.
-      - run: pnpm turbo run test --concurrency=1
-      - run: pnpm build
+      - run: pnpm turbo run lint --concurrency="$BOOKSWAP_CI_TURBO_CONCURRENCY"
+      - run: pnpm turbo run typecheck --concurrency="$BOOKSWAP_CI_TURBO_CONCURRENCY"
+      # Full, part 1: every unit suite (Shared, Web, API) — the Standard tier, never from Turbo's cache.
+      - run: node tools/test-tiers/run.mjs suites unit --force
+      - run: pnpm turbo run build --concurrency="$BOOKSWAP_CI_TURBO_CONCURRENCY"
 
   # Окрема job, бо потребує PostgreSQL. Заразом це перевірка критерію «чиста
   # PostgreSQL приймає всі міграції з нуля»: сервісний контейнер щоразу порожній,
@@ -44,6 +64,7 @@ jobs:
   # `migrate deploy` упаде саме тут, а не під час першого розгортання на сервері.
   database:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -73,31 +94,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Згенерувати Prisma Client
-        run: pnpm db:generate
+      # Full, part 2: migrations on the empty database, seed twice (repeatability), then the e2e and
+      # constraint specs. Prisma Client, @bookswap/shared and the API build (the CLI db-spec runs the
+      # BUILT command) come from the Turbo task dependencies of each step.
+      - name: Міграції, seed, e2e і тести constraint'ів
+        run: node tools/test-tiers/run.mjs suites db-setup e2e db
 
-      - name: Міграції на чисту базу
-        run: pnpm db:deploy
-
-      - name: Seed двічі — перевірка повторюваності
-        run: |
-          pnpm db:seed
-          pnpm db:seed
-
-      # guest-contact-retention-cleanup-cli.db-spec runs the BUILT command (apps/api/dist/cli/...). turbo's
-      # test:db builds the api's dependencies but not the api itself; gate.sh builds before test:db, so
-      # this job has to as well, with turbo so that @bookswap/shared is built first.
-      - name: Зібрати API (db-spec запускає зібрану CLI)
-        run: pnpm turbo run build --filter=@bookswap/api
-
-      - name: Тести constraint'ів і e2e
-        run: pnpm test:db
-
-  # Браузерні e2e (усі `*.browser-spec.ts`): гостьовий потік (Stage 10, 10i.3) і особистий статус читання (10j.2). Окрема job: потребує PostgreSQL, Chromium і його
-  # системних бібліотек, яких немає в `pnpm install`, тому в локальний `gate.sh` не входить. Відсутній
-  # Chromium дає ПАДІННЯ тесту, а не пропуск. Поштовий провайдер у тесті примусово `dev` (browser-env.ts).
+  # Браузерні e2e (усі `*.browser-spec.ts`). Окрема job: потребує PostgreSQL, Chromium і його системних
+  # бібліотек, яких немає в `pnpm install`. Відсутній Chromium дає ПАДІННЯ тесту, а не пропуск. Поштовий
+  # провайдер у тесті примусово `dev` (browser-env.ts).
   browser-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -126,18 +134,29 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Згенерувати Prisma Client
-        run: pnpm db:generate
-
-      # @bookswap/shared is consumed from its build (dist). The other jobs get it from turbo's ^build, but
-      # this job calls the package script directly, so without this step neither the API under test nor
-      # `next dev` can resolve the package.
-      - name: Зібрати спільний пакет
-        run: pnpm --filter @bookswap/shared build
-
       # Версія браузера визначається закріпленою версією playwright-core (apps/api/package.json).
       - name: Chromium і його системні залежності
         run: pnpm --filter @bookswap/api exec playwright-core install --with-deps chromium
 
+      # Full, part 3. Prisma Client and @bookswap/shared (consumed from dist by both the API under
+      # test and `next dev`) come from the Turbo task dependencies of test:browser.
       - name: Браузерний e2e
-        run: pnpm --filter @bookswap/api test:browser
+        run: node tools/test-tiers/run.mjs suites browser
+
+  # The required check for merging into main (BS-152): green only when every part of Full is.
+  # `always()` is deliberate. With the default condition a failed or cancelled job would SKIP this one,
+  # and GitHub counts a skipped required check as passed.
+  full:
+    name: Full test suite
+    if: always()
+    needs: [verify, database, browser-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Усі частини Full пройшли
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'length > 0 and (to_entries | all(.value.result == "success"))' > /dev/null
