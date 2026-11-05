@@ -19,9 +19,11 @@
     "db:reset": "prisma migrate reset",
     "lint": "eslint src test prisma prisma.config.ts --max-warnings=0",
     "test": "jest",
+    "test:prepare-db": "tsx test/db/prepare-tier-database.ts",
     "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "test:browser": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-browser.json",
-    "test:db": "pnpm run test:e2e && node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-db.json",
+    "test:db-specs": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-db.json",
+    "test:db": "pnpm run test:e2e && pnpm run test:db-specs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rimraf dist .turbo src/generated *.tsbuildinfo"
   },

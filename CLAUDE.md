@@ -62,12 +62,18 @@ docs/plan/                    roadmap and stage execution plans
 
 ```
 pnpm install
-pnpm lint | pnpm typecheck | pnpm test        # whole repo through turbo
+pnpm lint | pnpm typecheck                    # whole repo through turbo
+pnpm test:fast                                # unit specs the branch's changes reach (BS-152)
+pnpm test                                     # = test:standard: every shared, web and api unit spec
+pnpm db:up && pnpm test:full                  # standard + e2e, db and browser specs (needs Chromium)
 pnpm --filter @bookswap/web test -- <path>    # one web spec
 pnpm --filter @bookswap/api test -- <path>    # one api unit spec
 pnpm db:up && pnpm test:db                    # e2e + db tests, need PostgreSQL (docker compose)
-./gate.sh                                     # full read-only gate; the definition of "verified"
+./gate.sh [--level fast|standard|full]        # full read-only gate, default standard; "verified"
 ```
+
+Install the versioned pre-commit hook once per checkout with `pnpm hooks:install`. It runs
+`pnpm test:standard --force`; Full is required by the `Full test suite` GitHub check before merge.
 
 `gate.sh` never formats or fixes anything. If it fails on formatting, report it — don't run
 `pnpm format` over files you didn't touch.

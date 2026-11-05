@@ -43,9 +43,38 @@
     },
     // Потребує запущеної PostgreSQL, тож кешувати нічого: результат залежить від
     // стану бази, а не лише від вмісту репозиторію.
+    // `test:db` = `test:e2e` + `test:db-specs`; `pnpm test:full` runs the two separately
+    // (BS-152), so all three share dependencies and env. `build`: the
+    // guest-contact-retention-cleanup-cli db-spec runs the BUILT CLI from apps/api/dist.
     "test:db": {
+      "dependsOn": ["^build", "generate", "build"],
+      "env": ["DATABASE_URL", "DIRECT_DATABASE_URL", "TEST_DATABASE_URL"],
+      "cache": false,
+      "outputs": []
+    },
+    "test:e2e": {
       "dependsOn": ["^build", "generate"],
       "env": ["DATABASE_URL", "DIRECT_DATABASE_URL", "TEST_DATABASE_URL"],
+      "cache": false,
+      "outputs": []
+    },
+    "test:db-specs": {
+      "dependsOn": ["^build", "generate", "build"],
+      "env": ["DATABASE_URL", "DIRECT_DATABASE_URL", "TEST_DATABASE_URL"],
+      "cache": false,
+      "outputs": []
+    },
+    // Browser e2e: PostgreSQL, Chromium (playwright-core finds it under $HOME) and the web
+    // app's `next dev`. The screenshot directories are optional, for manual QA only.
+    "test:browser": {
+      "dependsOn": ["^build", "generate"],
+      "env": ["DATABASE_URL", "DIRECT_DATABASE_URL", "TEST_DATABASE_URL"],
+      "passThroughEnv": [
+        "HOME",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "BS134_SCREENSHOTS",
+        "SEARCH_CARDS_SCREENSHOTS"
+      ],
       "cache": false,
       "outputs": []
     },
