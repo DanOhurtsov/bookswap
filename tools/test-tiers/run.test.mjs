@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { availableParallelism, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -11,7 +11,13 @@ const RUN = fileURLToPath(new URL('./run.mjs', import.meta.url))
 
 function dryRun(args, env = {}) {
   return spawnSync(process.execPath, [RUN, ...args, '--dry-run'], {
-    env: { ...process.env, ...env },
+    env: {
+      ...process.env,
+      BOOKSWAP_JEST_WORKERS: '1',
+      BOOKSWAP_TEST_CONCURRENCY: '1',
+      BOOKSWAP_TURBO_CONCURRENCY: '1',
+      ...env,
+    },
     encoding: 'utf8',
   })
 }
@@ -92,15 +98,21 @@ describe('run.mjs as a command', () => {
   })
 
   it('applies the configured limits to the commands it runs', () => {
+    const cpus = availableParallelism()
+    const workers = Math.min(2, cpus)
+    const concurrency = Math.min(3, Math.floor(cpus / workers))
     const result = dryRun(['full'], {
-      BOOKSWAP_JEST_WORKERS: '2',
-      BOOKSWAP_TEST_CONCURRENCY: '3',
+      BOOKSWAP_JEST_WORKERS: String(workers),
+      BOOKSWAP_TEST_CONCURRENCY: String(concurrency),
       BOOKSWAP_TURBO_CONCURRENCY: '1',
     })
     const unit = result.stdout.split('\n').find((line) => line.includes('run test '))
 
-    assert.equal(result.status, 0)
-    assert.match(unit, /--concurrency=3 --force -- --maxWorkers=2$/)
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(
+      unit,
+      new RegExp(`--concurrency=${concurrency} --force -- --maxWorkers=${workers}$`),
+    )
     for (const task of ['test:e2e', 'test:db-specs', 'test:browser']) {
       assert.match(result.stdout, new RegExp(`run ${task} --filter=@bookswap/api --concurrency=1`))
     }
