@@ -1,42 +1,37 @@
 'use client'
 
-import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import type { Me } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
 import { useSession } from '@/app/lib/use-session'
 import { useGuestRedirect } from '@/app/lib/use-login-redirect'
-import {
-  LOANS_TABS,
-  loansTabHref,
-  readLoansAddress,
-  tabOf,
-  type LoansAddress,
-  type LoansTab,
-} from '../model/loans-address'
-import { LoanListPanel } from './LoanListPanel'
+import { useLoansAddress } from '../model/use-loans-address'
+import { CurrentLoansPanel } from './CurrentLoansPanel'
 import { LoansHistoryPanel } from './LoansHistoryPanel'
 import { SingleLoanView } from './SingleLoanView'
 
 /**
- * §5, §6.6 and §8: the «Позичання» section of «Моя бібліотека» — every loan of the person from both
- * sides, one loan by link, and the personal history (BS-143).
+ * §5, §6.6 and §8: the «Позичання» section of «Моя бібліотека» — the current loans of both sides,
+ * one loan by link, and the personal history (BS-143), drawn from the canvas (BS-153).
+ *
+ * Every state is inside `.canvas-theme`, the waiting ones too: the canvas palette (globals.css) is
+ * chosen by that class, so the page never changes colour as it loads.
  */
 export function LoansScreen() {
+  return (
+    <div className="canvas-theme loans-screen">
+      <LoansSession />
+    </div>
+  )
+}
+
+function LoansSession() {
   const { state: session } = useSession()
 
   useGuestRedirect(session.status)
 
-  if (session.status === 'loading') {
-    return (
-      <LibrarySectionPage>
-        <p className="status status--pending">Перевіряю сесію…</p>
-      </LibrarySectionPage>
-    )
-  }
+  if (session.status === 'loading') return <LoansStatus>Перевіряю сесію…</LoansStatus>
 
   if (session.status === 'error') {
     return (
@@ -47,23 +42,13 @@ export function LoansScreen() {
   }
 
   if (session.status !== 'authenticated') {
-    return (
-      <LibrarySectionPage>
-        <p className="status status--pending">Потрібен вхід. Переадресовую…</p>
-      </LibrarySectionPage>
-    )
+    return <LoansStatus>Потрібен вхід. Переадресовую…</LoansStatus>
   }
 
   // `useSearchParams` needs a Suspense boundary: without it Next cannot prerender a page that
   // depends on the query string.
   return (
-    <Suspense
-      fallback={
-        <LibrarySectionPage>
-          <p className="status status--pending">Завантажую…</p>
-        </LibrarySectionPage>
-      }
-    >
+    <Suspense fallback={<LoansStatus>Завантажую…</LoansStatus>}>
       <LoansContent user={session.user} />
     </Suspense>
   )
@@ -75,85 +60,26 @@ export function LoansScreen() {
  * inactive mode sends no request.
  */
 function LoansContent({ user }: { user: Me }) {
-  const address = readLoansAddress(useSearchParams())
+  const { address } = useLoansAddress()
 
-  return address.mode === 'loan' ? (
-    <SingleLoanView user={user} loanId={address.loanId} />
-  ) : (
-    <LoansTabs user={user} address={address} />
-  )
+  switch (address.mode) {
+    case 'loan':
+      // Mounted anew for another reader or another loan: the legacy resource keys its request by
+      // the path alone, so without this a switched account would keep the previous one's loan.
+      return (
+        <SingleLoanView key={`${user.id}:${address.loanId}`} user={user} loanId={address.loanId} />
+      )
+    case 'list':
+      return <CurrentLoansPanel user={user} side={address.side} filters={address.filters} />
+    case 'history':
+      return <LoansHistoryPanel filters={address.filters} />
+  }
 }
 
-const TAB_LABELS: Readonly<Record<LoansTab, string>> = {
-  owner: 'Мої книжки',
-  borrower: 'Я позичаю',
-  history: 'Історія',
-}
-
-type LoansTabsProps = {
-  user: Me
-  address: Exclude<LoansAddress, { mode: 'loan' }>
-}
-
-/**
- * The tab lives in the URL, not in `useState`.
- *
- * Otherwise it drifts from the address two ways: changing the query on the same route does
- * nothing, and a reload opens a different tab than the address bar names. The URL is the state.
- *
- * Switching goes through `router.replace`, i.e. it **creates no history entry**: "back" returns to
- * the previous page, not the previous tab. On purpose — a tab is a filter, not a navigation step,
- * and littering the history with it would make a person press "back" three times to leave.
- */
-function LoansTabs({ user, address }: LoansTabsProps) {
-  const router = useRouter()
-  const parameters = useSearchParams()
-  const tab = tabOf(address)
-
+function LoansStatus({ children }: { children: ReactNode }) {
   return (
     <LibrarySectionPage>
-      <GuestLoansLink />
-
-      <Tabs
-        className="gap-8"
-        value={tab}
-        onValueChange={(next) => {
-          const selected = LOANS_TABS.find((value) => value === next)
-          if (selected !== undefined) router.replace(loansTabHref(parameters, selected))
-        }}
-      >
-        <TabsList variant="line" aria-label="Вкладки позичань">
-          {LOANS_TABS.map((value) => (
-            <TabsTrigger key={value} value={value}>
-              {TAB_LABELS[value]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <TabsContent value={tab}>
-          {address.mode === 'history' ? (
-            <LoansHistoryPanel />
-          ) : (
-            <LoanListPanel user={user} role={address.role} />
-          )}
-        </TabsContent>
-      </Tabs>
+      <p className="status status--pending">{children}</p>
     </LibrarySectionPage>
-  )
-}
-
-function GuestLoansLink() {
-  // Stage 10 (10f.3): the route exists only behind the server's features.guestLoans — the same
-  // flag that hides the `/loans/guest` page itself.
-  const { state: session } = useSession()
-
-  if (session.status !== 'authenticated' || session.features?.guestLoans !== true) return null
-
-  return (
-    <div className="actions">
-      <Link href="/loans/guest" className="link-underline">
-        Гостьові позики
-      </Link>
-    </div>
   )
 }

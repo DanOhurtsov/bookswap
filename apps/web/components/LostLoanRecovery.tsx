@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import type { Loan } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
+import { Button } from '@/components/ui/button'
 import { LOAN_ACTION_LABELS, formatDate } from '@/app/lib/labels'
 
 interface LostLoanRecoveryProps {
@@ -66,16 +67,17 @@ export function LostLoanRecovery({
           setEffectiveAt(event.target.value)
         }}
       />
-      <button
+      <Button
         type="button"
-        className="button--ghost"
+        variant="outline"
+        className="loan-action"
         disabled={busy}
         onClick={() => {
           onRecover(effectiveAt === '' ? {} : { effectiveAt })
         }}
       >
         {submitting ? 'Виконую…' : LOAN_ACTION_LABELS.recover}
-      </button>
+      </Button>
     </div>
   )
 }

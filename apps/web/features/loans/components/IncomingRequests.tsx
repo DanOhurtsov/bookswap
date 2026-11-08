@@ -31,7 +31,7 @@ import {
 import { useApproveForm } from '../model/use-approve-form'
 import { useIncomingRequests } from '../model/use-incoming-requests'
 import { useLoanActions } from '../model/use-loan-actions'
-import { ApproveFields } from './LoanCardActions'
+import { ApproveFields } from './ApproveFields'
 
 /** The two answers this section gives; everything else about a loan stays on `/loans`. */
 type Answer = Extract<LoanAction, 'approve' | 'reject'>
