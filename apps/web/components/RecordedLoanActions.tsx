@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { Loan, LoanAction } from '@bookswap/shared'
 import { TextField } from '@/components/Form/FormFields'
+import { Button } from '@/components/ui/button'
 import { LOAN_ACTION_LABELS, formatDate } from '@/app/lib/labels'
 
 interface Confirmation {
@@ -52,18 +53,20 @@ export function RecordedLoanActions({
           справді отримали, або відхиліть запис. До вашої відповіді книжка недоступна іншим.
         </span>
         <div className="person__actions">
-          <button
+          <Button
             type="button"
+            className="loan-action loan-action--primary"
             disabled={busy}
             onClick={() => {
               void onAct(loan, 'confirm_record')
             }}
           >
             {label('confirm_record')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="button--danger"
+            variant="outline"
+            className="loan-action"
             disabled={busy}
             onClick={() => {
               onConfirm({
@@ -76,7 +79,7 @@ export function RecordedLoanActions({
             }}
           >
             {label('decline_record')}
-          </button>
+          </Button>
         </div>
       </>
     )
@@ -90,9 +93,10 @@ export function RecordedLoanActions({
       </span>
       <AmendRecordForm loan={loan} busy={busy} label={label('amend_record')} onAct={onAct} />
       <div className="person__actions">
-        <button
+        <Button
           type="button"
-          className="button--danger"
+          variant="outline"
+          className="loan-action"
           disabled={busy}
           onClick={() => {
             onConfirm({
@@ -104,7 +108,7 @@ export function RecordedLoanActions({
           }}
         >
           {label('withdraw_record')}
-        </button>
+        </Button>
       </div>
     </>
   )
@@ -155,9 +159,10 @@ function AmendRecordForm({
           setDueAt(event.target.value)
         }}
       />
-      <button
+      <Button
         type="button"
-        className="button--ghost"
+        variant="outline"
+        className="loan-action"
         disabled={busy || !changed || !valid}
         onClick={() => {
           void onAct(loan, 'amend_record', {
@@ -167,7 +172,7 @@ function AmendRecordForm({
         }}
       >
         {label}
-      </button>
+      </Button>
     </div>
   )
 }

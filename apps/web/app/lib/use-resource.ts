@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiRequest, describeError } from './api'
+import { ApiRequestError, apiRequest, describeError } from './api'
 import {
   requestKey,
   visibleState,
@@ -106,7 +106,11 @@ export function useApiResource<TData>(path: string, schema: ZodType<TData>): Res
         setSnapshot({
           key,
           generation,
-          state: { status: 'error', message: describeError(error) },
+          state: {
+            status: 'error',
+            message: describeError(error),
+            ...(error instanceof ApiRequestError ? { httpStatus: error.status } : {}),
+          },
         })
       }
     }

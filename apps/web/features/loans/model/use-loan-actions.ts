@@ -8,14 +8,18 @@ export interface Confirmation {
   title: string
   description: string
   confirmLabel: string
-  run: () => Promise<void>
+  /** The button that only closes the dialog: it says that nothing will happen. */
+  dismissLabel?: string
+  run: () => Promise<unknown>
+  /** Where the focus returns when the dialog closes; by default, what had it when it opened. */
+  opener?: HTMLElement | null
 }
 
 /**
  * The shared mechanics of acting on a loan.
  *
- * Both views — the list and one loan — do the same things to a card and differ only in where the
- * data came from. Two sets of `busyKey`, `failure` and `ConfirmDialog` would one day drift apart.
+ * The one loan's page and the home page's requests do the same things to a loan and differ only in
+ * where the data came from. Two sets of `busyKey`, `failure` and confirmation would one day drift.
  */
 export function useLoanActions(
   reload: () => Promise<void>,
@@ -26,7 +30,8 @@ export function useLoanActions(
   const [busyKey, setBusyKey] = useState<string>()
   const [confirmation, setConfirmation] = useState<Confirmation>()
 
-  async function run(key: string, action: () => Promise<void>): Promise<void> {
+  /** Whether the action went through: only then the caller may say so (BS-153: the toast). */
+  async function run(key: string, action: () => Promise<void>): Promise<boolean> {
     setFailure(undefined)
     setBusyKey(key)
 
@@ -35,23 +40,30 @@ export function useLoanActions(
       // `await` on purpose: without it `busyKey` would clear before the new data arrives, and the
       // same action could be pressed a second time on an already stale card.
       await reload()
+      setConfirmation(undefined)
+      return true
     } catch (error) {
       const shown = error instanceof ApiRequestError ? error : new Error(describeError(error))
       setFailure(shown)
       // Awaited for the same reason as `reload`: the card stays busy while the caller reacts.
       await onFailure?.(shown)
+      // BS-153: a confirmation that failed stays open, so it can be tried again as it is.
+      return false
     } finally {
       setBusyKey(undefined)
-      setConfirmation(undefined)
     }
   }
 
-  const act = (loan: Loan, action: LoanAction, body: Record<string, unknown> = {}): Promise<void> =>
+  const act = (loan: Loan, action: LoanAction, body: Record<string, unknown> = {}) =>
     run(`${action}:${loan.id}`, async () => {
       await apiRequest(`/loans/${loan.id}`, { method: 'PATCH', body: { action, ...body } })
     })
 
-  return { failure, busyKey, confirmation, setConfirmation, act }
-}
+  /** Asks before a dangerous action. A failure shown before is about another attempt: it goes. */
+  const confirm = (next: Confirmation) => {
+    setFailure(undefined)
+    setConfirmation(next)
+  }
 
-export type LoanActionsState = ReturnType<typeof useLoanActions>
+  return { failure, busyKey, confirmation, confirm, setConfirmation, act }
+}

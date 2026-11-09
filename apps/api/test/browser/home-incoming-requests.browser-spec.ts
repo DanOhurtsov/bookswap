@@ -471,7 +471,7 @@ describe('BS-147: «Потребує вашої дії» на головній (
     })
   }
 
-  it('«Погодити» з датою й відповіддю → картка зникає; /loans показує домовленість; відмова на /loans і повернення назад без перезавантаження показують свіжий список', async () => {
+  it('«Погодити» з датою й відповіддю → картка зникає; /loans показує домовленість; відмова в деталях позики і повернення назад без перезавантаження показують свіжий список', async () => {
     const { owner, asked } = await inboxOf('bs147-req-approve', 2)
     const page = await newPage(1440, 'light')
     const reads = watchListReads(page)
@@ -516,12 +516,22 @@ describe('BS-147: «Потребує вашої дії» на головній (
     await section(page).getByRole('link', { name: 'Переглянути всі' }).click()
     await page.waitForURL(`${WEB_ORIGIN}/loans?role=owner`)
 
-    const lent = page.locator('li.book', { hasText: asked[0]!.title })
-    const waiting = page.locator('li.book', { hasText: asked[1]!.title })
+    // BS-153: the list is rows that lead to each loan; the answers are on the loan's own page.
+    const lent = page.locator('a.loan-row', { hasText: asked[0]!.title })
+    const waiting = page.locator('a.loan-row', { hasText: asked[1]!.title })
 
-    await lent.getByText(/Домовлено, ще не передано/).waitFor()
-    await waiting.getByRole('button', { name: 'Відмовити' }).click()
-    await waiting.getByText(/Відмовлено/).waitFor()
+    await lent.getByText('Домовлено, ще не передано').waitFor()
+    await waiting.click()
+    // The row keeps its list beside the loan, so «← Позичання» knows the way back.
+    await page.waitForURL(`${WEB_ORIGIN}/loans?role=owner&loanId=${asked[1]!.loanId}`)
+    await page.getByRole('button', { name: 'Відмовити' }).click()
+    await page.getByRole('heading', { name: 'Ви відмовили в запиті' }).waitFor()
+
+    // Back to the list: read anew, the refusal has left the current loans for «Історія».
+    await page.goBack()
+    await page.waitForURL(`${WEB_ORIGIN}/loans?role=owner`)
+    await lent.waitFor()
+    expect(await waiting.count()).toBe(0)
 
     const readsBefore = reads.length
 

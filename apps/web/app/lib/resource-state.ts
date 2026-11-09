@@ -11,7 +11,17 @@
  */
 
 export type ResourceState<TData> =
-  { status: 'loading' } | { status: 'ready'; data: TData } | { status: 'error'; message: string }
+  | { status: 'loading' }
+  | { status: 'ready'; data: TData }
+  | {
+      status: 'error'
+      message: string
+      /**
+       * HTTP-статус відповіді API, коли вона була. Немає — відповіді не було взагалі (мережа,
+       * збій розбору), і це НЕ те саме, що 404: «позики немає» каже лише сервер.
+       */
+      httpStatus?: number
+    }
 
 /** Слід, який лишило по собі конкретне покоління запиту. */
 export interface ResourceSnapshot<TData> {

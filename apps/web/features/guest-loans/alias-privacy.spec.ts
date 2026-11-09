@@ -48,12 +48,17 @@ describe('приватність alias гостьового контакту (St
     expect(GENERAL_SURFACES).toEqual(
       expect.arrayContaining([
         `${LOANS_FEATURE}/components/LoansScreen.tsx`,
-        `${LOANS_FEATURE}/components/LoanListPanel.tsx`,
-        `${LOANS_FEATURE}/components/LoanCard.tsx`,
-        `${LOANS_FEATURE}/components/LoanCardActions.tsx`,
+        `${LOANS_FEATURE}/components/CurrentLoansPanel.tsx`,
+        `${LOANS_FEATURE}/components/LoanRows.tsx`,
         `${LOANS_FEATURE}/components/SingleLoanView.tsx`,
+        `${LOANS_FEATURE}/components/LoanPanel.tsx`,
+        `${LOANS_FEATURE}/components/LoanPageCards.tsx`,
         `${LOANS_FEATURE}/components/LoansHistoryPanel.tsx`,
         `${LOANS_FEATURE}/model/loans-address.ts`,
+        `${LOANS_FEATURE}/model/loan-row.ts`,
+        `${LOANS_FEATURE}/model/current-loans-view.ts`,
+        `${LOANS_FEATURE}/model/history-loans-view.ts`,
+        `${LOANS_FEATURE}/model/loan-page-view.ts`,
       ]),
     )
   })
