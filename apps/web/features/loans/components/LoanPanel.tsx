@@ -11,7 +11,7 @@ import {
   LoaderCircleIcon,
   TriangleAlertIcon,
 } from 'lucide-react'
-import type { Loan, LoanRole, LoanTermDays } from '@bookswap/shared'
+import type { Loan, LoanRole } from '@bookswap/shared'
 import { FormStatus } from '@/components/Form/FormStatus'
 import { LostLoanRecovery } from '@/components/LostLoanRecovery'
 import { RecordedLoanActions } from '@/components/RecordedLoanActions'
@@ -22,13 +22,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { LOAN_ACTION_LABELS } from '@/app/lib/labels'
 import { actionPlanOf, type PlannedAction } from '../model/loan-action-plan'
 import { loanPanelOf } from '../model/loan-panel'
 import type { BadgeTone } from '../model/loan-status'
-import { useApproveForm } from '../model/use-approve-form'
 import type { LoanPageActions } from '../model/use-loan-page-actions'
-import { ApproveFields } from './ApproveFields'
 
 const TONE_ICONS: Readonly<Record<BadgeTone, LucideIcon>> = {
   wait: ClockIcon,
@@ -41,7 +38,6 @@ const TONE_ICONS: Readonly<Record<BadgeTone, LucideIcon>> = {
 type LoanPanelProps = {
   loan: Loan
   role: LoanRole
-  defaultLoanTermDays: LoanTermDays | null
   actions: LoanPageActions
   /** The panel's title: the focus lands here when the action that had it is gone. */
   titleRef: RefObject<HTMLHeadingElement | null>
@@ -50,8 +46,11 @@ type LoanPanelProps = {
 /**
  * The canvas's panel of the current state: where the loan stands, what the reader can do, and what
  * went wrong with the last attempt (`role="alert"`, right under the words it is about).
+ *
+ * The owner's answer to a request (`answer`) is not here: the page shows `OwnerRequestView` instead of
+ * this panel while the owner answers.
  */
-export function LoanPanel({ loan, role, defaultLoanTermDays, actions, titleRef }: LoanPanelProps) {
+export function LoanPanel({ loan, role, actions, titleRef }: LoanPanelProps) {
   const titleId = useId()
   const panel = loanPanelOf(loan, role)
   const plan = actionPlanOf(loan.status, role)
@@ -76,9 +75,6 @@ export function LoanPanel({ loan, role, defaultLoanTermDays, actions, titleRef }
 
       {actions.confirmation === undefined && <FormStatus error={actions.failure} />}
 
-      {plan.kind === 'answer' && (
-        <AnswerForm loan={loan} defaultLoanTermDays={defaultLoanTermDays} actions={actions} />
-      )}
       {plan.kind === 'buttons' && plan.buttons.length > 0 && (
         <div className="loan-panel__actions">
           {plan.buttons.map((planned) => (
@@ -202,58 +198,5 @@ function MoreActions({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-/** The owner's answer: the term and a note go with «Погодити» (§8); «Відмовити» needs neither. */
-function AnswerForm({
-  loan,
-  defaultLoanTermDays,
-  actions,
-}: {
-  loan: Loan
-  defaultLoanTermDays: LoanTermDays | null
-  actions: LoanPageActions
-}) {
-  const form = useApproveForm(loan, defaultLoanTermDays)
-
-  return (
-    <>
-      <div className="loan-panel__form">
-        <ApproveFields loan={loan} form={form} />
-      </div>
-      <div className="loan-panel__actions">
-        <AnswerButton loan={loan} actions={actions} action="approve" body={form.body} />
-        <AnswerButton loan={loan} actions={actions} action="reject" />
-      </div>
-    </>
-  )
-}
-
-function AnswerButton({
-  loan,
-  actions,
-  action,
-  body,
-}: {
-  loan: Loan
-  actions: LoanPageActions
-  action: 'approve' | 'reject'
-  body?: Record<string, unknown>
-}) {
-  const isRunning = actions.busyKey === `${action}:${loan.id}`
-
-  return (
-    <Button
-      type="button"
-      variant={action === 'approve' ? 'default' : 'outline'}
-      className={action === 'approve' ? 'loan-action loan-action--primary' : 'loan-action'}
-      disabled={actions.busyKey !== undefined}
-      aria-busy={isRunning}
-      onClick={() => void actions.act(loan, action, body)}
-    >
-      {isRunning && <LoaderCircleIcon aria-hidden="true" className="motion-safe:animate-spin" />}
-      {isRunning ? 'Виконую…' : LOAN_ACTION_LABELS[action]}
-    </Button>
   )
 }

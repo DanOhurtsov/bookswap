@@ -1,24 +1,27 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useRef, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ChevronLeftIcon, CircleAlertIcon, LoaderCircleIcon } from 'lucide-react'
 import type { Loan, LoanRole, Me } from '@bookswap/shared'
 import { SECTION_NOTICE_LINK, SectionNotice } from '@/components/SectionNotice'
+import { ApiRequestError } from '@/app/lib/api'
 import { loginHref } from '@/app/lib/return-to'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LibrarySectionPage } from '@/features/library/sections/index.client'
-import { toLoanPageView } from '../model/loan-page-view'
+import { toLoanPageView, type LoanPageView } from '../model/loan-page-view'
 import { LOAD_PROBLEM_WORDS, type LoanLoadProblem } from '../model/loan-page-state'
 import { loanTimelineOf } from '../model/loan-timeline'
 import { ALL_TAB, loansBackHref, type LoansTab } from '../model/loans-address'
 import { useLoanPage } from '../model/use-loan-page'
-import { useLoanPageActions } from '../model/use-loan-page-actions'
+import { toOwnerRequestView } from '../model/owner-request-view'
+import { useLoanPageActions, type LoanPageActions } from '../model/use-loan-page-actions'
 import { useLoansAddress } from '../model/use-loans-address'
 import { LoanConfirmDialog } from './LoanConfirmDialog'
 import { LoanFactsCard, LoanHero, LoanMessages, LoanTimelineCard } from './LoanPageCards'
 import { LoanPanel } from './LoanPanel'
+import { OwnerRequestView } from './OwnerRequestView'
 
 type SingleLoanViewProps = {
   user: Me
@@ -136,9 +139,72 @@ type LoanPageProps = {
 
 function LoanPage({ loan, user, reload, notice }: LoanPageProps) {
   const view = useMemo(() => toLoanPageView(loan, user.id), [loan, user.id])
-  const steps = useMemo(() => loanTimelineOf(loan), [loan])
-  const actions = useLoanPageActions(reload)
+  // The canvas's «Запит до власника» is this page while the owner answers: opened on a request, it
+  // stays to show the answer's outcome, until «Відкрити позику» turns it into the loan's own page.
+  const [isAnswering, setIsAnswering] = useState(
+    () => view.role === 'owner' && loan.status === 'REQUESTED',
+  )
+  // While answering, a conflict (the borrower cancelled meanwhile) re-reads the loan: its new status
+  // is the outcome the page then shows — itself, so no toast repeats it.
+  const actions = useLoanPageActions(
+    reload,
+    isAnswering ? { onFailure: rereadOnConflict(reload), toasts: false } : {},
+  )
   const panelTitle = useRef<HTMLHeadingElement>(null)
+  const { parameters } = useLoansAddress()
+
+  // The outcome's «Відкрити позику» is gone with it: the loan's panel takes the focus.
+  const openLoan = () => {
+    setIsAnswering(false)
+    requestAnimationFrame(() => panelTitle.current?.focus())
+  }
+
+  return (
+    <>
+      {isAnswering ? (
+        <>
+          <LoanBack role={view.role} fallback={view.listTab} />
+          {notice}
+          <OwnerRequestView
+            loan={loan}
+            view={toOwnerRequestView(loan)}
+            defaultLoanTermDays={user.defaultLoanTermDays}
+            actions={actions}
+            backHref={loansBackHref(parameters, view.role, view.listTab)}
+            onOpenLoan={openLoan}
+            titleRef={panelTitle}
+          />
+        </>
+      ) : (
+        <LoanDetails
+          loan={loan}
+          view={view}
+          actions={actions}
+          titleRef={panelTitle}
+          notice={notice}
+        />
+      )}
+      <LoanConfirmDialog actions={actions} fallbackFocus={panelTitle} />
+    </>
+  )
+}
+
+function rereadOnConflict(reload: () => Promise<void>) {
+  return (failure: Error) =>
+    failure instanceof ApiRequestError && failure.status === 409 ? reload() : undefined
+}
+
+type LoanDetailsProps = {
+  loan: Loan
+  view: LoanPageView
+  actions: LoanPageActions
+  titleRef: RefObject<HTMLHeadingElement | null>
+  notice: ReactNode
+}
+
+/** The loan's own page: the book, where it stands with its actions, its history and its details. */
+function LoanDetails({ loan, view, actions, titleRef, notice }: LoanDetailsProps) {
+  const steps = useMemo(() => loanTimelineOf(loan), [loan])
 
   return (
     <>
@@ -147,13 +213,7 @@ function LoanPage({ loan, user, reload, notice }: LoanPageProps) {
       <LoanHero view={view} />
       <div className="loan-page__grid">
         <div className="loan-page__panel">
-          <LoanPanel
-            loan={loan}
-            role={view.role}
-            defaultLoanTermDays={user.defaultLoanTermDays}
-            actions={actions}
-            titleRef={panelTitle}
-          />
+          <LoanPanel loan={loan} role={view.role} actions={actions} titleRef={titleRef} />
         </div>
         <div className="loan-page__timeline">
           <LoanTimelineCard steps={steps} />
@@ -165,7 +225,6 @@ function LoanPage({ loan, user, reload, notice }: LoanPageProps) {
           <LoanMessages messages={view.messages} />
         </div>
       </div>
-      <LoanConfirmDialog actions={actions} fallbackFocus={panelTitle} />
     </>
   )
 }

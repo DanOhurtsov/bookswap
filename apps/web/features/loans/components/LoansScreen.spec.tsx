@@ -10,6 +10,7 @@ import type { SessionState } from '@/app/lib/use-session'
 import { ToastProvider } from '@/components/ui/toast'
 import { watchHistory } from '@/features/library/own-library/own-library.test-helpers'
 import { initialDueDate } from '../model/approve-due-date'
+import { shortDay } from '../model/loan-term'
 import { loanOf } from '../loans.test-helpers'
 import { LoansScreen } from './LoansScreen'
 
@@ -581,17 +582,21 @@ describe('LoansScreen: термін за замовчуванням у пого�
     render(<LoansScreen />)
   }
 
+  /** BS-153 design update: the chosen date is the summary beside the calendar, not a date field. */
+  const chosenDate = async () =>
+    (await screen.findByRole('group', { name: 'Повернути до' })).querySelector('.loan-term__due')
+      ?.textContent
+
   it('без дати від позичальника підставляє сьогодні + термін власника й надсилає її з погодженням', async () => {
     const user = userEvent.setup()
 
     openAsOwner(REQUESTED_LOAN, 21)
 
-    const field = await screen.findByLabelText('Повернути до')
     const expected = initialDueDate(null, 21, new Date())
 
-    expect(field).toHaveValue(expected)
+    expect(await chosenDate()).toBe(shortDay(expected))
 
-    await user.click(screen.getByRole('button', { name: 'Погодити' }))
+    await user.click(screen.getByRole('button', { name: `Погодити до ${shortDay(expected)}` }))
 
     expect(apiRequest).toHaveBeenCalledWith(`/loans/${REQUESTED_LOAN.id}`, {
       method: 'PATCH',
@@ -602,12 +607,14 @@ describe('LoansScreen: термін за замовчуванням у пого�
   it('дата, яку попросив позичальник, лишається', async () => {
     openAsOwner({ ...REQUESTED_LOAN, dueAt: '2026-12-01' }, 30)
 
-    expect(await screen.findByLabelText('Повернути до')).toHaveValue('2026-12-01')
+    expect(await chosenDate()).toBe('01.12.26')
   })
 
-  it('без терміну власника поле порожнє, як і раніше', async () => {
+  it('без терміну власника й дати в запиті — «Без дати», погодження без терміну', async () => {
     openAsOwner(REQUESTED_LOAN, null)
 
-    expect(await screen.findByLabelText('Повернути до')).toHaveValue('')
+    expect(await chosenDate()).toBe('Без дати')
+    expect(screen.getByRole('radio', { name: /^Без дати/ })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Погодити без терміну' })).toBeEnabled()
   })
 })

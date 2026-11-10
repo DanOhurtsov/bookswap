@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen, waitFor } from '@testing-library/react'
-import type { Me, PublicUser, VisibleLibraryResponse } from '@bookswap/shared'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { Me, PublicUser, VisibleCopy, VisibleLibraryResponse } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import { LegacyPersonRedirect, PersonScreen } from './PersonScreen'
@@ -160,5 +161,100 @@ describe('LegacyPersonRedirect: /users/<id>/library (BS-148)', () => {
 
     expect(await screen.findByText('Користувача не знайдено')).toBeInTheDocument()
     expect(mockReplace).not.toHaveBeenCalled()
+  })
+})
+
+/** Марта's shelf with one «Дюна» at home; `myActiveLoan` is the viewer's own open loan on it. */
+function shelfWith(myActiveLoan: VisibleCopy['myActiveLoan']): VisibleLibraryResponse {
+  return {
+    owner: MARTA,
+    groups: [
+      {
+        edition: {
+          id: 'ed-1',
+          workId: 'work-1',
+          translationId: null,
+          textKind: 'ORIGINAL',
+          publisher: null,
+          year: null,
+          isbn13: null,
+          pageCount: null,
+          coverUrl: null,
+          format: 'PAPERBACK',
+          lang: 'uk',
+          translator: null,
+          revision: 1,
+        },
+        work: {
+          id: 'work-1',
+          title: 'Дюна',
+          origLang: 'uk',
+          firstPubYear: null,
+          description: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          revision: 1,
+        },
+        authors: [],
+        copies: [
+          {
+            id: 'copy-1',
+            status: 'AVAILABLE',
+            condition: 'GOOD',
+            isHome: true,
+            holder: null,
+            myActiveLoan,
+            canRequest: myActiveLoan === null,
+            expectedReturnAt: null,
+          } as VisibleCopy,
+        ],
+        counts: { total: 1, home: 1, out: 0 },
+        inWishlist: false,
+      },
+    ],
+  }
+}
+
+describe('PersonScreen: «Попросити» (рішення PO від 10.11.2026)', () => {
+  it('the shelf read again after the request stays on screen: «Запит надіслано» outlives it, then «Закрити» shows the sent request', async () => {
+    let shelf = shelfWith(null)
+
+    serve({
+      '/users/handles/marta': () => Promise.resolve(MARTA),
+      '/users/user-2/library': () => Promise.resolve(shelf),
+      '/loans': () => {
+        shelf = shelfWith({ id: 'loan-9', status: 'REQUESTED' })
+
+        return Promise.resolve({ loan: { id: 'loan-9' } })
+      },
+    })
+
+    render(withQueryClient(<PersonScreen handle="marta" />))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
+
+    const sent = await screen.findByRole('heading', { name: 'Запит надіслано' })
+
+    await waitFor(() => {
+      expect(requestedPaths()).toEqual([
+        '/users/handles/marta',
+        '/users/user-2/library',
+        '/loans',
+        '/users/user-2/library',
+      ])
+    })
+    expect(sent).toBeInTheDocument()
+    expect(screen.queryByText('Завантажую…')).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('status')).getByRole('link', { name: 'Відкрити запит' }),
+    ).toHaveAttribute('href', '/loans?loanId=loan-9&role=borrower')
+
+    // jsdom has no wide viewport: the form is the phone's sheet, whose own ✕ is also «Закрити».
+    await userEvent.click(
+      within(screen.getByRole('status')).getByRole('button', { name: 'Закрити' }),
+    )
+
+    expect(screen.getByText(/Запит надіслано — чекайте на відповідь/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Попросити' })).not.toBeInTheDocument()
   })
 })
