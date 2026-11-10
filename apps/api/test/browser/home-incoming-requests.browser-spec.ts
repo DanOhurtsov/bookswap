@@ -524,8 +524,17 @@ describe('BS-147: «Потребує вашої дії» на головній (
     await waiting.click()
     // The row keeps its list beside the loan, so «← Позичання» knows the way back.
     await page.waitForURL(`${WEB_ORIGIN}/loans?role=owner&loanId=${asked[1]!.loanId}`)
-    await page.getByRole('button', { name: 'Відмовити' }).click()
-    await page.getByRole('heading', { name: 'Ви відмовили в запиті' }).waitFor()
+    // Рішення PO від 10.11.2026: the owner's answer on the loan's page asks before refusing, and the
+    // page itself states the outcome once the re-read loan is REJECTED.
+    await page
+      .getByRole('region', { name: 'Відповідь на запит' })
+      .getByRole('button', { name: 'Відмовити' })
+      .click()
+    await page
+      .getByRole('alertdialog', { name: 'Відмовити в запиті?' })
+      .getByRole('button', { name: 'Відмовити' })
+      .click()
+    await page.getByRole('heading', { name: 'Запит відхилено' }).waitFor()
 
     // Back to the list: read anew, the refusal has left the current loans for «Історія».
     await page.goBack()

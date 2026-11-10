@@ -1,6 +1,7 @@
 import type { Loan, LoanListResponse, PublicUser } from '@bookswap/shared'
 import { ApiRequestError, describeError } from '@/app/lib/api'
 import { countNoun, timeAgo } from '@/app/lib/time-ago'
+import { shortDay } from './loan-term'
 
 /** The canvas shows three requests; the rest are behind «Переглянути всі». */
 export const INCOMING_REQUESTS_SHOWN = 3
@@ -86,8 +87,7 @@ export function toIncomingRequestsView({
         title: loan.work.title,
         authors: loan.authors.map((author) => author.name).join(', '),
         coverUrl: loan.edition.coverUrl,
-        proposedDue:
-          loan.dueAt === null ? null : { date: loan.dueAt, label: shortDate(loan.dueAt) },
+        proposedDue: loan.dueAt === null ? null : { date: loan.dueAt, label: shortDay(loan.dueAt) },
         message: loan.message,
       }
     }),
@@ -106,11 +106,4 @@ export function isAnswerConflict(failure: unknown): failure is ApiRequestError {
 /** What the section says after such a conflict: which request, and the server's reason. */
 export function answerConflictMessage(title: string, failure: ApiRequestError): string {
   return `Не вдалося відповісти на запит на «${title}». ${failure.message}`
-}
-
-/** «2026-11-15» → «15.11.26», as the canvas writes a return date. */
-function shortDate(day: string): string {
-  const [year = '', month = '', date = ''] = day.split('-')
-
-  return `${date}.${month}.${year.slice(2)}`
 }

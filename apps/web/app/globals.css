@@ -1337,8 +1337,12 @@ a:focus-visible > .link-underline {
  * fields, switches, selects, the header above — match the page, and every other page keeps the app
  * palette. Plain CSS keyed on the theme class the head script sets before the first paint, so a dark
  * canvas page never flashes light.
+ *
+ * `.canvas-palette` is the same palette for one block drawn from the canvas on a page that is not
+ * (the request form on a friend's shelf): only that block changes, never the page around it.
  */
-body:has(.canvas-theme) {
+body:has(.canvas-theme),
+.canvas-palette {
   --canvas-page: #faf9f6;
   --canvas-surface: #ffffff;
   --canvas-subtle: #f3f3f0;
@@ -1396,7 +1400,8 @@ body:has(.canvas-theme) {
   --accent-foreground: var(--canvas-text);
 }
 
-.dark body:has(.canvas-theme) {
+.dark body:has(.canvas-theme),
+.dark .canvas-palette {
   --canvas-page: #171b18;
   --canvas-surface: #202621;
   --canvas-subtle: #29312b;
@@ -4161,5 +4166,893 @@ a.loan-back__link:hover {
   .loans-empty__title {
     font-size: 20px;
     line-height: 28px;
+  }
+}
+
+/* --- Запит на позику: строк, відповідь власника, запит позичальника ------- */
+/*
+ * Canvas «Запит до власника» and «Попросити книжку»: the term (presets, month, the chosen date), the
+ * note with its counter, a failure kept under the form, and the outcome once the server answered.
+ * Phone first: the cards stack, the presets scroll sideways and the chosen date stands above the month;
+ * from a tablet up the month and the date sit side by side.
+ */
+.owner-request {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--canvas-text);
+}
+
+.owner-request__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.owner-request__title {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.owner-request__sent {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--canvas-muted);
+}
+
+.owner-request__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'book' 'who' 'answer';
+  gap: 16px;
+}
+
+.owner-request__card,
+.borrow-request {
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  box-shadow: var(--canvas-card-shadow);
+}
+
+.owner-request__who {
+  grid-area: who;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.owner-request__person {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.owner-request__avatar {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  font-size: 20px;
+}
+
+.owner-request__person-words {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.owner-request__name {
+  overflow-wrap: anywhere;
+  border-radius: 4px;
+  color: var(--canvas-text);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.owner-request__name:hover,
+.owner-request__book-title:hover {
+  color: var(--canvas-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.owner-request__name:focus-visible,
+.owner-request__book-title:focus-visible,
+.loan-outcome__title:focus-visible {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+.owner-request__handle,
+.owner-request__book-line {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--canvas-muted);
+}
+
+.owner-request__message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--canvas-border);
+}
+
+.owner-request__message-label,
+.owner-request__eyebrow {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--canvas-muted);
+}
+
+.owner-request__quote {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  border-radius: 8px;
+  background: var(--canvas-subtle);
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.owner-request__book {
+  grid-area: book;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+}
+
+.owner-request__cover {
+  flex: 0 0 56px;
+  width: 56px;
+}
+
+.owner-request__cover .shelf-cover--drawn {
+  padding: 8px 5px 6px 8px;
+}
+
+.owner-request__cover .shelf-cover__title {
+  font-size: 9px;
+  line-height: 11px;
+}
+
+.owner-request__cover .shelf-cover__author {
+  font-size: 7px;
+  line-height: 9px;
+}
+
+.owner-request__book-words {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.owner-request__book-title {
+  overflow-wrap: anywhere;
+  border-radius: 4px;
+  color: var(--canvas-text);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.owner-request__copy-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--canvas-accent);
+}
+
+.owner-request__copy-state::before {
+  content: '';
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+
+.owner-request__answer {
+  grid-area: answer;
+  min-width: 0;
+}
+
+.owner-request__form,
+.borrow-request {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+  color: var(--canvas-text);
+}
+
+/* The term. */
+/*
+ * The term field's own buttons (presets, calendar days and arrows, «Повернути як у запиті») are plain
+ * <button>s styled by their classes. The legacy `button:not([data-ui='button'])` look — padding, dark
+ * fill, weight, a «progress» cursor and 0.6 opacity when disabled — is cleared here at that rule's own
+ * weight (`:where` adds none), so the classes below, scoped by their component, decide everything.
+ */
+:where(.loan-term, .loan-calendar) button:not([data-ui='button']) {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+:where(.loan-term, .loan-calendar) button:not([data-ui='button']):disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.loan-term {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.loan-term__legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.loan-term__hint {
+  margin: -6px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--canvas-muted);
+}
+
+.loan-term__options {
+  display: grid;
+  grid-auto-columns: minmax(88px, 1fr);
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+  border-radius: 10px;
+  background: var(--canvas-neutral-subtle);
+  scrollbar-width: none;
+}
+
+.loan-term .loan-term__option {
+  display: flex;
+  min-height: 52px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--canvas-text);
+  text-align: center;
+  cursor: pointer;
+}
+
+.loan-term .loan-term__option b {
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.loan-term .loan-term__option span {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--canvas-muted);
+  white-space: nowrap;
+}
+
+.loan-term .loan-term__option:hover {
+  background: color-mix(in srgb, var(--canvas-surface) 55%, transparent);
+}
+
+.loan-term .loan-term__option:focus-visible {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 1px;
+}
+
+.loan-term .loan-term__option--on,
+.loan-term .loan-term__option--on:hover {
+  background: var(--canvas-surface);
+  box-shadow:
+    0 1px 2px rgba(20, 28, 24, 0.1),
+    0 0 0 1px var(--canvas-accent);
+}
+
+.loan-term .loan-term__option--on span {
+  color: var(--canvas-accent);
+}
+
+.loan-term .loan-term__option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.loan-term__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.loan-term__summary {
+  order: -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--canvas-subtle);
+}
+
+.loan-term__summary-label {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--canvas-muted);
+}
+
+.loan-term__due {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.loan-term__distance {
+  font-size: 14px;
+  line-height: 20px;
+  color: color-mix(in srgb, var(--canvas-text) 82%, var(--canvas-muted));
+}
+
+.loan-term .loan-term__link {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--canvas-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.loan-term .loan-term__link:hover {
+  color: var(--canvas-accent-hover);
+}
+
+.loan-term .loan-term__link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+.loan-term__changed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--canvas-border);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.loan-term__changed-title {
+  font-weight: 600;
+  color: var(--canvas-warning-text);
+}
+
+.loan-term__changed-text {
+  color: var(--canvas-muted);
+}
+
+/* The month. */
+.loan-calendar {
+  display: flex;
+  width: 100%;
+  max-width: 336px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.loan-calendar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.loan-calendar__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.loan-calendar .loan-calendar__turn {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--canvas-text);
+  cursor: pointer;
+}
+
+.loan-calendar .loan-calendar__turn > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.loan-calendar .loan-calendar__turn:hover:not(:disabled) {
+  background: var(--canvas-subtle);
+}
+
+.loan-calendar .loan-calendar__turn:disabled {
+  color: var(--canvas-field-border);
+  cursor: default;
+}
+
+.loan-calendar__weekdays,
+.loan-calendar__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.loan-calendar__weekdays span {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--canvas-muted);
+}
+
+.loan-calendar .loan-calendar__day {
+  position: relative;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--canvas-text);
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.loan-calendar .loan-calendar__day:hover:not(:disabled) {
+  background: var(--canvas-subtle);
+}
+
+.loan-calendar .loan-calendar__day--term,
+.loan-calendar .loan-calendar__day--term:hover:not(:disabled) {
+  border-radius: 0;
+  background: var(--canvas-accent-subtle);
+  color: var(--canvas-accent-hover);
+}
+
+.loan-calendar .loan-calendar__day--today {
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1.5px var(--canvas-accent);
+}
+
+.loan-calendar .loan-calendar__day--due,
+.loan-calendar .loan-calendar__day--due:hover:not(:disabled) {
+  border-radius: 8px;
+  background: var(--canvas-cta-bg);
+  color: var(--canvas-on-cta);
+  font-weight: 700;
+}
+
+.loan-calendar .loan-calendar__day:disabled {
+  color: color-mix(in srgb, var(--canvas-muted) 45%, var(--canvas-surface));
+  cursor: default;
+}
+
+.loan-calendar .loan-calendar__day--due:disabled {
+  background: color-mix(in srgb, var(--canvas-cta-bg) 55%, var(--canvas-surface));
+  color: var(--canvas-on-cta);
+}
+
+.loan-calendar .loan-calendar__day:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+.loan-calendar__legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--canvas-muted);
+}
+
+.loan-calendar__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loan-calendar__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+}
+
+.loan-calendar__swatch--today {
+  box-shadow: inset 0 0 0 1.5px var(--canvas-accent);
+}
+
+.loan-calendar__swatch--due {
+  background: var(--canvas-cta-bg);
+}
+
+/* The note. */
+.loan-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.loan-note__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.loan-note__label {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.loan-note__label span {
+  font-weight: 400;
+  color: var(--canvas-muted);
+}
+
+.loan-note__count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--canvas-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.loan-note__field {
+  width: 100%;
+  min-height: 88px;
+  padding: 10px 12px;
+  border: 1px solid var(--canvas-field-border);
+  border-radius: 8px;
+  background: var(--canvas-surface);
+  color: var(--canvas-text);
+  font: inherit;
+  font-size: 15px;
+  line-height: 22px;
+  resize: vertical;
+}
+
+.loan-note__field::placeholder {
+  color: var(--canvas-muted);
+}
+
+.loan-note__field:hover:not(:disabled) {
+  border-color: var(--canvas-field-hover-border);
+}
+
+.loan-note__field:focus-visible {
+  border-color: var(--canvas-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas-accent) 22%, transparent);
+}
+
+.loan-note__field:disabled {
+  background: var(--canvas-subtle);
+  color: var(--canvas-muted);
+}
+
+/* A failure, kept under the form it is about. */
+.loan-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--canvas-danger-subtle);
+  color: var(--canvas-danger-text);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.loan-alert > svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.loan-alert > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.loan-form-actions {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--canvas-border);
+}
+
+.loan-form-actions--start {
+  flex-direction: column;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.loan-action.loan-action--link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.loan-action.loan-action--link:focus-visible {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+/* The outcome, in the badge's hue: agreed, closed, told, or no longer possible. */
+.loan-outcome {
+  --loan-outcome-bg: var(--canvas-subtle);
+  --loan-outcome-fg: var(--canvas-neutral-text);
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--loan-outcome-fg) 22%, var(--loan-outcome-bg));
+  border-radius: 12px;
+  background: var(--loan-outcome-bg);
+  color: var(--canvas-text);
+}
+
+.loan-outcome[data-tone='ok'] {
+  --loan-outcome-bg: var(--canvas-accent-subtle);
+  --loan-outcome-fg: var(--canvas-accent);
+}
+
+.loan-outcome[data-tone='info'] {
+  --loan-outcome-bg: var(--canvas-info-subtle);
+  --loan-outcome-fg: var(--canvas-info-text);
+}
+
+.loan-outcome[data-tone='warn'] {
+  --loan-outcome-bg: var(--canvas-warning-subtle);
+  --loan-outcome-fg: var(--canvas-warning-text);
+}
+
+.loan-outcome__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.loan-outcome__icon {
+  display: inline-flex;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--canvas-surface);
+  color: var(--loan-outcome-fg);
+}
+
+.loan-outcome__icon > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.loan-outcome__words {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loan-outcome__title {
+  margin: 0;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+}
+
+.loan-outcome__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 22px;
+  color: color-mix(in srgb, var(--canvas-text) 82%, var(--canvas-muted));
+}
+
+/* On a friend's shelf the form sits under its copy, as wide as the copy's row. */
+.copy > .borrow-request,
+.copy > .loan-outcome {
+  margin-top: 12px;
+}
+
+/* A phone: the same form in a bottom sheet over the shelf (BorrowRequestForm). */
+.borrow-sheet {
+  max-height: 92dvh;
+  gap: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-color: var(--canvas-border);
+  border-radius: 16px 16px 0 0;
+  background: var(--canvas-surface);
+  color: var(--canvas-text);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.borrow-sheet::before {
+  content: '';
+  align-self: center;
+  width: 36px;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--canvas-field-border);
+}
+
+.borrow-sheet__head {
+  padding: 12px 56px 0 16px;
+}
+
+.borrow-sheet__title {
+  color: var(--canvas-text);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.borrow-sheet__book {
+  overflow-wrap: anywhere;
+  color: var(--canvas-muted);
+}
+
+.borrow-sheet > .borrow-request {
+  border: 0;
+  box-shadow: none;
+  background: none;
+}
+
+.borrow-sheet > .loan-outcome {
+  margin: 16px;
+}
+
+@media (min-width: 48rem) {
+  .owner-request {
+    gap: 20px;
+  }
+
+  .owner-request__title {
+    flex-basis: auto;
+    font-size: 32px;
+    line-height: 40px;
+  }
+
+  .owner-request__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'who book'
+      'answer answer';
+    align-items: start;
+    gap: 20px;
+  }
+
+  .owner-request__who {
+    padding: 20px 24px;
+  }
+
+  .owner-request__book {
+    padding: 20px;
+  }
+
+  .owner-request__cover {
+    flex-basis: 72px;
+    width: 72px;
+  }
+
+  .owner-request__form,
+  .borrow-request,
+  .loan-outcome {
+    padding: 24px;
+  }
+
+  /* Five options, or six with «Без дати»: one row of equal columns either way. */
+  .loan-term__options {
+    grid-auto-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .loan-term__body {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 24px;
+  }
+
+  .loan-calendar {
+    flex: 0 1 336px;
+  }
+
+  .loan-term__summary {
+    order: 0;
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+
+  .loan-form-actions {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  .loan-form-actions--start {
+    justify-content: flex-start;
+  }
+}
+
+@media (min-width: 64rem) {
+  .owner-request__grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      'who book'
+      'answer book';
+  }
+
+  .owner-request__cover {
+    flex-basis: 84px;
+    width: 84px;
   }
 }

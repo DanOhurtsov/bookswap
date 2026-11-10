@@ -146,6 +146,14 @@ export function loansBackHref(
   return loansTabHref(next, fallback)
 }
 
+/**
+ * One loan for its borrower, from outside the list (a friend's shelf): `role=borrower` is the viewer's
+ * side, so «← Позичання» there leads to «Я позичаю».
+ */
+export function borrowerLoanHref(loanId: string): string {
+  return `/loans?loanId=${encodeURIComponent(loanId)}&role=borrower`
+}
+
 /** The address with other filters in the same tab; an empty search or `null` status is dropped. */
 export function loansFiltersHref(
   parameters: QueryParameters,

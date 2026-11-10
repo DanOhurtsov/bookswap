@@ -4,11 +4,11 @@ import Link from 'next/link'
 import { useState, type ReactNode } from 'react'
 import type { VisibleCopy, VisibleLibraryGroup } from '@bookswap/shared'
 import { AuthorLine, EditionLine } from '@/components/BookParts'
-import { RequestCopyForm } from '@/components/RequestCopyForm'
 import { FormStatus } from '@/components/Form/FormStatus'
-import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import { CONDITION_LABELS, COPY_STATUS_LABELS, formatDate } from '@/app/lib/labels'
-import { useFriendLibrary } from '@/app/lib/use-library'
+import { borrowerLoanHref } from '@/features/loans'
+import { BorrowRequestForm } from '@/features/loans/index.client'
+import { useFriendShelf } from '../model/use-friend-shelf'
 
 export function PersonShell({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -31,35 +31,9 @@ export function PersonShell({ title, children }: { title: string; children: Reac
  * a second click and a 409 — an error the client should have known in advance.
  */
 export function PersonLibrary({ ownerId }: { ownerId: string }) {
-  const { state, reload } = useFriendLibrary(ownerId)
-  const [failure, setFailure] = useState<unknown>()
-  const [busyKey, setBusyKey] = useState<string>()
+  const { state, shelf, backgroundErrorMessage, reload } = useFriendShelf(ownerId)
 
-  async function requestCopy(copyId: string, body: Record<string, unknown>): Promise<void> {
-    setFailure(undefined)
-    setBusyKey(`request:${copyId}`)
-
-    try {
-      await apiRequest('/loans', { method: 'POST', body: { copyId, ...body } })
-      // `await`: until the refreshed list with `canRequest: false` arrives, the button stays
-      // disabled — otherwise a second click would get a 409.
-      await reload()
-    } catch (error) {
-      setFailure(error instanceof ApiRequestError ? error : new Error(describeError(error)))
-    } finally {
-      setBusyKey(undefined)
-    }
-  }
-
-  if (state.status === 'loading') {
-    return (
-      <PersonShell title="Бібліотека">
-        <p className="status status--pending">Завантажую…</p>
-      </PersonShell>
-    )
-  }
-
-  if (state.status === 'error') {
+  if (shelf === undefined && state.status === 'error') {
     return (
       <PersonShell title="Бібліотека">
         <FormStatus error={new Error(state.message)} />
@@ -70,20 +44,29 @@ export function PersonLibrary({ ownerId }: { ownerId: string }) {
     )
   }
 
-  return (
-    <PersonShell title={`Бібліотека: ${state.data.owner.displayName}`}>
-      <FormStatus error={failure} />
+  if (shelf === undefined) {
+    return (
+      <PersonShell title="Бібліотека">
+        <p className="status status--pending">Завантажую…</p>
+      </PersonShell>
+    )
+  }
 
-      {state.data.groups.length === 0 ? (
+  return (
+    <PersonShell title={`Бібліотека: ${shelf.owner.displayName}`}>
+      {backgroundErrorMessage !== undefined && (
+        <FormStatus error={new Error(backgroundErrorMessage)} />
+      )}
+      {shelf.groups.length === 0 ? (
         <p className="empty">Тут поки нічого не видно.</p>
       ) : (
         <ul className="books">
-          {state.data.groups.map((group) => (
+          {shelf.groups.map((group) => (
             <GroupCard
               key={group.edition.id}
               group={group}
-              busyKey={busyKey}
-              onRequest={requestCopy}
+              ownerName={shelf.owner.displayName}
+              onRequested={reload}
             />
           ))}
         </ul>
@@ -92,15 +75,17 @@ export function PersonLibrary({ ownerId }: { ownerId: string }) {
   )
 }
 
+type RequestProps = {
+  ownerName: string
+  /** Reads the shelf again once a request is settled. */
+  onRequested: () => Promise<void>
+}
+
 function GroupCard({
   group,
-  busyKey,
-  onRequest,
-}: {
-  group: VisibleLibraryGroup
-  busyKey: string | undefined
-  onRequest: (copyId: string, body: Record<string, unknown>) => Promise<void>
-}) {
+  ownerName,
+  onRequested,
+}: { group: VisibleLibraryGroup } & RequestProps) {
   return (
     <li className="book">
       <Link className="book__title" href={`/works/${group.work.id}`}>
@@ -129,7 +114,12 @@ function GroupCard({
                 ` · орієнтовно вільна ${formatDate(copy.expectedReturnAt)}`}
             </span>
 
-            <CopyAction copy={copy} busyKey={busyKey} onRequest={onRequest} />
+            <CopyAction
+              copy={copy}
+              bookTitle={group.work.title}
+              ownerName={ownerName}
+              onRequested={onRequested}
+            />
           </li>
         ))}
       </ul>
@@ -146,20 +136,34 @@ function GroupCard({
  */
 function CopyAction({
   copy,
-  busyKey,
-  onRequest,
-}: {
-  copy: VisibleCopy
-  busyKey: string | undefined
-  onRequest: (copyId: string, body: Record<string, unknown>) => Promise<void>
-}) {
+  bookTitle,
+  ownerName,
+  onRequested,
+}: { copy: VisibleCopy; bookTitle: string } & RequestProps) {
   const [open, setOpen] = useState(false)
-  const busy = busyKey !== undefined
+
+  // An open form stays until it is closed: its outcome outlives the re-read shelf, where the request
+  // it has just made is already the copy's `myActiveLoan`.
+  if (open) {
+    return (
+      <BorrowRequestForm
+        copyId={copy.id}
+        bookTitle={bookTitle}
+        ownerName={ownerName}
+        myLoanId={copy.myActiveLoan?.id ?? null}
+        expectedReturnAt={copy.expectedReturnAt}
+        onSettled={onRequested}
+        onClose={() => {
+          setOpen(false)
+        }}
+      />
+    )
+  }
 
   if (copy.myActiveLoan !== null) {
     // The deep link leads to THIS loan, not to a list it still has to be found in. `role=borrower` is
     // the viewer's side: on someone else's shelf the viewer is always the one asking.
-    const loanHref = `/loans?loanId=${copy.myActiveLoan.id}&role=borrower`
+    const loanHref = borrowerLoanHref(copy.myActiveLoan.id)
 
     switch (copy.myActiveLoan.status) {
       case 'REQUESTED':
@@ -201,33 +205,16 @@ function CopyAction({
     return <span className="book__meta">Зараз попросити не можна.</span>
   }
 
-  if (!open) {
-    return (
-      <div className="person__actions">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            setOpen(true)
-          }}
-        >
-          Попросити
-        </button>
-      </div>
-    )
-  }
-
   return (
-    <RequestCopyForm
-      copyId={copy.id}
-      busy={busy}
-      submitting={busyKey === `request:${copy.id}`}
-      onSubmit={(body) => {
-        void onRequest(copy.id, body)
-      }}
-      onCancel={() => {
-        setOpen(false)
-      }}
-    />
+    <div className="person__actions">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true)
+        }}
+      >
+        Попросити
+      </button>
+    </div>
   )
 }

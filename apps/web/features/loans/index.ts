@@ -1,1 +1,1 @@
-export { LOANS_HISTORY_HREF } from './model/loans-address'
+export { LOANS_HISTORY_HREF, borrowerLoanHref } from './model/loans-address'
