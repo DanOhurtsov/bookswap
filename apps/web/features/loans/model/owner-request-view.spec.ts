@@ -1,6 +1,11 @@
 import { ApiRequestError } from '@/app/lib/api'
 import { loanOf } from '../loans.test-helpers'
-import { answerFailureText, ownerTermHint, toOwnerRequestView } from './owner-request-view'
+import {
+  answerFailureText,
+  approveLabel,
+  ownerTermHint,
+  toOwnerRequestView,
+} from './owner-request-view'
 
 /** Олесь asks for my «Дюна». */
 const REQUEST = loanOf({
@@ -99,6 +104,18 @@ describe('ownerTermHint', () => {
     expect(ownerTermHint(null)).toBe(
       'Позичальник не вказав дату. Оберіть, до якого дня повернути книжку, або залиште без дати.',
     )
+  })
+})
+
+describe('approveLabel', () => {
+  it('names the date the approval agrees to, or that it sets none', () => {
+    expect(approveLabel('2026-12-05', false)).toBe('Погодити до 05.12.26')
+    expect(approveLabel('', false)).toBe('Погодити без терміну')
+  })
+
+  it('while the approval is on its way, says so whatever the date', () => {
+    expect(approveLabel('2026-12-05', true)).toBe('Погоджую…')
+    expect(approveLabel('', true)).toBe('Погоджую…')
   })
 })
 

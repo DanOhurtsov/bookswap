@@ -4,7 +4,7 @@ import { COPY_STATUS_LABELS } from '@/app/lib/labels'
 import { personHref } from '@/app/lib/person-href'
 import { authorsLine, badgeOf, editionLine, type LoanRowView } from './loan-row'
 import { shownStatusOf } from './loan-status'
-import { localDay, shortDay, type Day } from './loan-term'
+import { NO_DAY, localDay, shortDay, type Day } from './loan-term'
 
 /**
  * The canvas's «Запит до власника»: the owner's own page of a request (`/loans?loanId=`) while it waits
@@ -121,6 +121,13 @@ export function ownerTermHint(requested: Day | null): string {
   return requested === null
     ? 'Позичальник не вказав дату. Оберіть, до якого дня повернути книжку, або залиште без дати.'
     : `Позичальник просить до ${shortDay(requested)}. Остаточну дату повернення вказуєте ви.`
+}
+
+/** The approval's button: the date it agrees to, or that it agrees to none; while sent, that it is. */
+export function approveLabel(dueAt: Day, isApproving: boolean): string {
+  if (isApproving) return 'Погоджую…'
+
+  return dueAt === NO_DAY ? 'Погодити без терміну' : `Погодити до ${shortDay(dueAt)}`
 }
 
 /**

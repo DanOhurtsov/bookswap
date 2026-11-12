@@ -1,31 +1,23 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useId, type RefObject } from 'react'
+import { useEffect, type RefObject } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import {
-  CheckIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
-  InfoIcon,
-  LoaderCircleIcon,
-} from 'lucide-react'
-import { LOAN_LIMITS, type Loan, type LoanTermDays } from '@bookswap/shared'
+import { CheckIcon, CircleCheckIcon, InfoIcon, LoaderCircleIcon } from 'lucide-react'
+import type { Loan, LoanTermDays } from '@bookswap/shared'
 import { getInitials } from '@/components/Friends/UserAvatar'
 import { ShelfCover } from '@/components/ShelfCover'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { localDay, shortDay } from '../model/loan-term'
 import {
-  answerFailureText,
-  ownerTermHint,
+  approveLabel,
   type OutcomeTone,
   type OwnerRequestOutcome,
   type OwnerRequestView as View,
 } from '../model/owner-request-view'
 import { useApproveForm } from '../model/use-approve-form'
 import type { LoanPageActions } from '../model/use-loan-page-actions'
-import { LoanTermField } from './LoanTermField'
+import { OwnerAnswerFields } from './OwnerAnswerFields'
 
 const OUTCOME_ICONS: Readonly<Record<OutcomeTone, LucideIcon>> = {
   ok: CircleCheckIcon,
@@ -166,75 +158,17 @@ type AnswerCardProps = {
  */
 function AnswerCard({ loan, view, defaultLoanTermDays, actions }: AnswerCardProps) {
   const form = useApproveForm(loan, defaultLoanTermDays)
-  const noteId = useId()
-  const countId = useId()
-  const today = localDay(new Date())
   const isLocked = actions.busyKey !== undefined
   const isApproving = actions.busyKey === `approve:${loan.id}`
-  const { requested } = view
-  const failure = actions.confirmation === undefined ? actions.failure : undefined
 
   return (
     <section className="owner-request__card owner-request__form" aria-label="Відповідь на запит">
-      <LoanTermField
-        value={form.dueAt}
-        onChange={form.setDueAt}
-        today={today}
-        requested={requested}
-        hint={ownerTermHint(requested)}
-        empty={{ title: 'Без дати', text: 'Позика буде без дати повернення.' }}
-        canClear={requested === null}
+      <OwnerAnswerFields
+        form={form}
+        requested={view.requested}
         isLocked={isLocked}
-      >
-        {(setDay) =>
-          requested !== null &&
-          form.dueAt !== requested && (
-            <div className="loan-term__changed">
-              <span className="loan-term__changed-title">Ви змінили дату</span>
-              <span className="loan-term__changed-text">У запиті — до {shortDay(requested)}.</span>
-              <button
-                type="button"
-                className="loan-term__link"
-                onClick={() => {
-                  setDay(requested)
-                }}
-              >
-                Повернути як у запиті
-              </button>
-            </div>
-          )
-        }
-      </LoanTermField>
-
-      <div className="loan-note">
-        <div className="loan-note__head">
-          <label htmlFor={noteId} className="loan-note__label">
-            Повідомлення до погодження <span>(необовʼязково)</span>
-          </label>
-          <span id={countId} className="loan-note__count">
-            {form.note.length}/{LOAN_LIMITS.noteMax}
-          </span>
-        </div>
-        <textarea
-          id={noteId}
-          className="loan-note__field"
-          aria-describedby={countId}
-          maxLength={LOAN_LIMITS.noteMax}
-          placeholder="Наприклад, де й коли зручно передати книжку"
-          value={form.note}
-          disabled={isLocked}
-          onChange={(event) => {
-            form.setNote(event.target.value)
-          }}
-        />
-      </div>
-
-      {failure !== undefined && failure !== null && (
-        <div className="loan-alert" role="alert">
-          <CircleAlertIcon aria-hidden="true" />
-          <p>{answerFailureText(failure)}</p>
-        </div>
-      )}
+        failure={actions.confirmation === undefined ? actions.failure : undefined}
+      />
 
       <div className="loan-form-actions">
         <Button
@@ -266,11 +200,7 @@ function AnswerCard({ loan, view, defaultLoanTermDays, actions }: AnswerCardProp
           {isApproving && (
             <LoaderCircleIcon aria-hidden="true" className="motion-safe:animate-spin" />
           )}
-          {isApproving
-            ? 'Погоджую…'
-            : form.dueAt === ''
-              ? 'Погодити без терміну'
-              : `Погодити до ${shortDay(form.dueAt)}`}
+          {approveLabel(form.dueAt, isApproving)}
         </Button>
       </div>
     </section>

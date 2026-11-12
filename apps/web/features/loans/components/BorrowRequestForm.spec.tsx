@@ -284,6 +284,39 @@ describe('BorrowRequestForm: «Попросити книжку» for one copy', 
     expect(props.onSettled).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    [
+      'sent',
+      () => apiRequest.mockResolvedValueOnce({ loan: { id: 'loan-1' } }),
+      { kind: 'sent', loanId: 'loan-1' },
+    ],
+    [
+      'duplicate',
+      () => apiRequest.mockRejectedValueOnce(conflict(API_ERROR_CODES.LOAN_DUPLICATE_REQUEST)),
+      { kind: 'duplicate' },
+    ],
+    [
+      'unavailable',
+      () => apiRequest.mockRejectedValueOnce(conflict(API_ERROR_CODES.LOAN_COPY_UNAVAILABLE)),
+      { kind: 'unavailable' },
+    ],
+    [
+      'paused',
+      () => apiRequest.mockRejectedValueOnce(conflict(API_ERROR_CODES.LOAN_REQUESTS_PAUSED)),
+      { kind: 'paused' },
+    ],
+  ])('the shelf is told how the request was settled: %s', async (_, answer, outcome) => {
+    answer()
+    const { props } = setup()
+
+    await userEvent.click(sendButton())
+
+    await waitFor(() => {
+      expect(props.onSettled).toHaveBeenCalledTimes(1)
+    })
+    expect(props.onSettled).toHaveBeenCalledWith(outcome)
+  })
+
   it('the owner paused requests: says so and offers nothing to open', async () => {
     apiRequest.mockRejectedValueOnce(conflict(API_ERROR_CODES.LOAN_REQUESTS_PAUSED))
     setup()

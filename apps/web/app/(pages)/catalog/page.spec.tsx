@@ -1,10 +1,11 @@
 /** @jest-environment jsdom */
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
 import type { CatalogDiscoveryResponse, CatalogDiscoveryResult } from '@bookswap/shared'
 import { QueryClient } from '@tanstack/react-query'
+import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import { chooseOption } from '@/components/Form/test-choose-option'
 import CatalogPage from './page'
@@ -353,15 +354,18 @@ it('normalises an invalid filter value in the address', async () => {
 })
 
 it('requests a copy right from the result without searching again', async () => {
+  apiRequest.mockImplementation((path: string) =>
+    Promise.resolve(path === '/loans' ? { loan: { id: 'loan-1' } } : response()),
+  )
   renderAt('q=Тигролови')
   await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
   await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
 
   await waitFor(() =>
-    expect(apiRequest).toHaveBeenCalledWith('/loans', {
-      method: 'POST',
-      body: { copyId: 'copy-1' },
-    }),
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/loans',
+      expect.objectContaining({ method: 'POST', body: { copyId: 'copy-1' } }),
+    ),
   )
   // The list is refreshed once so `canRequest` can flip.
   await waitFor(() =>
@@ -369,6 +373,176 @@ it('requests a copy right from the result without searching again', async () => 
       apiRequest.mock.calls.filter(([p]: [string]) => p.startsWith('/catalog/discover')),
     ).toHaveLength(2),
   )
+})
+
+describe('issue #87: the list read again after a request', () => {
+  /** The copy as the server lists it once asked for: it can no longer be asked for. */
+  const asked = response({
+    results: [
+      {
+        ...candidate,
+        locations: candidate.locations.map((location) => ({
+          ...location,
+          copies: location.copies.map((copy) => ({ ...copy, canRequest: false })),
+        })),
+      },
+    ],
+  })
+
+  /** `/loans` answers with `loan`; the second discovery read waits for `release`. */
+  function readAgainOnRelease(loan: () => Promise<unknown>) {
+    let release: () => void = () => undefined
+    let reads = 0
+
+    apiRequest.mockImplementation((path: string) => {
+      if (path === '/loans') return loan()
+
+      reads += 1
+      if (reads === 1) return Promise.resolve(response())
+
+      return new Promise((resolve) => {
+        release = () => resolve(asked)
+      })
+    })
+
+    return { release: () => release(), reads: () => reads }
+  }
+
+  it.each([
+    ['success', () => Promise.resolve({ loan: { id: 'loan-1' } }), 'Запит надіслано'],
+    [
+      '409 duplicate',
+      () =>
+        Promise.reject(
+          new ApiRequestError(409, { code: 'LOAN_DUPLICATE_REQUEST', message: 'Конфлікт' }),
+        ),
+      'Запит уже надіслано',
+    ],
+  ])('keeps the list and the %s outcome while it is read and after', async (_, loan, title) => {
+    const list = readAgainOnRelease(loan)
+
+    renderAt('q=Тигролови')
+    await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
+
+    await screen.findByRole('heading', { name: title })
+    await waitFor(() => expect(list.reads()).toBe(2))
+    // Read in the background: neither «Шукаю…» nor a remounted card in between.
+    expect(screen.queryByText('Шукаю…')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+
+    list.release()
+
+    // jsdom has no `matchMedia`: the outcome is in the phone's sheet, and the list behind it is inert.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Попросити', hidden: true }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Тигролови', hidden: true })).toBeInTheDocument()
+  })
+
+  it('a repeated «Знайти» still searches from scratch', async () => {
+    const list = readAgainOnRelease(() => Promise.resolve({ loan: { id: 'loan-1' } }))
+
+    renderAt('q=Тигролови')
+    await screen.findByRole('link', { name: 'Тигролови' })
+    await userEvent.click(screen.getByRole('button', { name: 'Знайти' }))
+
+    expect(await screen.findByText('Шукаю…')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Тигролови' })).not.toBeInTheDocument()
+
+    list.release()
+
+    expect(await screen.findByRole('link', { name: 'Тигролови' })).toBeInTheDocument()
+  })
+})
+
+describe('issue #87: LOAN_COPY_UNAVAILABLE — the explanation first, the list after it is closed', () => {
+  const discoverCalls = () =>
+    apiRequest.mock.calls.filter(([path]: [string]) => path.startsWith('/catalog/discover'))
+
+  /**
+   * The copy is refused as unavailable; the list read after that no longer has it (discovery lists
+   * copies at home). `reread` answers that read — or fails it.
+   */
+  function refusedThenGone(reread: () => Promise<unknown>) {
+    apiRequest.mockImplementation((path: string) => {
+      if (path === '/loans')
+        return Promise.reject(
+          new ApiRequestError(409, { code: 'LOAN_COPY_UNAVAILABLE', message: 'Конфлікт' }),
+        )
+
+      return discoverCalls().length === 1 ? Promise.resolve(response()) : reread()
+    })
+  }
+
+  async function refuse() {
+    renderAt('q=Тигролови')
+    await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
+    await screen.findByRole('heading', { name: 'Книжку зараз не можна попросити' })
+  }
+
+  const empty = 'Серед ваших книжок і книжок друзів доступних примірників не знайшлося.'
+
+  it.each([
+    [
+      'its «Закрити»',
+      () =>
+        userEvent.click(
+          within(screen.getByRole('status')).getByRole('button', { name: 'Закрити' }),
+        ),
+    ],
+    ['Escape', () => userEvent.keyboard('{Escape}')],
+  ])(
+    'the explanation stays, nothing can be sent again; closed by %s, the list is read and the card is gone',
+    async (_, close) => {
+      refusedThenGone(() => Promise.resolve(response({ results: [], total: 0 })))
+      await refuse()
+
+      // Not read yet: the card — and the explanation in it — stays.
+      expect(discoverCalls()).toHaveLength(1)
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Поки ви заповнювали запит, примірник став недоступним.',
+      )
+      expect(screen.queryByRole('button', { name: 'Надіслати запит' })).not.toBeInTheDocument()
+
+      await close()
+
+      expect(await screen.findByText(empty)).toBeInTheDocument()
+      expect(discoverCalls()).toHaveLength(2)
+      expect(screen.queryByRole('link', { name: 'Тигролови' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Попросити' })).not.toBeInTheDocument()
+      expect(apiRequest.mock.calls.filter(([path]: [string]) => path === '/loans')).toHaveLength(1)
+    },
+  )
+
+  it('a failed read after closing is said, with a retry that reads the list again', async () => {
+    let fail = true
+
+    refusedThenGone(() =>
+      fail
+        ? Promise.reject(new Error('Мережа'))
+        : Promise.resolve(response({ results: [], total: 0 })),
+    )
+    await refuse()
+    await userEvent.click(
+      within(screen.getByRole('status')).getByRole('button', { name: 'Закрити' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Не вдалося звʼязатися з API')
+    // The refused card is not offered again as if nothing had happened.
+    expect(screen.queryByRole('button', { name: 'Попросити' })).not.toBeInTheDocument()
+
+    fail = false
+    await userEvent.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
+
+    expect(await screen.findByText(empty)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(discoverCalls()).toHaveLength(3)
+  })
 })
 
 describe('BS-134: the grid and the two pages ahead', () => {

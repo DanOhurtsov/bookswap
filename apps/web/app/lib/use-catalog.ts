@@ -34,21 +34,18 @@ export interface CatalogDiscoverySearch {
   pageSize: number
   scope: CatalogDiscoveryScope
   filters: DiscoveryFilters
-  /** Bumped to ask the same search again (a repeated submit, a copy just requested). */
-  refresh: number
 }
 
 /** One resource, one key prefix (CONVENTIONS §3.9): every discovery page of every viewer. */
 export const CATALOG_DISCOVERY_QUERY_KEY = ['catalog', 'discover'] as const
 
 function discoverySearchKeyOf(search: CatalogDiscoverySearch) {
-  const { viewerId, query, pageSize, scope, filters, refresh } = search
+  const { viewerId, query, pageSize, scope, filters } = search
 
   return [
     ...CATALOG_DISCOVERY_QUERY_KEY,
     viewerId,
     { q: query.trim(), pageSize, scope, filters },
-    refresh,
   ] as const
 }
 
@@ -88,13 +85,41 @@ export function discoveryNextPage(
   return nextPageOf({ page, localHasMore: response?.hasMore === true, externalMore: 'NO' })
 }
 
+export interface CatalogDiscovery {
+  state: CatalogDiscoveryState
+  /**
+   * Reads the same search again in the background (a copy just requested): the list on screen, and
+   * any outcome open in it, stays until the answer replaces it. The key does not change, so the list
+   * never goes back to `loading` and its cards are not remounted.
+   */
+  refresh: () => Promise<void>
+  /** Asks the same search again from scratch (a repeated «Знайти»): `loading` until it answers. */
+  searchAgain: () => Promise<void>
+}
+
 /**
  * Discovery of physical copies for the selected viewer scope, filters and URL
  * page. The page on screen comes from the shared cache, and the two pages after
  * it are loaded there in the background (`usePagesAhead`), so moving on costs no
- * wait. Stale responses never render for another key.
+ * wait. Stale responses never render for another key: another viewer, text,
+ * scope, filters or page size is another key, and starts at `loading`.
  */
 export function useCatalogDiscovery(
+  search: CatalogDiscoverySearch,
+  page: number,
+): CatalogDiscovery {
+  const queryClient = useQueryClient()
+  const searchKey = discoverySearchKeyOf(search)
+  const state = useCatalogDiscoveryState(search, page)
+
+  return {
+    state,
+    refresh: () => queryClient.invalidateQueries({ queryKey: searchKey }),
+    searchAgain: () => queryClient.resetQueries({ queryKey: searchKey }),
+  }
+}
+
+function useCatalogDiscoveryState(
   search: CatalogDiscoverySearch,
   page: number,
 ): CatalogDiscoveryState {

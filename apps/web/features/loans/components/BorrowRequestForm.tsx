@@ -25,6 +25,7 @@ import {
   isClosedPhase,
   sendFailureText,
   type BorrowOutcome,
+  type ClosedBorrowPhase,
 } from '../model/borrow-request'
 import { localDay, type Day } from '../model/loan-term'
 import { borrowerLoanHref } from '../model/loans-address'
@@ -49,9 +50,9 @@ export type BorrowRequestFormProps = {
   myLoanId: string | null
   /** «орієнтовно вільна» of the copy (§6.5), as the shelf says it now. */
   expectedReturnAt: Day | null
-  /** Reads the shelf again once the request is settled. */
-  onSettled: () => Promise<void> | void
-  /** «Скасувати» and «Закрити»: back to the shelf as it is. */
+  /** Reads the shelf again once the request is settled, told how it was. */
+  onSettled: (outcome: ClosedBorrowPhase) => Promise<void> | void
+  /** «Скасувати» and «Закрити» — in the sheet also Escape and its ✕: back to the shelf as it is. */
   onClose: () => void
 }
 

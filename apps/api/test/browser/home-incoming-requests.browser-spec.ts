@@ -29,6 +29,7 @@ import { startWeb, stopWeb } from './web-server'
  *   запитів;
  * - сценарій помилки: читання списку браузер обриває на рівні мережі (`route.abort`), повтор іде до
  *   справжнього API; завантаження — справжній запит, затриманий у браузері;
+ * - збій погодження: перший PATCH браузер так само обриває, повтор іде до справжнього API;
  * - «інша вкладка» у сценарії конфлікту — виклик API від імені власника поза браузером.
  *
  * `BROWSER_SCREENSHOT_DIR` (необовʼязково) — куди покласти знімки для ручного перегляду.
@@ -148,6 +149,17 @@ async function ask(
 /** The day `days` from today, as the API takes a return date. */
 function dayFromNow(days: number): string {
   return new Date(Date.now() + days * 24 * HOUR_MS).toISOString().slice(0, 10)
+}
+
+/** The local calendar day `days` from today, as the term field counts its presets. */
+function localDayFromNow(days: number): string {
+  const at = new Date(Date.now() + days * 24 * HOUR_MS)
+
+  return [
+    String(at.getFullYear()),
+    String(at.getMonth() + 1).padStart(2, '0'),
+    String(at.getDate()).padStart(2, '0'),
+  ].join('-')
 }
 
 /** «2026-11-15» → «15.11.26», as the card writes it. */
@@ -483,14 +495,20 @@ describe('BS-147: «Потребує вашої дії» на головній (
 
     await target.getByRole('button', { name: 'Погодити' }).click()
 
-    const due = target.getByLabel('Повернути до')
+    // The approval of /loans: the borrower's date is chosen, and the focus is on that choice.
+    const chosen = target.getByRole('radio', { checked: true })
 
-    expect(await due.inputValue()).toBe(dayFromNow(30))
-    expect(await due.evaluate((field) => field === document.activeElement)).toBe(true)
-    await due.fill(dayFromNow(21))
-    await target.getByLabel('Відповідь').fill('Забирай у суботу')
+    expect(await target.locator('.loan-term__due').textContent()).toBe(shortDate(dayFromNow(30)))
+    expect(await chosen.evaluate((option) => option === document.activeElement)).toBe(true)
+
+    const due = localDayFromNow(21)
+
+    await target.getByRole('radio', { name: /^3 тижні/ }).click()
+    await target
+      .getByRole('textbox', { name: /Повідомлення до погодження/ })
+      .fill('Забирай у суботу')
     await screenshot(page, 'bs147-requests-approving-1440-light')
-    await target.getByRole('button', { name: 'Погодити' }).click()
+    await target.getByRole('button', { name: `Погодити до ${shortDate(due)}` }).click()
 
     await target.waitFor({ state: 'detached' })
     expect(await section(page).getByRole('status').textContent()).toBe(
@@ -506,7 +524,7 @@ describe('BS-147: «Потребує вашої дії» на головній (
       .expect(200)
 
     expect(approved.body).toMatchObject({
-      loan: { status: 'APPROVED', dueAt: dayFromNow(21), responseNote: 'Забирай у суботу' },
+      loan: { status: 'APPROVED', dueAt: due, responseNote: 'Забирай у суботу' },
     })
 
     // To /loans and back inside the app: the page is never reloaded.
@@ -554,7 +572,7 @@ describe('BS-147: «Потребує вашої дії» на головній (
     expect(reads.length).toBeGreaterThan(readsBefore)
   })
 
-  it('клавіатура: Enter на «Погодити» ставить фокус у дату, Escape повертає його; «Відмовити» відхиляє, і фокус переходить на заголовок секції', async () => {
+  it('клавіатура: Enter на «Погодити» ставить фокус на обраний термін, Escape повертає його; «Відмовити» відхиляє, і фокус переходить на заголовок секції', async () => {
     const { owner, asked } = await inboxOf('bs147-req-keys', 2)
     const page = await newPage(1440, 'dark')
 
@@ -578,10 +596,10 @@ describe('BS-147: «Потребує вашої дії» на головній (
     await screenshot(page, 'bs147-requests-focus-1440-dark')
 
     await page.keyboard.press('Enter')
-    expect(await isFocused(target.getByLabel('Повернути до'))).toBe(true)
+    expect(await isFocused(target.getByRole('radio', { checked: true }))).toBe(true)
 
     await page.keyboard.press('Escape')
-    expect(await target.getByLabel('Повернути до').count()).toBe(0)
+    expect(await target.getByRole('group', { name: 'Термін позики' }).count()).toBe(0)
     expect(await isFocused(approve)).toBe(true)
 
     await page.keyboard.press('Tab')
@@ -681,24 +699,127 @@ describe('BS-147: «Потребує вашої дії» на головній (
     expect(waiting.body).toMatchObject({ loan: { status: 'REQUESTED' } })
   })
 
-  it('форма погодження на планшеті й телефоні: поля в межах картки, без горизонтального скролу', async () => {
+  // The term lays itself out by its own width too: a row of the tablet has room for the presets in one
+  // row and the month beside the summary; a desktop third and the phone's rail keep the phone's layout.
+  const FORM_LAYOUTS = [
+    { width: 1440, wide: false },
+    { width: 834, wide: true },
+    { width: 390, wide: false },
+  ] as const
+
+  it('форма погодження на 1440/834/390: термін, повідомлення й кнопки в межах картки, без горизонтального скролу', async () => {
     const { owner, asked } = await inboxOf('bs147-req-form', 2)
 
-    for (const width of [834, 390]) {
-      const page = await newPage(width, 'light')
+    for (const layout of FORM_LAYOUTS) {
+      const page = await newPage(layout.width, 'light')
+      const target = card(page, asked[0]!.title)
 
       await login(page, owner.email)
       await ready(page)
-      await card(page, asked[0]!.title).getByRole('button', { name: 'Погодити' }).click()
-      await card(page, asked[0]!.title).getByLabel('Відповідь').waitFor()
-      await screenshot(page, `bs147-requests-approving-${String(width)}-light`)
+      await target.getByRole('button', { name: 'Погодити' }).click()
+      await target.getByRole('textbox', { name: /Повідомлення до погодження/ }).waitFor()
+      await screenshot(page, `bs147-requests-approving-${String(layout.width)}-light`)
 
       const shown = await layoutOf(page)
+      const term = await target.evaluate((article) => {
+        const outer = article.getBoundingClientRect()
+        const options = article.querySelector('.loan-term__options')!
+        const inside = (selector: string) =>
+          [...article.querySelectorAll(selector)].every((element) => {
+            const box = element.getBoundingClientRect()
 
-      expect({ width, pageOverflow: shown.pageOverflow, overflow: shown.overflowingCards }).toEqual(
-        { width, pageOverflow: 0, overflow: 0 },
-      )
+            return box.left >= outer.left - 0.5 && box.right <= outer.right + 0.5
+          })
+
+        return {
+          // One row of equal columns, or the phone's rail that scrolls inside the field.
+          wide: getComputedStyle(options).overflowX === 'visible',
+          optionsInside: inside('.loan-term__options'),
+          calendarInside: inside('.loan-calendar'),
+          answersInside: inside('.incoming-request__form button[data-ui="button"]'),
+        }
+      })
+
+      expect({
+        width: layout.width,
+        pageOverflow: shown.pageOverflow,
+        overflow: shown.overflowingCards,
+        ...term,
+      }).toEqual({
+        width: layout.width,
+        pageOverflow: 0,
+        overflow: 0,
+        wide: layout.wide,
+        optionsInside: true,
+        calendarInside: true,
+        answersInside: true,
+      })
     }
+  })
+
+  it('збій мережі зберігає термін і повідомлення; повтор подвійним натисканням — один PATCH з тим самим тілом; повідомлення — до 1000 знаків', async () => {
+    const { owner, asked } = await inboxOf('bs147-req-retry', 2)
+    const page = await newPage(1440, 'light')
+    const target = card(page, asked[1]!.title)
+    const patches: unknown[] = []
+    let failing = true
+
+    page.on('request', (sent: Request) => {
+      if (sent.method() === 'PATCH') patches.push(sent.postDataJSON())
+    })
+    await page.route(
+      (address) => address.pathname === `${LIST_PATH}/${asked[1]!.loanId}`,
+      async (route) => {
+        if (failing) await route.abort('failed')
+        else await route.continue()
+      },
+    )
+
+    await login(page, owner.email)
+    await ready(page)
+    await target.getByRole('button', { name: 'Погодити' }).click()
+
+    const note = target.getByRole('textbox', { name: /Повідомлення до погодження/ })
+    const due = localDayFromNow(14)
+
+    // The contract's limit: whatever is typed past it is not taken, and the counter says so.
+    await note.fill('я'.repeat(1005))
+    expect((await note.inputValue()).length).toBe(1000)
+    expect(await target.locator('.loan-note__count').textContent()).toBe('1000/1000')
+
+    await note.fill('Забирай у суботу')
+    await target.getByRole('radio', { name: /^2 тижні/ }).click()
+
+    const approve = target.getByRole('button', { name: `Погодити до ${shortDate(due)}` })
+
+    await approve.click()
+
+    const alert = target.getByRole('alert')
+
+    await alert.waitFor()
+    expect(await alert.innerText()).toBe(
+      'Не вдалося відповісти на запит. Перевірте зʼєднання і спробуйте ще раз. Вибрана дата й повідомлення збережені.',
+    )
+    expect(await note.inputValue()).toBe('Забирай у суботу')
+    expect(await target.locator('.loan-term__due').textContent()).toBe(shortDate(due))
+    expect(await approve.evaluate((button) => button === document.activeElement)).toBe(true)
+
+    failing = false
+    await approve.dblclick()
+    await target.waitFor({ state: 'detached' })
+
+    const body = { action: 'approve', dueAt: due, note: 'Забирай у суботу' }
+
+    expect(patches).toEqual([body, body])
+
+    const approved = await request(app.getHttpServer())
+      .get(url(`/loans/${asked[1]!.loanId}`))
+      .set('Cookie', owner.cookie)
+      .expect(200)
+
+    expect(approved.body).toMatchObject({
+      loan: { status: 'APPROVED', dueAt: due, responseNote: 'Забирай у суботу' },
+    })
   })
 
   it('текст 200 %: без горизонтального скролу, вміст карток у їхніх межах', async () => {

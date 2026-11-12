@@ -31,7 +31,7 @@ import {
   ResultCardGrid,
   SearchPagination,
 } from '@/features/catalog/add-book/index.client'
-import { NetworkOwnerCopies } from '@/features/network/index.client'
+import { NetworkOwnerCopies, type RequestOutcome } from '@/features/network/index.client'
 
 export default function CatalogPage() {
   return (
@@ -107,13 +107,13 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
   const scopeValid = rawScope === null || rawScope === 'CIRCLE' || rawScope === 'ALL'
   const [query, setQuery] = useState(submitted)
   const [syncedWith, setSyncedWith] = useState(submitted)
-  const [refresh, setRefresh] = useState(0)
   const [errors, setErrors] = useState<FieldErrors>({})
   const { filters, valid: filtersValid } = readDiscoveryFilters(parameters)
-  const search = useCatalogDiscovery(
-    { viewerId, query: submitted, pageSize, scope, filters, refresh },
+  const discovery = useCatalogDiscovery(
+    { viewerId, query: submitted, pageSize, scope, filters },
     page,
   )
+  const search = discovery.state
 
   function hrefFor(
     target: SearchAddress,
@@ -156,10 +156,19 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
     setErrors({})
 
     if (parsed.data.q === submitted && page === 1) {
-      setRefresh((current) => current + 1)
+      void discovery.searchAgain()
     } else {
       router.push(hrefFor({ q: parsed.data.q, page: 1, pageSize }))
     }
+  }
+
+  // The list keeps only copies at home (`availability=AVAILABLE` by default): read at once after
+  // LOAN_COPY_UNAVAILABLE, it would take the copy's card — and the explanation in it — away. That list
+  // is read once the explanation is closed; every other outcome reads it at once (issue #87).
+  const readAfterRequest = (outcome: RequestOutcome) =>
+    outcome === 'unavailable' ? undefined : discovery.refresh()
+  const readAfterClosing = (outcome: RequestOutcome) => {
+    if (outcome === 'unavailable') void discovery.refresh()
   }
 
   const response = search.status === 'ready' ? search.response : undefined
@@ -249,7 +258,16 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
 
       {search.status === 'idle' && <p className="empty">Уведіть щонайменше два символи.</p>}
       {search.status === 'loading' && <p className="status status--pending">Шукаю…</p>}
-      {search.status === 'error' && <FormStatus error={new Error(search.message)} />}
+      {search.status === 'error' && (
+        <>
+          <FormStatus error={new Error(search.message)} />
+          <p className="form__aside">
+            <button type="button" onClick={() => void discovery.searchAgain()}>
+              Спробувати ще раз
+            </button>
+          </p>
+        </>
+      )}
 
       {response !== undefined && response.results.length > 0 && (
         <ResultCardGrid>
@@ -263,7 +281,9 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
               renderLocationActions={(location) => (
                 <NetworkOwnerCopies
                   owner={location}
-                  onRequested={() => setRefresh((current) => current + 1)}
+                  bookTitle={result.work.title}
+                  onRequested={readAfterRequest}
+                  onOutcomeClosed={readAfterClosing}
                 />
               )}
             />

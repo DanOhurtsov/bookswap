@@ -53,6 +53,3 @@ export const fetchWorkHolders = (workId: string, signal?: AbortSignal) =>
     schema: workHoldersResponseSchema,
     signal,
   })
-
-export const requestLoan = (copyId: string, body: Record<string, unknown>) =>
-  apiRequest('/loans', { method: 'POST', body: { copyId, ...body } })
