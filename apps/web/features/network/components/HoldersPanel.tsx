@@ -7,7 +7,7 @@ import { useWorkHolders } from '../model/use-holders'
 import { NetworkOwnerCopies } from './NetworkCopyActions'
 
 /** «Хто має цю книжку?» — friends' copies of a work, grouped by translation. */
-export function HoldersPanel({ workId }: { workId: string }) {
+export function HoldersPanel({ workId, workTitle }: { workId: string; workTitle: string }) {
   const { state, reload } = useWorkHolders(workId)
 
   return (
@@ -40,7 +40,7 @@ export function HoldersPanel({ workId }: { workId: string }) {
                 <li key={owner.owner.id}>
                   <Link href={personHref(owner.owner)}>{owner.owner.displayName}</Link> · доступних
                   примірників: {owner.availableCopies}
-                  <NetworkOwnerCopies owner={owner} onRequested={reload} />
+                  <NetworkOwnerCopies owner={owner} bookTitle={workTitle} onRequested={reload} />
                 </li>
               ))}
             </ul>

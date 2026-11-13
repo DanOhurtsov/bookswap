@@ -3,11 +3,12 @@
 import '@testing-library/jest-dom'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { Loan, Me } from '@bookswap/shared'
+import { LOAN_LIMITS, type Loan, type Me } from '@bookswap/shared'
 import { ApiRequestError } from '@/app/lib/api'
 import { withQueryClient } from '@/app/lib/test-query-client'
 import type { SessionState } from '@/app/lib/use-session'
 import { initialDueDate } from '../model/approve-due-date'
+import { addDays, localDay, shortDay } from '../model/loan-term'
 import { IncomingRequests } from './IncomingRequests'
 
 /**
@@ -269,11 +270,30 @@ describe('IncomingRequests (BS-147)', () => {
   })
 })
 
-describe('IncomingRequests: answering (BS-147)', () => {
-  it('«Погодити» opens the /loans approval form in the card, with the focus in its date', async () => {
-    const user = userEvent.setup()
+/** The day `days` from today in the reader's calendar, as the term field counts it. */
+const dayIn = (days: number) => addDays(localDay(new Date()), days)
 
-    requests = [request('1', 'Майстер і Маргарита', { dueAt: '2026-11-15' })]
+/** The form's own controls, inside one card. */
+const term = (article: HTMLElement) => within(article).getByRole('group', { name: 'Термін позики' })
+const summary = (article: HTMLElement) =>
+  within(article).getByRole('group', { name: 'Повернути до' })
+const note = (article: HTMLElement) =>
+  within(article).getByRole('textbox', { name: /Повідомлення до погодження/ })
+
+async function openForm(user: ReturnType<typeof userEvent.setup>, title: string) {
+  const article = await screen.findByRole('article', { name: title })
+
+  await user.click(within(article).getByRole('button', { name: 'Погодити' }))
+
+  return article
+}
+
+describe('IncomingRequests: answering (BS-147)', () => {
+  it('«Погодити» opens the /loans approval form in the card: the borrower’s date chosen, the focus on it', async () => {
+    const user = userEvent.setup()
+    const asked = dayIn(14)
+
+    requests = [request('1', 'Майстер і Маргарита', { dueAt: asked })]
 
     renderSection()
 
@@ -281,16 +301,25 @@ describe('IncomingRequests: answering (BS-147)', () => {
     const approve = within(article).getByRole('button', { name: 'Погодити' })
 
     expect(approve).toHaveAttribute('aria-expanded', 'false')
-    expect(within(article).queryByLabelText('Повернути до')).not.toBeInTheDocument()
+    expect(within(article).queryByRole('group', { name: 'Термін позики' })).not.toBeInTheDocument()
 
     await user.click(approve)
 
-    const due = within(article).getByLabelText('Повернути до')
+    const chosen = within(article).getByRole('radio', { name: /^2 тижні/ })
 
-    expect(due).toHaveValue('2026-11-15')
-    expect(due).toHaveFocus()
-    expect(due).toHaveAccessibleDescription('Позичальник просив саме цю дату.')
-    expect(within(article).getByLabelText('Відповідь')).toHaveValue('')
+    expect(chosen).toBeChecked()
+    expect(chosen).toHaveAccessibleName('2 тижні за запитом')
+    expect(chosen).toHaveFocus()
+    expect(term(article)).toHaveAccessibleDescription(
+      `Позичальник просить до ${shortDay(asked)}. Остаточну дату повернення вказуєте ви.`,
+    )
+    expect(summary(article)).toHaveTextContent(shortDay(asked))
+    // The borrower asked for a date: «Без дати» is not offered, as on /loans.
+    expect(within(article).queryByRole('radio', { name: /^Без дати/ })).not.toBeInTheDocument()
+    expect(note(article)).toHaveValue('')
+    expect(
+      within(article).getByRole('button', { name: `Погодити до ${shortDay(asked)}` }),
+    ).toBeInTheDocument()
     expect(patches()).toHaveLength(0)
   })
 
@@ -302,33 +331,50 @@ describe('IncomingRequests: answering (BS-147)', () => {
 
     renderSection()
 
-    await user.click(
-      within(await screen.findByRole('article', { name: 'Дюна' })).getByRole('button', {
-        name: 'Погодити',
-      }),
-    )
+    const article = await openForm(user, 'Дюна')
 
-    expect(screen.getByLabelText('Повернути до')).toHaveValue(initialDueDate(null, 21, new Date()))
+    expect(within(article).getByRole('radio', { name: /^3 тижні/ })).toBeChecked()
+    expect(summary(article)).toHaveTextContent(shortDay(initialDueDate(null, 21, new Date())))
   })
 
-  it('approves with the date and the answer, reads the list again, and the card leaves', async () => {
+  it('a changed date says so and goes back to the borrower’s with one press', async () => {
+    const user = userEvent.setup()
+    const asked = dayIn(14)
+
+    requests = [request('1', 'Дюна', { dueAt: asked })]
+
+    renderSection()
+
+    const article = await openForm(user, 'Дюна')
+
+    await user.click(within(article).getByRole('radio', { name: /^Місяць/ }))
+
+    expect(within(article).getByText('Ви змінили дату')).toBeInTheDocument()
+
+    await user.click(within(article).getByRole('button', { name: 'Повернути як у запиті' }))
+
+    expect(summary(article)).toHaveTextContent(shortDay(asked))
+    expect(within(article).queryByText('Ви змінили дату')).not.toBeInTheDocument()
+  })
+
+  it('approves with the chosen date and the note, reads the list again, and the card leaves', async () => {
     const user = userEvent.setup()
 
     requests = [request('1', 'Майстер і Маргарита'), request('2', 'Дюна')]
 
     renderSection()
 
-    const article = await screen.findByRole('article', { name: 'Майстер і Маргарита' })
+    const article = await openForm(user, 'Майстер і Маргарита')
 
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
-    await user.clear(within(article).getByLabelText('Повернути до'))
-    await user.type(within(article).getByLabelText('Повернути до'), '2026-11-20')
-    await user.type(within(article).getByLabelText('Відповідь'), 'Забирай у суботу')
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
+    await user.click(within(article).getByRole('radio', { name: /^2 тижні/ }))
+    await user.type(note(article), 'Забирай у суботу')
+    await user.click(
+      within(article).getByRole('button', { name: `Погодити до ${shortDay(dayIn(14))}` }),
+    )
 
     expect(apiRequest).toHaveBeenCalledWith('/loans/1', {
       method: 'PATCH',
-      body: { action: 'approve', dueAt: '2026-11-20', note: 'Забирай у суботу' },
+      body: { action: 'approve', dueAt: dayIn(14), note: 'Забирай у суботу' },
     })
     await waitFor(() => {
       expect(screen.queryByRole('article', { name: 'Майстер і Маргарита' })).not.toBeInTheDocument()
@@ -341,25 +387,46 @@ describe('IncomingRequests: answering (BS-147)', () => {
     expect(screen.getByRole('heading', { level: 2, name: SECTION })).toHaveFocus()
   })
 
-  it('Enter in the answer sends the approval too', async () => {
+  it('«Погодити без терміну» sends no date, and a blank note is not sent', async () => {
+    const user = userEvent.setup()
+
+    session = { status: 'authenticated', user: me({ defaultLoanTermDays: 14 }) } as SessionState
+    requests = [request('1', 'Дюна')]
+
+    renderSection()
+
+    const article = await openForm(user, 'Дюна')
+
+    await user.click(within(article).getByRole('radio', { name: /^Без дати/ }))
+    await user.type(note(article), '   ')
+
+    expect(summary(article)).toHaveTextContent('Без дати')
+
+    await user.click(within(article).getByRole('button', { name: 'Погодити без терміну' }))
+
+    expect(patches()).toEqual([['/loans/1', { method: 'PATCH', body: { action: 'approve' } }]])
+  })
+
+  it('the note counts its characters against the contract’s limit, and Enter in it writes a line, not an answer', async () => {
     const user = userEvent.setup()
 
     requests = [request('1', 'Дюна')]
 
     renderSection()
 
-    const article = await screen.findByRole('article', { name: 'Дюна' })
+    const article = await openForm(user, 'Дюна')
 
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
-    await user.type(within(article).getByLabelText('Відповідь'), 'Так{Enter}')
+    expect(note(article)).toHaveAccessibleDescription(`0/${LOAN_LIMITS.noteMax}`)
+    expect(note(article)).toHaveAttribute('maxLength', String(LOAN_LIMITS.noteMax))
 
-    expect(apiRequest).toHaveBeenCalledWith('/loans/1', {
-      method: 'PATCH',
-      body: { action: 'approve', note: 'Так' },
-    })
+    await user.type(note(article), 'Так{Enter}субота')
+
+    expect(note(article)).toHaveValue('Так\nсубота')
+    expect(note(article)).toHaveAccessibleDescription(`10/${LOAN_LIMITS.noteMax}`)
+    expect(patches()).toHaveLength(0)
   })
 
-  it('while the approval is sent, says so and lets neither answer be pressed again', async () => {
+  it('while the approval is sent: one PATCH however often it is pressed, the form locked, «Погоджую…»', async () => {
     const user = userEvent.setup()
 
     requests = [request('1', 'Дюна')]
@@ -367,15 +434,65 @@ describe('IncomingRequests: answering (BS-147)', () => {
 
     renderSection()
 
-    const article = await screen.findByRole('article', { name: 'Дюна' })
+    const article = await openForm(user, 'Дюна')
 
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
+    await user.click(within(article).getByRole('button', { name: 'Погодити без терміну' }))
 
-    expect(within(article).getByRole('button', { name: 'Погоджуємо…' })).toBeDisabled()
+    const busy = within(article).getByRole('button', { name: 'Погоджую…' })
+
+    await user.click(busy)
+    await user.keyboard('{Enter}')
+
+    expect(busy).toHaveAttribute('aria-disabled', 'true')
+    expect(busy).toHaveAttribute('aria-busy', 'true')
+    expect(busy).toHaveFocus()
+    expect(term(article)).toBeDisabled()
+    expect(note(article)).toBeDisabled()
     expect(within(article).getByRole('button', { name: 'Скасувати' })).toBeDisabled()
     expect(article).toHaveAttribute('aria-busy', 'true')
     expect(patches()).toHaveLength(1)
+  })
+
+  it('a failed approval keeps the date and the note and the focus; a retry sends them again', async () => {
+    const user = userEvent.setup()
+
+    requests = [request('1', 'Дюна'), request('2', 'Земля')]
+    answer = () =>
+      Promise.reject(new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Збій' }))
+
+    renderSection()
+
+    const article = await openForm(user, 'Дюна')
+    const due = dayIn(7)
+    const body = { action: 'approve', dueAt: due, note: 'Забирай у суботу' }
+
+    await user.click(within(article).getByRole('radio', { name: /^Тиждень/ }))
+    await user.type(note(article), 'Забирай у суботу')
+    await user.click(within(article).getByRole('button', { name: `Погодити до ${shortDay(due)}` }))
+
+    expect(await within(article).findByRole('alert')).toHaveTextContent(
+      'Не вдалося відповісти на запит. Перевірте зʼєднання і спробуйте ще раз. Вибрана дата й повідомлення збережені.',
+    )
+    expect(note(article)).toHaveValue('Забирай у суботу')
+    expect(summary(article)).toHaveTextContent(shortDay(due))
+
+    const retry = within(article).getByRole('button', { name: `Погодити до ${shortDay(due)}` })
+
+    expect(retry).toHaveFocus()
+    expect(retry).toHaveAttribute('aria-disabled', 'false')
+    expect(listReads()).toHaveLength(1)
+
+    answer = answeredBy
+    await user.click(retry)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('article', { name: 'Дюна' })).not.toBeInTheDocument()
+    })
+    expect(patches()).toEqual([
+      ['/loans/1', { method: 'PATCH', body }],
+      ['/loans/1', { method: 'PATCH', body }],
+    ])
+    expect(within(section()).getByRole('status')).toHaveTextContent('Запит на «Дюна» погоджено.')
   })
 
   it('«Скасувати» and Escape close the form without answering, and the focus returns to «Погодити»', async () => {
@@ -385,18 +502,17 @@ describe('IncomingRequests: answering (BS-147)', () => {
 
     renderSection()
 
-    const article = await screen.findByRole('article', { name: 'Дюна' })
+    const article = await openForm(user, 'Дюна')
 
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
     await user.click(within(article).getByRole('button', { name: 'Скасувати' }))
 
-    expect(within(article).queryByLabelText('Повернути до')).not.toBeInTheDocument()
+    expect(within(article).queryByRole('group', { name: 'Термін позики' })).not.toBeInTheDocument()
     expect(within(article).getByRole('button', { name: 'Погодити' })).toHaveFocus()
 
     await user.click(within(article).getByRole('button', { name: 'Погодити' }))
     await user.keyboard('{Escape}')
 
-    expect(within(article).queryByLabelText('Повернути до')).not.toBeInTheDocument()
+    expect(within(article).queryByRole('group', { name: 'Термін позики' })).not.toBeInTheDocument()
     expect(within(article).getByRole('button', { name: 'Погодити' })).toHaveFocus()
     expect(within(article).getByRole('button', { name: 'Відмовити' })).toBeEnabled()
     expect(patches()).toHaveLength(0)
@@ -439,6 +555,26 @@ describe('IncomingRequests: answering (BS-147)', () => {
     expect(within(article).getByRole('button', { name: 'Погодити' })).toBeDisabled()
   })
 
+  it('a failed rejection is said on the card, with the form closed', async () => {
+    const user = userEvent.setup()
+
+    requests = [request('1', 'Дюна')]
+    answer = () =>
+      Promise.reject(
+        new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Сервер недоступний' }),
+      )
+
+    renderSection()
+
+    const article = await screen.findByRole('article', { name: 'Дюна' })
+
+    await user.click(within(article).getByRole('button', { name: 'Відмовити' }))
+
+    expect(await within(article).findByRole('alert')).toHaveTextContent('Сервер недоступний')
+    expect(within(article).getByRole('button', { name: 'Відмовити' })).toBeEnabled()
+    expect(listReads()).toHaveLength(1)
+  })
+
   it('a request already answered elsewhere: 409, the list is read once again, the stale card goes, the count follows, and the explanation stays', async () => {
     const user = userEvent.setup()
 
@@ -457,12 +593,11 @@ describe('IncomingRequests: answering (BS-147)', () => {
 
     renderSection()
 
-    const article = await screen.findByRole('article', { name: 'Майстер і Маргарита' })
+    const article = await openForm(user, 'Майстер і Маргарита')
 
     expect(within(section()).getByText('4 запити')).toBeInTheDocument()
 
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
-    await user.click(within(article).getByRole('button', { name: 'Погодити' }))
+    await user.click(within(article).getByRole('button', { name: 'Погодити без терміну' }))
 
     await waitFor(() => {
       expect(screen.queryByRole('article', { name: 'Майстер і Маргарита' })).not.toBeInTheDocument()
@@ -602,7 +737,7 @@ describe('IncomingRequests: answering (BS-147)', () => {
     expect(patches()).toHaveLength(1)
   })
 
-  it.each<[string, () => Error, string?]>([
+  it.each<[string, () => Error, string]>([
     [
       'another conflict',
       () =>
@@ -610,15 +745,21 @@ describe('IncomingRequests: answering (BS-147)', () => {
           code: 'LOAN_COPY_STATE_MISMATCH',
           message: 'Полиця вже не така',
         }),
+      'Не вдалося відповісти на запит. Полиця вже не така Вибрана дата й повідомлення збережені.',
     ],
     [
       'a server error',
       () => new ApiRequestError(503, { code: 'INTERNAL_ERROR', message: 'Сервер недоступний' }),
+      'Не вдалося відповісти на запит. Перевірте зʼєднання і спробуйте ще раз.',
     ],
-    ['a network failure', () => new TypeError('Failed to fetch'), 'Не вдалося звʼязатися з API'],
+    [
+      'a network failure',
+      () => new TypeError('Failed to fetch'),
+      'Не вдалося відповісти на запит. Перевірте зʼєднання і спробуйте ще раз.',
+    ],
   ])(
-    '%s is shown on that card only; the card stays and the list is not read again',
-    async (_name, failure, shown = failure().message) => {
+    '%s is shown in that card’s form only, as on /loans; the card stays and the list is not read again',
+    async (_name, failure, shown) => {
       const user = userEvent.setup()
 
       requests = [request('1', 'Майстер і Маргарита'), request('2', 'Дюна')]
@@ -626,14 +767,16 @@ describe('IncomingRequests: answering (BS-147)', () => {
 
       renderSection()
 
-      const article = await screen.findByRole('article', { name: 'Майстер і Маргарита' })
+      const article = await openForm(user, 'Майстер і Маргарита')
 
-      await user.click(within(article).getByRole('button', { name: 'Погодити' }))
-      await user.click(within(article).getByRole('button', { name: 'Погодити' }))
+      await user.click(within(article).getByRole('button', { name: 'Погодити без терміну' }))
 
       expect(await within(article).findByRole('alert')).toHaveTextContent(shown)
       expect(within(card('Дюна')).queryByRole('alert')).not.toBeInTheDocument()
-      expect(within(article).getByRole('button', { name: 'Погодити' })).toBeEnabled()
+      expect(within(article).getByRole('button', { name: 'Погодити без терміну' })).toHaveAttribute(
+        'aria-disabled',
+        'false',
+      )
       expect(listReads()).toHaveLength(1)
       expect(within(section()).getAllByRole('alert')).toHaveLength(1)
       expect(within(section()).getByRole('status')).toBeEmptyDOMElement()

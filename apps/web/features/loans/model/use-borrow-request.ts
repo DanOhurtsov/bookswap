@@ -4,15 +4,24 @@ import { useRef, useState } from 'react'
 import { loanResponseSchema, type CreateLoanRequest } from '@bookswap/shared'
 import { apiRequest } from '@/app/lib/api'
 import { NO_DAY, type Day } from './loan-term'
-import { isClosedPhase, phaseOfFailure, type BorrowPhase } from './borrow-request'
+import {
+  isClosedPhase,
+  phaseOfFailure,
+  type BorrowPhase,
+  type ClosedBorrowPhase,
+} from './borrow-request'
 
 /**
  * One request for one copy (§8, `POST /loans`) and where it stands. The typed values belong to the form
  * and outlive a failure. A press while a request is on its way is ignored here, not only by the button:
  * a second POST would make a second request. Once the request is settled — sent, or refused by a 409 —
- * the shelf is read again (`onSettled`), so its «Попросити» and its links follow the server.
+ * the shelf is read again (`onSettled`, told how it was settled), so its «Попросити» and its links
+ * follow the server.
  */
-export function useBorrowRequest(copyId: string, onSettled: () => Promise<void> | void) {
+export function useBorrowRequest(
+  copyId: string,
+  onSettled: (outcome: ClosedBorrowPhase) => Promise<void> | void,
+) {
   const [message, setMessage] = useState('')
   const [proposedDueAt, setProposedDueAt] = useState<Day>(NO_DAY)
   const [phase, setPhase] = useState<BorrowPhase>({ kind: 'draft' })
@@ -48,7 +57,7 @@ export function useBorrowRequest(copyId: string, onSettled: () => Promise<void> 
     }
 
     setPhase(next)
-    if (isClosedPhase(next)) await onSettled()
+    if (isClosedPhase(next)) await onSettled(next)
   }
 
   return { message, setMessage, proposedDueAt, setProposedDueAt, phase, send }

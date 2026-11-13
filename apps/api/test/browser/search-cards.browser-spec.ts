@@ -308,10 +308,32 @@ function cards(page: Page, withPlus: boolean): Promise<Cards> {
       }
       if (card.scrollWidth > card.clientWidth) overflowing.push(`scroll: ${name(card)}`)
 
-      for (const inner of card.querySelectorAll('*')) {
-        const box = inner.getBoundingClientRect()
+      // What of an element is on screen: its box cut down by every ancestor inside the card that clips
+      // it horizontally (a scrolling rail), as the home page's check does. The clipping ancestor is
+      // checked as an element of its own, so a rail that itself runs past the card still counts.
+      const visibleBox = (element: Element): { left: number; right: number } => {
+        const box = element.getBoundingClientRect()
+        let { left, right } = box
 
-        if (box.width > 0 && (box.left < rect.left - 0.5 || box.right > rect.right + 0.5)) {
+        for (let up = element.parentElement; up !== null && up !== card; up = up.parentElement) {
+          if (getComputedStyle(up).overflowX === 'visible') continue
+
+          const clip = up.getBoundingClientRect()
+
+          left = Math.max(left, clip.left + up.clientLeft)
+          right = Math.min(right, clip.left + up.clientLeft + up.clientWidth)
+        }
+
+        return { left, right }
+      }
+
+      for (const inner of card.querySelectorAll('*')) {
+        const box = visibleBox(inner)
+
+        if (
+          box.right - box.left > 0 &&
+          (box.left < rect.left - 0.5 || box.right > rect.right + 0.5)
+        ) {
           overflowing.push(`inside: ${(inner.textContent ?? inner.tagName).slice(0, 40)}`)
         }
       }

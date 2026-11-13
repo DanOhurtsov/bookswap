@@ -183,7 +183,7 @@ export default function WorkPage() {
 
       {work.description !== null && <p>{work.description}</p>}
 
-      <HoldersPanel workId={work.id} />
+      <HoldersPanel workId={work.id} workTitle={work.title} />
 
       <section className="friends-section">
         <h2>Переклади</h2>

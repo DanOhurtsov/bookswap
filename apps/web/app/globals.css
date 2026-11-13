@@ -2003,9 +2003,12 @@ body:has(.canvas-theme),
   margin-top: auto;
 }
 
+/* The term, the note and a failure: one column, spaced as the answer on `/loans`. */
 .incoming-request__fields {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .incoming-request__actions {
@@ -2015,6 +2018,15 @@ body:has(.canvas-theme),
 }
 
 .incoming-request__actions > :first-child {
+  flex: 1 1 auto;
+}
+
+/* «Погодити до 15.12.26» is longer than «Погодити»: where both do not fit a row, each takes its own. */
+.incoming-request__form .incoming-request__actions {
+  flex-wrap: wrap;
+}
+
+.incoming-request__form .incoming-request__actions > * {
   flex: 1 1 auto;
 }
 
@@ -2178,12 +2190,6 @@ body:has(.canvas-theme),
     margin-top: 12px;
   }
 
-  /* Side by side, the two inputs line up even though only the date has a hint above it. */
-  .incoming-request__fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: end;
-  }
-
   .incoming-request > .incoming-request__actions {
     grid-area: actions;
   }
@@ -2194,10 +2200,12 @@ body:has(.canvas-theme),
     margin: 0;
   }
 
-  /* The form's answers stand where the row's answers stood: the right-hand 296 px. */
+  /* The form's answers stand where the row's answers stood: the right-hand 296 px, wider only when
+     «Погодити до …» needs it. */
   .incoming-request__form .incoming-request__actions {
     align-self: flex-end;
-    width: 296px;
+    min-width: 296px;
+    grid-template-columns: repeat(2, auto);
   }
 }
 
@@ -4405,6 +4413,7 @@ a.loan-back__link:hover {
 }
 
 .loan-term {
+  container: loan-term / inline-size;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -4815,6 +4824,15 @@ a.loan-back__link:hover {
   overflow-wrap: anywhere;
 }
 
+/*
+ * The request form and an outcome take their width from where they stand, never from their buttons:
+ * in a narrow card they stay inside it and lay out by their own width.
+ */
+.borrow-request,
+.loan-outcome {
+  container: loan-form / inline-size;
+}
+
 .loan-form-actions {
   display: flex;
   flex-direction: column-reverse;
@@ -5010,27 +5028,33 @@ a.loan-back__link:hover {
     padding: 24px;
   }
 
-  /* Five options, or six with «Без дати»: one row of equal columns either way. */
-  .loan-term__options {
-    grid-auto-columns: minmax(0, 1fr);
-    overflow: visible;
-  }
+  /*
+   * The term's own width decides as well as the screen's: in a narrow card on a wide screen (the home
+   * page's requests, a copy in the catalog's grid) the field keeps the phone's layout.
+   */
+  @container loan-term (min-width: 30rem) {
+    /* Five options, or six with «Без дати»: one row of equal columns either way. */
+    .loan-term__options {
+      grid-auto-columns: minmax(0, 1fr);
+      overflow: visible;
+    }
 
-  .loan-term__body {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 24px;
-  }
+    .loan-term__body {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 24px;
+    }
 
-  .loan-calendar {
-    flex: 0 1 336px;
-  }
+    .loan-calendar {
+      flex: 0 1 336px;
+    }
 
-  .loan-term__summary {
-    order: 0;
-    flex: 1 1 200px;
-    min-width: 0;
+    .loan-term__summary {
+      order: 0;
+      flex: 1 1 200px;
+      min-width: 0;
+    }
   }
 
   .loan-form-actions {
@@ -5040,6 +5064,17 @@ a.loan-back__link:hover {
 
   .loan-form-actions--start {
     justify-content: flex-start;
+  }
+
+  /* A form narrower than its two buttons side by side (a copy in the catalog's grid) stacks them. */
+  @container loan-form (max-width: 20rem) {
+    .loan-form-actions {
+      flex-direction: column-reverse;
+    }
+
+    .loan-form-actions--start {
+      flex-direction: column;
+    }
   }
 }
 

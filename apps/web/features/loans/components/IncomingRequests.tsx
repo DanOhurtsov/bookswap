@@ -28,10 +28,11 @@ import {
   type IncomingRequestCard as Card,
   type IncomingRequestsView,
 } from '../model/incoming-requests-view'
+import { approveLabel } from '../model/owner-request-view'
 import { useApproveForm } from '../model/use-approve-form'
 import { useIncomingRequests } from '../model/use-incoming-requests'
 import { useLoanActions } from '../model/use-loan-actions'
-import { ApproveFields } from './ApproveFields'
+import { OwnerAnswerFields } from './OwnerAnswerFields'
 
 /** The two answers this section gives; everything else about a loan stays on `/loans`. */
 type Answer = Extract<LoanAction, 'approve' | 'reject'>
@@ -222,9 +223,9 @@ function IncomingRequestsContent({
 
 /**
  * One request. «Погодити» opens the approval form of `/loans` inside the card — the return date and an
- * answer — and sends it from there; «Відмовити» answers at once, as on `/loans`. Each card has its own
- * actions, so one card's wait or failure is shown on that card only — except a conflict, which the
- * section explains while the list is read again. An answered card leaves the list when it is read again;
+ * answer — and sends it from there; «Відмовити» sends the refusal at once, with no confirmation step.
+ * Each card has its own actions, so one card's wait or failure is shown on that card only — except a
+ * conflict, which the section explains while the list is read again. An answered card leaves the list when it is read again;
  * there is no undo (PO decision, 29.10.2026).
  */
 function IncomingRequestCard({
@@ -250,6 +251,8 @@ function IncomingRequestCard({
 
   const busy = actions.busyKey !== undefined
   const sending = (action: Answer) => actions.busyKey === `${action}:${loan.id}`
+  // A conflict is the section's to explain: this card is about to leave.
+  const failure = isAnswerConflict(actions.failure) ? undefined : actions.failure
 
   const send = (action: Answer, body?: Record<string, unknown>) => {
     answer.current = action
@@ -257,12 +260,13 @@ function IncomingRequestCard({
     void actions.act(loan, action, body)
   }
 
-  // The focus follows the form: into its first field when it opens, back to «Погодити» when it closes.
+  // The focus follows the form: into the term, at its chosen option, when it opens; back to
+  // «Погодити» when it closes.
   const openForm = () => {
     flushSync(() => {
       setApproving(true)
     })
-    fields.current?.querySelector('input')?.focus()
+    fields.current?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus()
   }
 
   const closeForm = () => {
@@ -322,8 +326,8 @@ function IncomingRequestCard({
 
       {card.message !== null && <p className="incoming-request__message">«{card.message}»</p>}
 
-      {/* A conflict is the section's to explain: this card is about to leave. */}
-      <FormStatus error={isAnswerConflict(actions.failure) ? undefined : actions.failure} />
+      {/* With the form open, a failed approval is said under its fields, as on `/loans`. */}
+      {!approving && <FormStatus error={failure} />}
 
       {approving ? (
         <form
@@ -335,18 +339,24 @@ function IncomingRequestCard({
           }}
         >
           <div ref={fields} className="incoming-request__fields">
-            <ApproveFields loan={loan} form={form} />
+            <OwnerAnswerFields
+              form={form}
+              requested={card.proposedDue?.date ?? null}
+              isLocked={busy}
+              failure={failure}
+            />
           </div>
           <div className="incoming-request__actions">
-            <Button type="submit" className={CTA} disabled={busy}>
-              {sending('approve') ? (
-                <>
-                  <Spinner />
-                  Погоджуємо…
-                </>
-              ) : (
-                'Погодити'
-              )}
+            {/* Focusable while sent: the focus stays on the pressed button through a failure. */}
+            <Button
+              type="submit"
+              className={CTA}
+              disabled={busy}
+              focusableWhenDisabled
+              aria-busy={sending('approve')}
+            >
+              {sending('approve') && <Spinner />}
+              {approveLabel(form.dueAt, sending('approve'))}
             </Button>
             <Button
               type="button"
