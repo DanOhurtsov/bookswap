@@ -958,6 +958,272 @@ describe('запит з результатів пошуку /catalog (issue #87)
         dialogs: await page.getByRole('dialog').count(),
         overflow: await sidewaysOverflow(page),
       }).toEqual({ reads: 1, posts: 1, dialogs: 0, overflow: 0 })
+      // The card took the focused copy line with it: the focus goes to the results, not the page.
+      expect(await focusedOn(page)).toBe('results')
     })
   }
+
+  /** What holds the keyboard focus, in words a failed expectation can be read by. */
+  async function focusedOn(page: Page): Promise<string> {
+    return page.evaluate(() => {
+      const active = document.activeElement
+
+      if (active === null || active === document.body) return 'body'
+      if (active.matches('section[aria-label="Результати пошуку"]')) return 'results'
+      if (active.matches('#catalog-query')) return 'search field'
+      if (active.matches('li.copy > .book__meta')) return `copy line: ${active.textContent ?? ''}`
+
+      return active.outerHTML.slice(0, 120)
+    })
+  }
+
+  /** Discovery reads, each answered — or held, or failed — as the scenario says at that moment. */
+  async function controlDiscovery(page: Page) {
+    const control = {
+      mode: 'pass' as 'pass' | 'fail' | 'hold',
+      release: () => undefined as void,
+      /** Resolves once a read is being held. */
+      held: Promise.resolve(),
+    }
+    let markHeld = () => undefined as void
+
+    control.held = new Promise((resolve) => {
+      markHeld = resolve
+    })
+    await page.route(
+      (address) => address.pathname === '/api/v1/catalog/discover',
+      async (route) => {
+        if (control.mode === 'fail') return route.abort('failed')
+        if (control.mode === 'hold') {
+          await new Promise<void>((resolve) => {
+            control.release = resolve
+            markHeld()
+          })
+        }
+
+        return route.continue()
+      },
+    )
+
+    return control
+  }
+
+  /** A friend's copy listed under `token`; `extra` more books of the same owner match it as well. */
+  async function listedFor(prefix: string, extra = 0) {
+    const owner = await registerReader(`${prefix}-o`, LONG_NAME)
+    const borrower = await registerReader(`${prefix}-b`, `Позичальниця ${prefix}`)
+
+    await befriend(app, owner, borrower)
+    sequence += 1
+
+    const token = `оновлення${String(sequence)}`
+    const title = `Книжка ${token}`
+    const { copyId } = await addBook(owner, title)
+    const others: { title: string; copyId: string }[] = []
+
+    for (let index = 0; index < extra; index += 1) {
+      const other = `Інша ${token} ${String(index)}`
+
+      others.push({ title: other, ...(await addBook(owner, other)) })
+    }
+
+    return { borrower, token, title, copyId, others }
+  }
+
+  async function openCatalog(page: Page, borrower: Reader, search: string): Promise<void> {
+    await login(page, borrower.email)
+    await page.goto(`${WEB_ORIGIN}/catalog?${search}`)
+    await page.locator("li[data-slot='result-card']").first().waitFor()
+    await page.waitForLoadState('networkidle')
+  }
+
+  /** Asks for `copyId` from its card after the copy left the owner's home: the server refuses. */
+  async function refuse(page: Page, title: string, copyId: string): Promise<void> {
+    const card = resultCard(page, title)
+
+    await card.getByRole('button', { name: 'Попросити' }).click()
+    await app
+      .get(PrismaService)
+      .copy.update({ where: { id: copyId }, data: { status: 'UNAVAILABLE' } })
+    await card.getByRole('button', { name: 'Надіслати запит' }).click()
+    await card.getByRole('heading', { name: 'Книжку зараз не можна попросити' }).waitFor()
+    await page.waitForLoadState('networkidle')
+  }
+
+  const refreshAlert = (page: Page) =>
+    page.getByRole('alert').filter({ hasText: 'Не вдалося оновити список' })
+
+  it('1440: GET після «Запит надіслано» впав — результати, підтвердження й посилання лишаються; «Повторити» читає знову без другого POST', async () => {
+    const { borrower, token, title, others } = await listedFor('cat-r-sent', 1)
+    const page = await newPage(SIZES[2])
+    const posts: Request[] = []
+
+    page.on('request', (sent: Request) => {
+      if (isLoanPost(sent)) posts.push(sent)
+    })
+
+    const discovery = await controlDiscovery(page)
+
+    await openCatalog(page, borrower, `q=${encodeURIComponent(token)}`)
+
+    const card = resultCard(page, title)
+    const other = resultCard(page, others[0]!.title)
+
+    await card.getByRole('button', { name: 'Попросити' }).click()
+    discovery.mode = 'fail'
+
+    const created = page.waitForResponse((response) => isLoanPost(response.request()))
+
+    await card.getByRole('button', { name: 'Надіслати запит' }).click()
+
+    const loanId = ((await (await created).json()) as { loan: { id: string } }).loan.id
+
+    await refreshAlert(page).waitFor()
+
+    const outcome = card.locator('.loan-outcome')
+    const link = outcome.getByRole('link', { name: 'Відкрити запит' })
+
+    expect({
+      shown: await outcome.getByRole('heading', { name: 'Запит надіслано' }).isVisible(),
+      link: await link.getAttribute('href'),
+      linkVisible: await link.isVisible(),
+      cards: [await card.count(), await other.count()],
+      searchError: await page.getByRole('button', { name: 'Спробувати ще раз' }).count(),
+      searching: await page.getByText('Шукаю…').count(),
+      overflow: await sidewaysOverflow(page),
+    }).toEqual({
+      shown: true,
+      link: `/loans?loanId=${loanId}&role=borrower`,
+      linkVisible: true,
+      cards: [1, 1],
+      searchError: 0,
+      searching: 0,
+      overflow: 0,
+    })
+    // Reachable from the keyboard: the link takes the focus.
+    await link.focus()
+    expect(await link.evaluate((element) => element === document.activeElement)).toBe(true)
+    await screenshot(page, 'catalog-refresh-failed-1440-light')
+
+    // Meanwhile the other book has left its owner's home: the fresh list no longer has it.
+    await app
+      .get(PrismaService)
+      .copy.update({ where: { id: others[0]!.copyId }, data: { status: 'UNAVAILABLE' } })
+    discovery.mode = 'pass'
+
+    const reread = page.waitForResponse(
+      (response) => isDiscovery(response.request()) && response.ok(),
+    )
+
+    await page.getByRole('button', { name: 'Повторити' }).click()
+    await reread
+    await other.waitFor({ state: 'detached' })
+    await refreshAlert(page).waitFor({ state: 'detached' })
+
+    expect({
+      cards: await card.count(),
+      shown: await outcome.getByRole('heading', { name: 'Запит надіслано' }).isVisible(),
+      posts: posts.length,
+    }).toEqual({ cards: 1, shown: true, posts: 1 })
+  })
+
+  it('1440: картка лишається після перечитування — фокус лишається біля примірника', async () => {
+    const { borrower, token, title, copyId } = await listedFor('cat-f-stay')
+    const page = await newPage(SIZES[2])
+
+    // Every copy, not only those at home: the refused copy stays listed, as «Тимчасово не даю».
+    await openCatalog(page, borrower, `q=${encodeURIComponent(token)}&availability=ANY`)
+    await refuse(page, title, copyId)
+
+    const card = resultCard(page, title)
+    const reread = page.waitForResponse(
+      (response) => isDiscovery(response.request()) && response.ok(),
+    )
+
+    await card.locator('.loan-outcome').getByRole('button', { name: 'Закрити' }).click()
+    await reread
+    await card.getByText('Тимчасово не даю').waitFor()
+
+    expect({ cards: await card.count(), focus: await focusedOn(page) }).toEqual({
+      cards: 1,
+      focus: 'copy line: Тимчасово не даю',
+    })
+
+    // And the work goes on from there: the next stop is still in the card.
+    await page.keyboard.press('Tab')
+    expect(
+      await page.evaluate(
+        (text) =>
+          document.activeElement
+            ?.closest('li[data-slot="result-card"]')
+            ?.textContent?.includes(text),
+        title,
+      ),
+    ).toBe(true)
+  })
+
+  it('1440: фокус переведено до відповіді GET — лишається там, куди його перевели', async () => {
+    const { borrower, token, title, copyId } = await listedFor('cat-f-moved')
+    const page = await newPage(SIZES[2])
+    const discovery = await controlDiscovery(page)
+
+    await openCatalog(page, borrower, `q=${encodeURIComponent(token)}`)
+    await refuse(page, title, copyId)
+
+    const card = resultCard(page, title)
+
+    discovery.mode = 'hold'
+    await card.locator('.loan-outcome').getByRole('button', { name: 'Закрити' }).click()
+    await discovery.held
+
+    expect(await focusedOn(page)).toBe('copy line: Вдома, вільна')
+
+    await page.locator('#catalog-query').focus()
+    discovery.mode = 'pass'
+    discovery.release()
+    await card.waitFor({ state: 'detached' })
+    await page
+      .getByText('Серед ваших книжок і книжок друзів доступних примірників не знайшлося.')
+      .waitFor()
+
+    expect(await focusedOn(page)).toBe('search field')
+  })
+
+  it('1440: GET після закриття пояснення впав — картка й фокус лишаються; «Повторити» прибирає картку, фокус на результатах', async () => {
+    const { borrower, token, title, copyId } = await listedFor('cat-f-fail')
+    const page = await newPage(SIZES[2])
+    const posts: Request[] = []
+
+    page.on('request', (sent: Request) => {
+      if (isLoanPost(sent)) posts.push(sent)
+    })
+
+    const discovery = await controlDiscovery(page)
+
+    await openCatalog(page, borrower, `q=${encodeURIComponent(token)}`)
+    await refuse(page, title, copyId)
+
+    const card = resultCard(page, title)
+
+    discovery.mode = 'fail'
+    await card.locator('.loan-outcome').getByRole('button', { name: 'Закрити' }).click()
+    await refreshAlert(page).waitFor()
+
+    expect({
+      cards: await card.count(),
+      ask: await card.locator('button', { hasText: 'Попросити' }).count(),
+      focus: await focusedOn(page),
+      posts: posts.length,
+    }).toEqual({ cards: 1, ask: 0, focus: 'copy line: Вдома, вільна', posts: 1 })
+
+    discovery.mode = 'pass'
+    await page.getByRole('button', { name: 'Повторити' }).click()
+    await card.waitFor({ state: 'detached' })
+
+    expect({
+      alert: await refreshAlert(page).count(),
+      focus: await focusedOn(page),
+      posts: posts.length,
+    }).toEqual({ alert: 0, focus: 'results', posts: 1 })
+  })
 })
