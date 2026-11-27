@@ -100,12 +100,11 @@ describe('FriendsSessionBoundary', () => {
     render(<FriendsSessionBoundary />)
 
     expect(screen.getByText('Готовий список друзів')).toBeInTheDocument()
-    // The full people search is one step from the friends lists, next to the page title — the
-    // page's only action there.
-    expect(screen.getByRole('link', { name: 'Знайти людей' })).toHaveAttribute(
-      'href',
-      '/friends/search',
-    )
+    // BS-154: the canvas title and lead; the people search moved into the «Знайти друзів» tab.
+    expect(screen.getByRole('heading', { name: 'Друзі', level: 1 })).toBeInTheDocument()
+    expect(
+      screen.getByText('Бачите бібліотеки одне одного і можете позичати книжки'),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Додати друга' })).not.toBeInTheDocument()
   })
 })

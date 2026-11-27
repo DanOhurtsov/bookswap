@@ -1,119 +1,104 @@
 /** @jest-environment jsdom */
 
 import '@testing-library/jest-dom'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { Friend, FriendRequest, PublicUser } from '@bookswap/shared'
+import type { Friend } from '@bookswap/shared'
 import { FriendsList } from './FriendsList'
 
-const friendUser: PublicUser = {
-  id: 'friend-1',
-  displayName: 'Олена Коваль',
-  handle: 'olena',
-  avatarUrl: null,
+function friendOf(id: string, displayName: string, handle: string): Friend {
+  return {
+    user: { id, displayName, handle, avatarUrl: null },
+    friendsSince: '2026-08-20T10:00:00.000Z',
+  }
 }
 
-const incomingUser: PublicUser = {
-  id: 'incoming-1',
-  displayName: 'Марко Левченко',
-  handle: 'marko',
-  avatarUrl: null,
-}
+const olena = friendOf('friend-1', 'Олена Коваль', 'olena')
+const taras = friendOf('friend-2', 'Тарас Литвин', 'taras')
 
-const outgoingUser: PublicUser = {
-  id: 'outgoing-1',
-  displayName: 'Ірина Бондар',
-  handle: 'iryna',
-  avatarUrl: null,
-}
-
-const friend: Friend = {
-  user: friendUser,
-  friendsSince: '2026-08-20T10:00:00.000Z',
-}
-
-const incoming: FriendRequest = {
-  id: 'request-incoming',
-  user: incomingUser,
-  createdAt: '2026-08-24T10:00:00.000Z',
-}
-
-const outgoing: FriendRequest = {
-  id: 'request-outgoing',
-  user: outgoingUser,
-  createdAt: '2026-08-23T10:00:00.000Z',
-}
-
-function renderList({
-  friends = [],
-  incomingRequests = [],
-  outgoingRequests = [],
-}: {
-  friends?: Friend[]
-  incomingRequests?: FriendRequest[]
-  outgoingRequests?: FriendRequest[]
-} = {}) {
+function renderList(friends: Friend[] = []) {
   const handlers = {
-    onRespond: jest.fn(),
-    onCancelRequest: jest.fn(),
     onRemoveFriend: jest.fn(),
     onBlockFriend: jest.fn(),
+    onFindFriends: jest.fn(),
   }
 
-  render(
-    <FriendsList
-      friends={friends}
-      incoming={incomingRequests}
-      outgoing={outgoingRequests}
-      busyKey={undefined}
-      {...handlers}
-    />,
-  )
+  render(<FriendsList friends={friends} busyKey={undefined} {...handlers} />)
 
   return handlers
 }
 
 describe('FriendsList', () => {
-  it('does not render empty request sections', () => {
-    renderList()
-
-    expect(screen.queryByText('Нові запити')).not.toBeInTheDocument()
-    expect(screen.queryByText('Надіслані запити')).not.toBeInTheDocument()
-    expect(screen.getByText('Тут поки нікого')).toBeInTheDocument()
-  })
-
-  it('points an empty friends list to the people search', () => {
-    renderList()
-
-    const link = screen.getByRole('link', { name: 'Знайдіть людину' })
-
-    expect(link).toHaveAttribute('href', '/friends/search')
-    expect(link.closest('p')).toHaveTextContent('Знайдіть людину й надішліть запит у друзі.')
-  })
-
-  it('shows incoming requests first with compact accept and decline actions', async () => {
+  it('points an empty friends list to «Знайти друзів»', async () => {
     const user = userEvent.setup()
-    const handlers = renderList({
-      friends: [friend],
-      incomingRequests: [incoming],
-      outgoingRequests: [outgoing],
-    })
+    const handlers = renderList()
 
-    expect(screen.getByRole('heading', { name: 'Нові запити' })).toBeInTheDocument()
-    expect(screen.getByText('Надіслані запити')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Тут поки нікого' })).toBeInTheDocument()
+    expect(screen.queryByRole('searchbox', { name: 'Пошук серед друзів' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Прийняти запит від Марко Левченко' }))
-    expect(handlers.onRespond).toHaveBeenCalledWith('request-incoming', 'accept')
-
-    await user.click(screen.getByRole('button', { name: 'Відхилити запит від Марко Левченко' }))
-    expect(handlers.onRespond).toHaveBeenCalledWith('request-incoming', 'decline')
+    await user.click(screen.getByRole('button', { name: 'Знайти нових друзів' }))
+    expect(handlers.onFindFriends).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps destructive friend actions behind the row menu trigger', () => {
-    renderList({ friends: [friend] })
+  it('makes the whole card a link to the friend’s library', () => {
+    renderList([olena])
+
+    const cards = screen.getByRole('list', { name: 'Мої друзі' })
+    const link = within(cards).getByRole('link', { name: 'Олена Коваль' })
+
+    expect(link).toHaveAttribute('href', '/u/olena')
+    expect(within(cards).getByText('@olena')).toBeInTheDocument()
+    expect(within(cards).getByText(/^Друзі з /)).toBeInTheDocument()
+  })
+
+  it('filters by name or nickname and says how many matched', async () => {
+    const user = userEvent.setup()
+    renderList([olena, taras])
+
+    expect(screen.getByText('Показано 2 з 2 друзі')).toBeInTheDocument()
+
+    await user.type(screen.getByRole('searchbox', { name: 'Пошук серед друзів' }), '@tar')
+
+    expect(screen.getByText('Знайдено: 1 друг')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Тарас Литвин' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Олена Коваль' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Очистити пошук' }))
+    expect(screen.getByText('Показано 2 з 2 друзі')).toBeInTheDocument()
+  })
+
+  it('offers a reset and the people search when nobody matches', async () => {
+    const user = userEvent.setup()
+    const handlers = renderList([olena])
+
+    await user.type(screen.getByRole('searchbox', { name: 'Пошук серед друзів' }), 'Марта')
+
+    expect(screen.getByRole('heading', { name: 'Нікого не знайдено' })).toBeInTheDocument()
+    expect(screen.getByText(/Серед друзів немає «Марта»/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Знайти нових друзів' }))
+    expect(handlers.onFindFriends).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Скинути пошук' }))
+    expect(screen.getByRole('link', { name: 'Олена Коваль' })).toBeInTheDocument()
+  })
+
+  it('keeps destructive friend actions behind the card menu trigger', async () => {
+    const user = userEvent.setup()
+    const handlers = renderList([olena])
 
     expect(screen.queryByText('Видалити з друзів')).not.toBeInTheDocument()
     expect(screen.queryByText('Заблокувати')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Дії з другом Олена Коваль' })).toBeInTheDocument()
+
+    const trigger = screen.getByRole('button', { name: 'Дії з другом Олена Коваль' })
+
+    // The trigger goes along: the confirmation gives the focus back to it.
+    await user.click(trigger)
+    await user.click(await screen.findByRole('menuitem', { name: 'Видалити з друзів' }))
+    expect(handlers.onRemoveFriend).toHaveBeenCalledWith(olena.user, trigger)
+
+    await user.click(trigger)
+    await user.click(await screen.findByRole('menuitem', { name: 'Заблокувати' }))
+    expect(handlers.onBlockFriend).toHaveBeenCalledWith(olena.user, trigger)
   })
 })

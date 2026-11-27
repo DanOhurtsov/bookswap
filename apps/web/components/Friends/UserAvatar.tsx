@@ -13,11 +13,26 @@ function getInitials(displayName: string): string {
   )
 }
 
-function UserAvatar({ user }: { user: PublicUser }) {
+type UserAvatarProps = {
+  user: PublicUser
+  /** The canvas pages (BS-154 `/friends`) draw initials on the person's pastel; elsewhere grey. */
+  variant?: 'neutral' | 'pastel'
+  className?: string
+}
+
+function UserAvatar({ user, variant = 'neutral', className }: UserAvatarProps) {
+  const initials = getInitials(user.displayName)
+
   return (
-    <Avatar size="lg">
+    <Avatar size="lg" className={className}>
       {user.avatarUrl !== null && <AvatarImage src={user.avatarUrl} alt="" />}
-      <AvatarFallback>{getInitials(user.displayName)}</AvatarFallback>
+      {variant === 'pastel' ? (
+        <AvatarFallback variant="pastel" name={user.displayName}>
+          {initials}
+        </AvatarFallback>
+      ) : (
+        <AvatarFallback>{initials}</AvatarFallback>
+      )}
     </Avatar>
   )
 }

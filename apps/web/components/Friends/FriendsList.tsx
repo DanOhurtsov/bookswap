@@ -1,128 +1,181 @@
-import Link from 'next/link'
-import type { Friend, FriendRequest, PublicUser } from '@bookswap/shared'
-import { ChevronDownIcon, SendIcon, UserRoundCheckIcon, UsersIcon } from 'lucide-react'
-import { FriendRequestRow } from '@/components/Friends/FriendRequestRow'
+'use client'
+
+import { useState } from 'react'
+import type { Friend, PublicUser } from '@bookswap/shared'
+import { SearchIcon, XIcon } from 'lucide-react'
 import { FriendRow } from '@/components/Friends/FriendRow'
-import { USER_SEARCH_PATH } from '@/features/user-search/index.client'
+import {
+  FRIENDS_SORT_LABELS,
+  friendsResultLabel,
+  hasFriendsSearch,
+  visibleFriends,
+  type FriendsSort,
+} from '@/components/Friends/friends-view'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+type SortOption = { value: FriendsSort; label: string }
+
+const SORT_OPTIONS: readonly SortOption[] = (['recent', 'name'] as const).map((value) => ({
+  value,
+  label: FRIENDS_SORT_LABELS[value],
+}))
 
 interface FriendsListProps {
   friends: Friend[]
-  incoming: FriendRequest[]
-  outgoing: FriendRequest[]
   busyKey: string | undefined
-  onRespond: (requestId: string, action: 'accept' | 'decline') => void
-  onCancelRequest: (request: FriendRequest) => void
-  onRemoveFriend: (friend: PublicUser) => void
-  onBlockFriend: (friend: PublicUser) => void
+  onRemoveFriend: (friend: PublicUser, returnFocusTo: HTMLElement | null) => void
+  onBlockFriend: (friend: PublicUser, returnFocusTo: HTMLElement | null) => void
+  /** Opens «Знайти друзів»: where an empty list and a search with no match point. */
+  onFindFriends: () => void
 }
 
+/**
+ * «Мої друзі»: the search among friends, the order, and one card per friend. The search and the
+ * order only rearrange the list already loaded — no request — and stay on this tab (BS-154 report:
+ * moving them into the address needs the loans search-draft mechanism, outside this screen).
+ */
 function FriendsList({
   friends,
-  incoming,
-  outgoing,
   busyKey,
-  onRespond,
-  onCancelRequest,
   onRemoveFriend,
   onBlockFriend,
+  onFindFriends,
 }: FriendsListProps) {
-  return (
-    <div className="space-y-6">
-      {incoming.length > 0 && (
-        <section aria-labelledby="incoming-requests-title">
-          <div className="mb-2 flex items-center gap-2">
-            <UserRoundCheckIcon
-              className="size-4 text-emerald-600 dark:text-emerald-400"
-              aria-hidden="true"
-            />
-            <h2 id="incoming-requests-title" className="text-sm font-semibold">
-              Нові запити
-            </h2>
-            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-              {incoming.length}
-            </span>
-          </div>
-          <ul className="divide-y overflow-hidden rounded-xl border bg-card text-card-foreground">
-            {incoming.map((request) => (
-              <FriendRequestRow
-                key={request.id}
-                request={request}
-                direction="incoming"
-                busyKey={busyKey}
-                onAccept={() => onRespond(request.id, 'accept')}
-                onDecline={() => onRespond(request.id, 'decline')}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<FriendsSort>('recent')
 
-      {outgoing.length > 0 && (
-        <details className="group overflow-hidden rounded-xl border bg-card text-card-foreground">
-          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted/50 [&::-webkit-details-marker]:hidden">
-            <SendIcon className="size-4" aria-hidden="true" />
-            Надіслані запити
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{outgoing.length}</span>
-            <ChevronDownIcon
-              className="ml-auto size-4 transition-transform group-open:rotate-180"
-              aria-hidden="true"
-            />
-          </summary>
-          <ul className="divide-y border-t">
-            {outgoing.map((request) => (
-              <FriendRequestRow
-                key={request.id}
-                request={request}
-                direction="outgoing"
-                busyKey={busyKey}
-                onCancel={() => onCancelRequest(request)}
-              />
-            ))}
-          </ul>
-        </details>
-      )}
-
-      <section aria-labelledby="friends-list-title">
-        <div className="mb-2 flex items-center gap-2">
-          <UsersIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-          <h2 id="friends-list-title" className="text-sm font-semibold">
-            Усі друзі
-          </h2>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {friends.length}
-          </span>
+  if (friends.length === 0) {
+    return (
+      <div className="friends-empty">
+        <h2 className="friends-empty__title">Тут поки нікого</h2>
+        <p className="friends-empty__text">
+          Знайдіть людину й надішліть запит у друзі або запросіть друзів за посиланням.
+        </p>
+        <div className="friends-empty__actions">
+          <button
+            type="button"
+            className="friends-button friends-button--primary"
+            onClick={onFindFriends}
+          >
+            Знайти нових друзів
+          </button>
         </div>
+      </div>
+    )
+  }
 
-        {friends.length === 0 ? (
-          <div className="rounded-xl border border-dashed px-5 py-10 text-center">
-            <UsersIcon
-              className="mx-auto mb-3 size-8 text-muted-foreground/60"
-              aria-hidden="true"
-            />
-            <p className="font-medium">Тут поки нікого</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {/* Stands out from the muted sentence before hover; focus keeps the global ring. */}
-              <Link href={USER_SEARCH_PATH} className="link-underline font-medium text-foreground">
-                Знайдіть людину
-              </Link>{' '}
-              й надішліть запит у друзі.
-            </p>
+  const shown = visibleFriends(friends, query, sort)
+
+  return (
+    <>
+      <div className="friends-toolbar">
+        <div className="friends-search">
+          <SearchIcon className="friends-search__icon" aria-hidden="true" />
+          <label htmlFor="friends-query" className="sr-only">
+            Пошук серед друзів
+          </label>
+          <input
+            id="friends-query"
+            className="friends-search__input"
+            type="search"
+            autoComplete="off"
+            placeholder="Ім’я або нік"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value)
+            }}
+          />
+          {query !== '' && (
+            <button
+              type="button"
+              className="friends-search__clear"
+              aria-label="Очистити пошук"
+              onClick={() => {
+                setQuery('')
+              }}
+            >
+              <XIcon aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <div className="friends-toolbar__sort">
+          <label htmlFor="friends-sort" className="sr-only">
+            Сортування
+          </label>
+          <Select
+            value={SORT_OPTIONS.find((option) => option.value === sort) ?? null}
+            isItemEqualToValue={(one: SortOption, other: SortOption) => one.value === other.value}
+            onValueChange={(option: SortOption | null) => {
+              if (option !== null) setSort(option.value)
+            }}
+          >
+            <SelectTrigger id="friends-sort">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <p className="friends-result" aria-live="polite">
+        {friendsResultLabel(shown.length, friends.length, query)}
+      </p>
+
+      {shown.length === 0 && hasFriendsSearch(query) ? (
+        <div className="friends-empty">
+          <h2 className="friends-empty__title">Нікого не знайдено</h2>
+          <p className="friends-empty__text">
+            Серед друзів немає «{query.trim()}». Можливо, ви ще не додали цю людину.
+          </p>
+          <div className="friends-empty__actions">
+            <button
+              type="button"
+              className="friends-button friends-button--secondary"
+              onClick={() => {
+                setQuery('')
+              }}
+            >
+              Скинути пошук
+            </button>
+            <button
+              type="button"
+              className="friends-button friends-button--primary"
+              onClick={onFindFriends}
+            >
+              Знайти нових друзів
+            </button>
           </div>
-        ) : (
-          <ul className="divide-y overflow-hidden rounded-xl border bg-card text-card-foreground">
-            {friends.map((friend) => (
-              <FriendRow
-                key={friend.user.id}
-                friend={friend}
-                busy={busyKey !== undefined}
-                onRemove={() => onRemoveFriend(friend.user)}
-                onBlock={() => onBlockFriend(friend.user)}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+        </div>
+      ) : (
+        <ul className="friend-cards" aria-label="Мої друзі">
+          {shown.map((friend) => (
+            <FriendRow
+              key={friend.user.id}
+              friend={friend}
+              busy={busyKey !== undefined}
+              onRemove={(menuTrigger) => {
+                onRemoveFriend(friend.user, menuTrigger)
+              }}
+              onBlock={(menuTrigger) => {
+                onBlockFriend(friend.user, menuTrigger)
+              }}
+            />
+          ))}
+        </ul>
+      )}
+    </>
   )
 }
 
