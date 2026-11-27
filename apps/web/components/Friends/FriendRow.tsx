@@ -1,10 +1,10 @@
 import Link from 'next/link'
+import { useRef } from 'react'
 import type { Friend } from '@bookswap/shared'
-import { BanIcon, BookOpenIcon, EllipsisVerticalIcon, UserMinusIcon } from 'lucide-react'
+import { BanIcon, EllipsisIcon, UserMinusIcon } from 'lucide-react'
 import { formatDate } from '@/app/lib/labels'
 import { personHref } from '@/app/lib/person-href'
 import { UserAvatar } from '@/components/Friends/UserAvatar'
-import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,55 +18,65 @@ import {
 interface FriendRowProps {
   friend: Friend
   busy: boolean
-  onRemove: () => void
-  onBlock: () => void
+  /** Each gets «⋯»: the focus goes back there when the confirmation closes. */
+  onRemove: (menuTrigger: HTMLElement | null) => void
+  onBlock: (menuTrigger: HTMLElement | null) => void
 }
 
+/**
+ * One friend as the canvas card draws it: the whole card opens the friend's library (the name link
+ * stretches over it), only «⋯» is a control of its own. The canvas's books, mutual friends and loan
+ * status are not in `GET /friends` (BS-154 report), so the card says since when you are friends.
+ */
 function FriendRow({ friend, busy, onRemove, onBlock }: FriendRowProps) {
-  const libraryHref = personHref(friend.user)
+  const { user } = friend
+  const trigger = useRef<HTMLButtonElement>(null)
 
   return (
-    <li className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/50 sm:px-4">
-      <Link
-        href={libraryHref}
-        className="flex min-w-0 flex-1 items-center gap-3 text-inherit no-underline"
-      >
-        <UserAvatar user={friend.user} />
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{friend.user.displayName}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            Друзі з {formatDate(friend.friendsSince)}
-          </span>
-        </span>
-      </Link>
+    <li className="friend-card">
+      <UserAvatar user={user} variant="pastel" className="friend-card__avatar" />
+      <div className="friend-card__who">
+        <Link href={personHref(user)} className="friend-card__name">
+          {user.displayName}
+        </Link>
+        <span className="friend-card__handle">@{user.handle}</span>
+      </div>
+      <span className="friend-card__since">Друзі з {formatDate(friend.friendsSince)}</span>
 
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button
+            <button
+              ref={trigger}
               type="button"
-              variant="ghost"
-              size="icon"
+              className="friend-card__menu"
               disabled={busy}
-              aria-label={`Дії з другом ${friend.user.displayName}`}
+              aria-label={`Дії з другом ${user.displayName}`}
             >
-              <EllipsisVerticalIcon aria-hidden="true" />
-            </Button>
+              <EllipsisIcon aria-hidden="true" />
+            </button>
           }
         />
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="truncate">{friend.user.displayName}</DropdownMenuLabel>
-            <DropdownMenuItem render={<Link href={libraryHref} />}>
-              <BookOpenIcon aria-hidden="true" />
-              Відкрити бібліотеку
-            </DropdownMenuItem>
+            <DropdownMenuLabel className="truncate">{user.displayName}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={busy} onClick={onRemove}>
+            <DropdownMenuItem
+              disabled={busy}
+              onClick={() => {
+                onRemove(trigger.current)
+              }}
+            >
               <UserMinusIcon aria-hidden="true" />
               Видалити з друзів
             </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" disabled={busy} onClick={onBlock}>
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                onBlock(trigger.current)
+              }}
+            >
               <BanIcon aria-hidden="true" />
               Заблокувати
             </DropdownMenuItem>

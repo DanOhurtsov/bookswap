@@ -5091,3 +5091,997 @@ a.loan-back__link:hover {
     width: 84px;
   }
 }
+
+/* --- Друзі (BS-154) -------------------------------------------------------- */
+/*
+ * Canvas «Friends Page»: the title, three line tabs, then the open tab. «Мої друзі» is one card per
+ * friend — the whole card is the link to the library, «⋯» the only control of its own. «Запити» is
+ * two lists of rows in a card, «Знайти друзів» the search beside the invitations. On a phone the tabs
+ * become the canvas's segmented control and a card's date goes under the name.
+ *
+ * Every plain <button> here is styled by its class, prefixed by `.friends-page`: that outweighs the
+ * legacy `button:not([data-ui='button'])` look (padding, dark fill) without clearing it page-wide.
+ */
+.friends-page {
+  --friends-max-width: 1120px;
+}
+
+/* Not the confirmation <dialog>: it keeps its own width. */
+.friends-page > :not(dialog) {
+  width: 100%;
+  max-width: var(--friends-max-width);
+  margin-inline: auto;
+}
+
+.friends-page__header {
+  margin-bottom: 24px;
+}
+
+.friends-page__title {
+  margin: 0;
+  color: var(--canvas-text);
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 44px;
+  letter-spacing: -0.02em;
+}
+
+.friends-page__lead {
+  margin: 6px 0 0;
+  color: var(--canvas-muted);
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.friends-alert {
+  margin-bottom: 16px;
+}
+
+/* Tabs: the canvas `.mtab` — 48 px, 16 px semibold, the accent underline. */
+.friends-tabs {
+  gap: 0;
+}
+
+.friends-tabs__list {
+  width: 100%;
+  gap: 4px 32px;
+  padding: 0;
+  border-bottom: 1px solid var(--canvas-border);
+}
+
+.friends-tabs__tab {
+  gap: 8px;
+  height: 48px;
+  margin-bottom: -1px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--canvas-muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.friends-tabs__tab::after {
+  display: none;
+}
+
+.friends-tabs__tab:hover {
+  color: var(--canvas-text);
+}
+
+.friends-tabs__tab:focus-visible {
+  border-bottom-color: transparent;
+  border-radius: 4px;
+  box-shadow: none;
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+.friends-tabs__tab[data-active] {
+  border-bottom-color: var(--canvas-accent);
+  color: var(--canvas-accent);
+}
+
+.friends-tabs__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  background: var(--canvas-neutral-subtle);
+  color: var(--canvas-neutral-text);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.friends-tabs__tab[data-active] .friends-tabs__count {
+  background: var(--canvas-accent-subtle);
+  color: var(--canvas-accent);
+}
+
+/* Requests waiting for an answer stay warm on every tab: they are what the page asks of you. */
+.friends-tabs__count--hot,
+.friends-tabs__tab[data-active] .friends-tabs__count--hot {
+  background: var(--canvas-warning-subtle);
+  color: var(--canvas-warning-text);
+}
+
+.friends-tabs__panel {
+  margin-top: 24px;
+  outline: none;
+}
+
+/* Buttons: the canvas `.btn` — 44 px, 15 px semibold. */
+.friends-page .friends-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.friends-page .friends-button > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.friends-page .friends-button--primary {
+  background: var(--canvas-cta-bg);
+  color: var(--canvas-on-cta);
+}
+
+.friends-page .friends-button--primary:hover {
+  background: var(--canvas-cta-hover);
+}
+
+.friends-page .friends-button--secondary {
+  border-color: var(--canvas-field-border);
+  background: var(--canvas-surface);
+  color: var(--canvas-text);
+}
+
+.friends-page .friends-button--secondary:hover {
+  border-color: var(--canvas-field-hover-border);
+  background: var(--canvas-subtle);
+}
+
+.friends-page .friends-button:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.friends-page .friends-button--primary:disabled {
+  background: color-mix(in srgb, var(--canvas-cta-bg) 45%, var(--canvas-page));
+}
+
+.friends-page .friends-button--secondary:disabled {
+  color: var(--canvas-muted);
+}
+
+/* The pressed one keeps its full colour while it works: the spinner tells it apart. */
+.friends-page .friends-button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.friends-page .friends-button--primary[aria-busy='true'] {
+  background: var(--canvas-cta-hover);
+}
+
+.friends-page .friends-button--secondary[aria-busy='true'] {
+  color: var(--canvas-text);
+}
+
+.friends-page .friends-button:focus-visible {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+/* «Мої друзі»: the search and the order. */
+.friends-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.friends-search {
+  display: flex;
+  flex: 1 1 360px;
+  align-items: center;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid var(--canvas-field-border);
+  border-radius: 8px;
+  background: var(--canvas-surface);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.friends-search:hover {
+  border-color: var(--canvas-field-hover-border);
+}
+
+.friends-search:focus-within {
+  border-color: var(--canvas-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas-accent) 14%, transparent);
+}
+
+.friends-search__icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0 10px 0 14px;
+  color: var(--canvas-muted);
+  stroke-width: 1.75;
+}
+
+/* 16 px: a smaller field makes iOS zoom the page when it takes the focus. */
+.friends-search__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--canvas-text);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.friends-search__input::placeholder {
+  color: var(--canvas-muted);
+}
+
+/* The field's own «×» is the named clear button: one control, not two. */
+.friends-search__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.friends-page .friends-search__clear {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--canvas-muted);
+}
+
+.friends-page .friends-search__clear:hover {
+  background: var(--canvas-subtle);
+  color: var(--canvas-text);
+}
+
+.friends-search__clear > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.friends-toolbar__sort {
+  flex: 0 0 240px;
+  min-width: 0;
+}
+
+.friends-toolbar__sort [data-slot='select-trigger'] {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px 0 14px;
+  border-color: var(--canvas-field-border);
+  border-radius: 8px;
+  background: var(--canvas-surface);
+  font-size: 15px;
+}
+
+.friends-toolbar__sort [data-slot='select-trigger']:hover {
+  border-color: var(--canvas-field-hover-border);
+}
+
+.friends-result {
+  margin: 16px 0;
+  color: var(--canvas-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* One card per friend. */
+.friend-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.friend-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1.1fr) minmax(0, 1fr) 44px;
+  grid-template-areas: 'avatar who since menu';
+  align-items: center;
+  gap: 4px 16px;
+  min-height: 72px;
+  padding: 12px 8px 12px 20px;
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  box-shadow: var(--canvas-card-shadow);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.2s ease-out,
+    transform 0.2s ease-out;
+}
+
+.friend-card:hover,
+.friend-card:has(.friend-card__name:focus-visible) {
+  border-color: var(--canvas-card-hover-border);
+  box-shadow: var(--canvas-card-shadow-raised);
+  transform: translateY(-1px);
+}
+
+.friend-card:has(.friend-card__name:focus-visible) {
+  outline: 2px solid var(--canvas-accent);
+  outline-offset: 2px;
+}
+
+.friend-card:has(.friend-card__name:active) {
+  box-shadow: var(--canvas-card-shadow);
+  transform: translateY(0);
+  transition-duration: 0.08s;
+}
+
+.friend-card--placeholder {
+  display: flex;
+  gap: 16px;
+}
+
+.friend-card--placeholder:hover {
+  transform: none;
+}
+
+.friend-card__avatar {
+  grid-area: avatar;
+  width: 44px;
+  height: 44px;
+}
+
+.friend-card__avatar [data-slot='avatar-fallback'] {
+  font-size: 16px;
+}
+
+.friend-card__who {
+  display: flex;
+  grid-area: who;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.friend-card__name {
+  overflow: hidden;
+  color: var(--canvas-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The name stretches over the card: the card is one link, its focus ring drawn on the card. */
+.friend-card__name::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 12px;
+  content: '';
+}
+
+.friend-card__name:hover {
+  color: var(--canvas-text);
+}
+
+.friend-card__name:focus-visible {
+  outline: none;
+}
+
+.friend-card__handle,
+.friend-card__since {
+  overflow: hidden;
+  color: var(--canvas-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-card__handle {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.friend-card__since {
+  grid-area: since;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Above the stretched link: «⋯» is the card's one control of its own. */
+.friends-page .friend-card__menu {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  grid-area: menu;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--canvas-text);
+}
+
+.friends-page .friend-card__menu:hover,
+.friends-page .friend-card__menu[aria-expanded='true'] {
+  background: var(--canvas-subtle);
+}
+
+.friends-page .friend-card__menu:disabled {
+  color: var(--canvas-muted);
+  cursor: not-allowed;
+}
+
+.friend-card__menu > svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* An empty list and a search with no match: a sentence and the way on, not a gap. */
+.friends-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  text-align: center;
+}
+
+.friends-empty__title {
+  margin: 0;
+  color: var(--canvas-text);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.friends-empty__text {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--canvas-muted);
+  font-size: 15px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+
+.friends-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.friends-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--canvas-danger-subtle);
+  border-radius: 12px;
+  background: var(--canvas-danger-subtle);
+  color: var(--canvas-danger-text);
+  font-size: 15px;
+}
+
+.friends-load-error p {
+  margin: 0;
+}
+
+.friends-heading {
+  margin: 0 0 12px;
+  color: var(--canvas-text);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+}
+
+.friends-note {
+  margin: 0;
+  padding: 20px;
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  color: var(--canvas-muted);
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.friends-note--plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* «Запити»: two lists of rows, each in one card. */
+.friend-requests {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.request-rows {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  box-shadow: var(--canvas-card-shadow);
+  list-style: none;
+}
+
+.request-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 84px;
+  padding: 14px 20px;
+}
+
+.request-row + .request-row {
+  border-top: 1px solid var(--canvas-border);
+}
+
+.request-row__avatar {
+  width: 48px;
+  height: 48px;
+}
+
+.request-row__avatar [data-slot='avatar-fallback'] {
+  font-size: 17px;
+}
+
+.request-row__who {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.request-row__name,
+.request-row__meta {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.request-row__name {
+  color: var(--canvas-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.request-row__handle {
+  color: var(--canvas-muted);
+  font-weight: 400;
+}
+
+.request-row__meta {
+  color: var(--canvas-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.request-row__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.request-row__outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--canvas-muted);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+}
+
+.request-row__outcome--ok {
+  color: var(--canvas-accent);
+}
+
+.request-row__outcome > svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* «Знайти друзів»: the search beside the invitations. */
+.find-friends {
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
+}
+
+.find-friends__search {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.find-friends__search .friends-heading {
+  margin: 0;
+}
+
+.find-friends__form {
+  display: flex;
+  gap: 8px;
+}
+
+.find-friends__invite {
+  display: flex;
+  flex: 0 0 336px;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--canvas-border);
+  border-radius: 12px;
+  background: var(--canvas-surface);
+  box-shadow: var(--canvas-card-shadow);
+}
+
+.find-friends__invite-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  background: var(--canvas-accent-subtle);
+  color: var(--canvas-accent);
+}
+
+.find-friends__invite-icon > svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.75;
+}
+
+/* `InviteManager` (features/network) as it is, laid out as the canvas card. */
+.find-friends__invite .friends-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.find-friends__invite .friends-section h2 {
+  margin: 0;
+  color: var(--canvas-text);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+}
+
+.find-friends__invite .friends-section p {
+  margin: 0;
+}
+
+.find-friends__invite .form {
+  margin: 0;
+}
+
+.find-friends__invite input {
+  max-width: 100%;
+}
+
+.find-friends__invite button:not([data-ui='button']) {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--canvas-field-border);
+  border-radius: 8px;
+  background: var(--canvas-surface);
+  color: var(--canvas-text);
+  font-size: 15px;
+}
+
+.find-friends__invite button:not([data-ui='button']):hover {
+  border-color: var(--canvas-field-hover-border);
+  background: var(--canvas-subtle);
+}
+
+.find-friends__invite .person__actions button:not([data-ui='button']) {
+  width: 100%;
+  border-color: transparent;
+  background: var(--canvas-cta-bg);
+  color: var(--canvas-on-cta);
+}
+
+.find-friends__invite .person__actions button:not([data-ui='button']):hover {
+  background: var(--canvas-cta-hover);
+}
+
+.find-friends__invite .books {
+  gap: 8px;
+  margin: 0;
+}
+
+.find-friends__invite .book {
+  gap: 8px;
+  padding: 12px;
+  border-color: var(--canvas-border);
+}
+
+@media (max-width: 1000px) {
+  .find-friends {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .find-friends__invite {
+    flex-basis: auto;
+  }
+}
+
+/* A phone: the canvas «Mobile / Друзі». */
+@media (max-width: 640px) {
+  .friends-page__header {
+    margin-bottom: 16px;
+  }
+
+  .friends-page__title {
+    font-size: 28px;
+    line-height: 36px;
+  }
+
+  .friends-page__lead {
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  /* The tabs become the canvas `.seg`: one row, equal parts, the open one raised. */
+  .friends-tabs__list {
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 4px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--canvas-neutral-subtle);
+  }
+
+  .friends-tabs__tab {
+    flex: 1 1 0;
+    gap: 6px;
+    min-width: 0;
+    height: 40px;
+    margin: 0;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 7px;
+    font-size: 14px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .friends-tabs__tab[data-active] {
+    background: var(--canvas-surface);
+    box-shadow: 0 1px 2px rgba(20, 28, 24, 0.08);
+    color: var(--canvas-text);
+  }
+
+  .friends-tabs__tab:focus-visible {
+    border-radius: 7px;
+    outline-offset: 0;
+  }
+
+  /* Only what waits for you is counted on a phone, as a solid badge. */
+  .friends-tabs__count {
+    display: none;
+  }
+
+  .friends-tabs__count--hot,
+  .friends-tabs__tab[data-active] .friends-tabs__count--hot {
+    display: inline-flex;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--canvas-warning-dot);
+    color: #ffffff;
+    font-size: 11px;
+  }
+
+  .friends-tabs__panel {
+    margin-top: 14px;
+  }
+
+  .friends-toolbar__sort {
+    flex: 1 1 100%;
+  }
+
+  .friends-result {
+    margin: 10px 0;
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  /* The canvas phone list is one card of rows, not a card per friend. */
+  .friend-cards {
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--canvas-border);
+    border-radius: 12px;
+    background: var(--canvas-surface);
+    box-shadow: var(--canvas-card-shadow);
+  }
+
+  .friend-card {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-areas:
+      'avatar who menu'
+      'avatar since menu';
+    gap: 2px 12px;
+    min-height: 64px;
+    padding: 8px 4px 8px 14px;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .friend-card + .friend-card {
+    border-top: 1px solid var(--canvas-border);
+  }
+
+  .friend-card:hover,
+  .friend-card:has(.friend-card__name:focus-visible) {
+    border-color: var(--canvas-border);
+    background: var(--canvas-subtle);
+    box-shadow: none;
+    transform: none;
+  }
+
+  .friend-card:has(.friend-card__name:focus-visible) {
+    outline-offset: -2px;
+  }
+
+  .friend-card__name::after {
+    border-radius: 0;
+  }
+
+  .friend-card__handle {
+    display: none;
+  }
+
+  .friend-card__name {
+    font-size: 15px;
+    line-height: 20px;
+  }
+
+  .friend-card__since {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .friends-empty {
+    padding: 24px 16px;
+  }
+
+  .friends-heading {
+    margin-bottom: 8px;
+    font-size: 17px;
+    line-height: 24px;
+  }
+
+  .friend-requests {
+    gap: 20px;
+  }
+
+  .request-row {
+    flex-wrap: wrap;
+    gap: 12px;
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .request-row__avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .request-row__who {
+    flex-basis: calc(100% - 56px);
+  }
+
+  .request-row__name {
+    font-size: 15px;
+    line-height: 20px;
+  }
+
+  .request-row__meta {
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .request-row__actions {
+    display: grid;
+    flex: 1 1 100%;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+  }
+
+  .friends-page .request-row__actions .friends-button {
+    width: 100%;
+  }
+
+  .request-row__outcome {
+    min-height: 44px;
+  }
+
+  .find-friends {
+    gap: 20px;
+  }
+
+  /* The canvas puts the invitation first on a phone. */
+  .find-friends__invite {
+    order: -1;
+    padding: 16px;
+  }
+
+  .find-friends__form .friends-button {
+    padding: 0 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .friend-card,
+  .friend-card:hover,
+  .friend-card:has(.friend-card__name:focus-visible) {
+    transform: none;
+    transition: none;
+  }
+}
