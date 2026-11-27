@@ -8,7 +8,13 @@ import {
 } from '@bookswap/shared'
 import { ApiRequestError, apiRequest, describeError } from '@/app/lib/api'
 import { announceResourceChanged } from '@/app/lib/resource-sync'
-import type { AnsweredRequest, RequestOutcome } from './friends-view'
+import type { FriendsResource } from '@/app/lib/use-friends'
+import {
+  currentAnswers,
+  type AnsweredRequests,
+  type IncomingSnapshot,
+  type RequestOutcome,
+} from './friends-view'
 
 export interface Confirmation {
   title: string
@@ -22,7 +28,7 @@ export interface FriendActions {
   busyKey: string | undefined
   failure: unknown
   /** Incoming requests answered on this page, by request id (`incomingRows`). */
-  answered: Readonly<Record<string, AnsweredRequest>>
+  answered: AnsweredRequests
   confirmation: Confirmation | undefined
   respond: (request: FriendRequest, action: 'accept' | 'decline') => void
   /** `returnFocusTo`: what opened it from a menu — the menu item itself is gone by then. */
@@ -38,15 +44,38 @@ const OUTCOMES: Readonly<Record<'accept' | 'decline', RequestOutcome>> = {
 }
 
 /**
+ * The incoming requests answered on this page, by request id. A request sent again after its
+ * answer comes back in a fresh read under the same id: `incomingRows` already shows it as waiting,
+ * and its old outcome is dropped here as well, so a later read without the request does not bring
+ * that outcome back. Dropped during render (React's "derive state from props" pattern), not in an
+ * effect: `currentAnswers` returns the same answers once nothing is over, so this settles at once.
+ */
+function useAnsweredRequests(snapshot: IncomingSnapshot | undefined) {
+  const [answered, setAnswered] = useState<AnsweredRequests>({})
+  const current = snapshot === undefined ? answered : currentAnswers(answered, snapshot)
+
+  if (current !== answered) setAnswered(current)
+
+  function record(request: FriendRequest, outcome: RequestOutcome, staleThrough: number): void {
+    setAnswered((previous) => ({ ...previous, [request.id]: { request, outcome, staleThrough } }))
+  }
+
+  return { answered: current, record }
+}
+
+/**
  * Every friend action of `/friends`: the request, the busy key, the failure and the follow-up.
  * One place owns «after a change, announce it»: the lists here reload, and so do the relations in
  * the header people search.
  */
-export function useFriendActions(): FriendActions {
+export function useFriendActions({
+  state,
+  latestRevision,
+}: Pick<FriendsResource, 'state' | 'latestRevision'>): FriendActions {
   const [failure, setFailure] = useState<unknown>()
   const [busyKey, setBusyKey] = useState<string>()
   const [confirmation, setConfirmation] = useState<Confirmation>()
-  const [answered, setAnswered] = useState<Readonly<Record<string, AnsweredRequest>>>({})
+  const { answered, record } = useAnsweredRequests(state.status === 'ready' ? state : undefined)
   const returnFocus = useRef<HTMLElement | null>(null)
 
   // The modal dialog gives the focus back to what had it when it opened. Opened from a «⋯» menu,
@@ -102,11 +131,9 @@ export function useFriendActions(): FriendActions {
           body: { action },
           schema: friendshipStateResponseSchema,
         })
-        // Recorded before the reload is announced: the row keeps its place with the outcome.
-        setAnswered((previous) => ({
-          ...previous,
-          [request.id]: { request, outcome: OUTCOMES[action] },
-        }))
+        // Recorded before the reload is announced: the row keeps its place with the outcome, and
+        // every load requested until now — the one the announce requests comes later — is stale.
+        record(request, OUTCOMES[action], latestRevision())
       })
     },
     confirmRemoveFriend: (friend, returnFocusTo) => {

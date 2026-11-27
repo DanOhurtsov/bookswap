@@ -1,5 +1,6 @@
 import type { Friend, FriendRequest } from '@bookswap/shared'
 import {
+  currentAnswers,
   friendsCount,
   friendsResultLabel,
   friendsTabHref,
@@ -123,10 +124,10 @@ describe('incomingRows', () => {
 
   it('keeps an answered request in its place after it left the incoming list', () => {
     const answered: Record<string, AnsweredRequest> = {
-      b: { request: middle, outcome: 'accepted' },
+      b: { request: middle, outcome: 'accepted', staleThrough: 0 },
     }
 
-    expect(incomingRows([newest, oldest], answered)).toEqual([
+    expect(incomingRows({ revision: 1, incoming: [newest, oldest] }, answered)).toEqual([
       { kind: 'pending', request: newest },
       { kind: 'answered', request: middle, outcome: 'accepted' },
       { kind: 'pending', request: oldest },
@@ -135,21 +136,57 @@ describe('incomingRows', () => {
 
   it('shows an answered request once while the list still has it', () => {
     const answered: Record<string, AnsweredRequest> = {
-      a: { request: newest, outcome: 'declined' },
+      a: { request: newest, outcome: 'declined', staleThrough: 0 },
     }
 
-    expect(incomingRows([newest, middle], answered)).toEqual([
+    expect(incomingRows({ revision: 0, incoming: [newest, middle] }, answered)).toEqual([
       { kind: 'answered', request: newest, outcome: 'declined' },
+      { kind: 'pending', request: middle },
+    ])
+  })
+
+  it('shows a request sent again once, as waiting, when a read requested after the answer has it', () => {
+    const answered: Record<string, AnsweredRequest> = {
+      a: { request: newest, outcome: 'declined', staleThrough: 0 },
+    }
+    // The API reuses the friendship: the same id and the same `createdAt`.
+    const sentAgain = { ...newest }
+
+    expect(incomingRows({ revision: 1, incoming: [sentAgain, middle] }, answered)).toEqual([
+      { kind: 'pending', request: sentAgain },
       { kind: 'pending', request: middle },
     ])
   })
 
   it('counts only the requests still waiting for an answer', () => {
     const answered: Record<string, AnsweredRequest> = {
-      a: { request: newest, outcome: 'accepted' },
+      a: { request: newest, outcome: 'accepted', staleThrough: 2 },
     }
 
-    expect(pendingIncomingCount([newest, middle, oldest], answered)).toBe(2)
-    expect(pendingIncomingCount([], answered)).toBe(0)
+    expect(
+      pendingIncomingCount({ revision: 2, incoming: [newest, middle, oldest] }, answered),
+    ).toBe(2)
+    expect(pendingIncomingCount({ revision: 3, incoming: [] }, answered)).toBe(0)
+    expect(pendingIncomingCount({ revision: 3, incoming: [newest, middle] }, answered)).toBe(2)
+  })
+})
+
+describe('currentAnswers', () => {
+  const declined = requestOf('a', '2026-11-03T10:00:00.000Z')
+  const accepted = requestOf('b', '2026-11-02T10:00:00.000Z')
+  const answered: Record<string, AnsweredRequest> = {
+    a: { request: declined, outcome: 'declined', staleThrough: 1 },
+    b: { request: accepted, outcome: 'accepted', staleThrough: 1 },
+  }
+
+  it('returns the same answers while no fresh read lists an answered request', () => {
+    expect(currentAnswers(answered, { revision: 1, incoming: [declined, accepted] })).toBe(answered)
+    expect(currentAnswers(answered, { revision: 2, incoming: [] })).toBe(answered)
+  })
+
+  it('drops only the answers whose request a fresh read lists again', () => {
+    expect(currentAnswers(answered, { revision: 2, incoming: [{ ...declined }] })).toEqual({
+      b: answered.b,
+    })
   })
 })

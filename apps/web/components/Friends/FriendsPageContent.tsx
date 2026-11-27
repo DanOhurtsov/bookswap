@@ -31,8 +31,9 @@ const TAB_LABELS: Readonly<Record<FriendsTab, string>> = {
  * needs neither list and opens at once.
  */
 function FriendsPageContent() {
-  const { state, reload } = useFriends()
-  const actions = useFriendActions()
+  const friends = useFriends()
+  const { state, reload } = friends
+  const actions = useFriendActions(friends)
   const { tab, selectTab } = useFriendsTab()
   const counts = tabCounts(state, actions)
 
@@ -77,7 +78,7 @@ function FriendsPageContent() {
           <ListsBody state={state} onRetry={reload}>
             {(ready) => (
               <FriendRequestsPanel
-                incoming={incomingRows(ready.incoming, actions.answered)}
+                incoming={incomingRows(ready, actions.answered)}
                 outgoing={ready.outgoing}
                 busyKey={actions.busyKey}
                 onRespond={actions.respond}
@@ -112,7 +113,7 @@ function tabCounts(state: FriendsState, actions: FriendActions): TabCounts {
 
   return {
     friends: state.friends.length,
-    requests: pendingIncomingCount(state.incoming, actions.answered),
+    requests: pendingIncomingCount(state, actions.answered),
   }
 }
 

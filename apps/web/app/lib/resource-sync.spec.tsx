@@ -43,6 +43,19 @@ describe('legacy readers follow announced changes', () => {
     expect(callsTo('/friends')).toBe(2)
   })
 
+  it('useFriends marks each read with the load that made it, requested at once on a change', async () => {
+    const { result } = renderHook(() => useFriends())
+
+    await waitFor(() => expect(result.current.state).toMatchObject({ revision: 0 }))
+    expect(result.current.latestRevision()).toBe(0)
+
+    act(() => announceResourceChanged('friends'))
+    // Requested before the new read lands: the lists on screen are still those of load 0.
+    expect(result.current.latestRevision()).toBe(1)
+
+    await waitFor(() => expect(result.current.state).toMatchObject({ revision: 1 }))
+  })
+
   it('every mounted useNotifications instance reloads when notifications change', async () => {
     const badge = renderHook(() => useNotifications(false))
     const unreadPage = renderHook(() => useNotifications(true))

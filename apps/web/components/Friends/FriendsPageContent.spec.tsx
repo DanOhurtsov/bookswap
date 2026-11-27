@@ -26,10 +26,29 @@ jest.mock('next/navigation', () => ({
 
 let mockFriendsState: FriendsState = { status: 'loading' }
 const mockReload = jest.fn()
+// The newest load requested: like `useFriends`, an announced change requests one more.
+let mockRequestedRevision = 0
 
-jest.mock('@/app/lib/use-friends', () => ({
-  useFriends: () => ({ state: mockFriendsState, reload: mockReload }),
-}))
+function mockRequestLoad(): void {
+  mockRequestedRevision += 1
+}
+
+jest.mock('@/app/lib/use-friends', () => {
+  const { useReloadOnResourceChange } =
+    jest.requireActual<typeof import('@/app/lib/resource-sync')>('@/app/lib/resource-sync')
+
+  return {
+    useFriends: () => {
+      useReloadOnResourceChange('friends', mockRequestLoad)
+
+      return {
+        state: mockFriendsState,
+        reload: mockReload,
+        latestRevision: () => mockRequestedRevision,
+      }
+    },
+  }
+})
 
 jest.mock('@/features/network/index.client', () => ({
   InviteManager: () => <h2>Запросити друзів</h2>,
@@ -56,6 +75,7 @@ const outgoing: FriendRequest = {
 
 const READY: FriendsState = {
   status: 'ready',
+  revision: 0,
   friends: [friend],
   incoming: [incoming],
   outgoing: [outgoing],
@@ -78,6 +98,7 @@ beforeEach(() => {
   mockPush.mockReset()
   mockReload.mockReset()
   mockFriendsState = READY
+  mockRequestedRevision = 0
   window.history.replaceState(null, '', '/friends')
   unwatch = watchHistory()
 })
@@ -159,6 +180,43 @@ describe('FriendsPageContent', () => {
     expect(
       screen.queryByRole('button', { name: 'Прийняти запит від Марко Левченко' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('shows a request sent again after a decline as waiting once a fresh read returns it', async () => {
+    const user = userEvent.setup()
+    apiRequest.mockResolvedValue({ relation: 'NONE' })
+    window.history.replaceState(null, '', '/friends?tab=requests')
+
+    const { rerender } = render(<FriendsPageContent />)
+    await user.click(screen.getByRole('button', { name: 'Відхилити запит від Марко Левченко' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Запит відхилено')
+    expect(mockRequestedRevision).toBe(1)
+
+    // A read that was not requested after the decline still lists the request: the outcome stays.
+    mockFriendsState = { ...READY, incoming: [{ ...incoming }] }
+    rerender(<FriendsPageContent />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Запит відхилено')
+    expect(tab(/^Запити/)).toHaveTextContent(/^Запити$/)
+
+    // The refresh the decline requested comes back with the request sent again: the same id and
+    // `createdAt`, and no empty list in between.
+    mockFriendsState = { ...READY, revision: 1, incoming: [{ ...incoming }] }
+    rerender(<FriendsPageContent />)
+
+    const incomingSection = screen.getByRole('region', { name: 'Хочуть додати вас' })
+
+    expect(within(incomingSection).getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Прийняти запит від Марко Левченко' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Відхилити запит від Марко Левченко' })).toBeEnabled()
+    expect(tab(/^Запити/)).toHaveTextContent('Запити1')
+
+    // The old outcome is gone, not hidden: once the request is withdrawn, it does not come back.
+    mockFriendsState = { ...READY, revision: 2, incoming: [] }
+    rerender(<FriendsPageContent />)
+
+    expect(screen.getByText('Нових запитів немає.')).toBeInTheDocument()
   })
 
   it('shows a failed answer as an alert and keeps the buttons', async () => {

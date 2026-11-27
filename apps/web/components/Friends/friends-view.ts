@@ -106,12 +106,48 @@ export function friendsResultLabel(shown: number, total: number, query: string):
 
 export type RequestOutcome = 'accepted' | 'declined'
 
-/** An incoming request answered on this page, kept until the page is left. */
-export type AnsweredRequest = { request: FriendRequest; outcome: RequestOutcome }
+/**
+ * An incoming request answered on this page, kept until the page is left. `staleThrough` is the
+ * newest friends load requested when the answer was recorded (`useFriends().latestRevision`): those
+ * reads may have started before the answer, so their copy of the request says nothing new.
+ */
+export type AnsweredRequest = {
+  request: FriendRequest
+  outcome: RequestOutcome
+  staleThrough: number
+}
+
+export type AnsweredRequests = Readonly<Record<string, AnsweredRequest>>
+
+/** The incoming requests and the friends load that read them (`useFriends` ready state). */
+export type IncomingSnapshot = { revision: number; incoming: readonly FriendRequest[] }
 
 export type IncomingRow =
   | { kind: 'pending'; request: FriendRequest }
   | { kind: 'answered'; request: FriendRequest; outcome: RequestOutcome }
+
+/**
+ * The answers that still describe `snapshot`. The API reuses the friendship of a declined request
+ * when it is sent again — the same id and `createdAt` — so only the read itself tells them apart: a
+ * load requested after the answer that still lists the request lists a new one, and its answer is
+ * over. Returns `answered` itself when nothing is over, so a state update with it is a no-op.
+ */
+export function currentAnswers(
+  answered: AnsweredRequests,
+  snapshot: IncomingSnapshot,
+): AnsweredRequests {
+  const listed = new Set(snapshot.incoming.map((request) => request.id))
+  const over = Object.values(answered).filter(
+    ({ request, staleThrough }) => snapshot.revision > staleThrough && listed.has(request.id),
+  )
+
+  if (over.length === 0) return answered
+
+  const current = { ...answered }
+  for (const { request } of over) delete current[request.id]
+
+  return current
+}
 
 /**
  * The «Хочуть додати вас» rows. An answered request leaves `GET /friends/requests` on the next read,
@@ -120,13 +156,14 @@ export type IncomingRow =
  * row stays where it was when the list is read again.
  */
 export function incomingRows(
-  incoming: readonly FriendRequest[],
-  answered: Readonly<Record<string, AnsweredRequest>>,
+  snapshot: IncomingSnapshot,
+  answered: AnsweredRequests,
 ): IncomingRow[] {
-  const pending: IncomingRow[] = incoming
-    .filter((request) => answered[request.id] === undefined)
+  const current = currentAnswers(answered, snapshot)
+  const pending: IncomingRow[] = snapshot.incoming
+    .filter((request) => current[request.id] === undefined)
     .map((request) => ({ kind: 'pending', request }))
-  const done: IncomingRow[] = Object.values(answered).map(({ request, outcome }) => ({
+  const done: IncomingRow[] = Object.values(current).map(({ request, outcome }) => ({
     kind: 'answered',
     request,
     outcome,
@@ -139,8 +176,10 @@ export function incomingRows(
 
 /** The «Запити» tab count: incoming requests still waiting for an answer. */
 export function pendingIncomingCount(
-  incoming: readonly FriendRequest[],
-  answered: Readonly<Record<string, AnsweredRequest>>,
+  snapshot: IncomingSnapshot,
+  answered: AnsweredRequests,
 ): number {
-  return incoming.filter((request) => answered[request.id] === undefined).length
+  const current = currentAnswers(answered, snapshot)
+
+  return snapshot.incoming.filter((request) => current[request.id] === undefined).length
 }

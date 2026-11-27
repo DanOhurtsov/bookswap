@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   friendListResponseSchema,
   friendRequestsResponseSchema,
@@ -16,12 +16,33 @@ import { useReloadOnResourceChange } from './resource-sync'
  */
 export type FriendsState =
   | { status: 'loading' }
-  | { status: 'ready'; friends: Friend[]; incoming: FriendRequest[]; outgoing: FriendRequest[] }
+  | {
+      status: 'ready'
+      /** The load that read these lists; see `latestRevision`. */
+      revision: number
+      friends: Friend[]
+      incoming: FriendRequest[]
+      outgoing: FriendRequest[]
+    }
   | { status: 'error'; message: string }
 
-export function useFriends(): { state: FriendsState; reload: () => void } {
+export interface FriendsResource {
+  state: FriendsState
+  reload: () => void
+  /**
+   * The revision of the newest load requested so far, read at call time. Every `reload` requests a
+   * new one, so lists whose `revision` is greater were requested after the call: they are not a
+   * read that was already under way. A request id and `createdAt` can come back unchanged after
+   * the request was answered and sent again, so only this tells an old read from a fresh one.
+   */
+  latestRevision: () => number
+}
+
+export function useFriends(): FriendsResource {
   const [state, setState] = useState<FriendsState>({ status: 'loading' })
   const [nonce, setNonce] = useState(0)
+  // Bumped synchronously in `reload`, before React renders the new nonce and starts its load.
+  const requested = useRef(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -44,6 +65,7 @@ export function useFriends(): { state: FriendsState; reload: () => void } {
 
         setState({
           status: 'ready',
+          revision: nonce,
           friends: friends.friends,
           incoming: requests.incoming,
           outgoing: requests.outgoing,
@@ -63,11 +85,14 @@ export function useFriends(): { state: FriendsState; reload: () => void } {
   }, [nonce])
 
   const reload = useCallback(() => {
-    setNonce((value) => value + 1)
+    requested.current += 1
+    setNonce(requested.current)
   }, [])
+
+  const latestRevision = useCallback(() => requested.current, [])
 
   // A friend request answered elsewhere (the notifications panel) changes both lists here.
   useReloadOnResourceChange('friends', reload)
 
-  return { state, reload }
+  return { state, reload, latestRevision }
 }
