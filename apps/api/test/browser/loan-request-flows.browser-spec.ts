@@ -1149,17 +1149,11 @@ describe('запит з результатів пошуку /catalog (issue #87)
       focus: 'copy line: Тимчасово не даю',
     })
 
-    // And the work goes on from there: the next stop is still in the card.
+    // And the work goes on from there: the card has no tab stop after the copy line, so Tab moves on
+    // in document order to the next control of the catalog, the page-size select.
     await page.keyboard.press('Tab')
-    expect(
-      await page.evaluate(
-        (text) =>
-          document.activeElement
-            ?.closest('li[data-slot="result-card"]')
-            ?.textContent?.includes(text),
-        title,
-      ),
-    ).toBe(true)
+    const pageSize = page.getByRole('combobox', { name: 'Результатів на сторінці' })
+    expect(await pageSize.evaluate((element) => element === document.activeElement)).toBe(true)
   })
 
   it('1440: фокус переведено до відповіді GET — лишається там, куди його перевели', async () => {
