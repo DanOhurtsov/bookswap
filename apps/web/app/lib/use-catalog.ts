@@ -24,6 +24,12 @@ export type CatalogDiscoveryState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; response: CatalogDiscoveryResponse }
+  /**
+   * A background read of the same search (`refresh`) failed: the last answer stays on screen, and with
+   * it the cards and any outcome open in them, until a read succeeds.
+   */
+  | { status: 'refreshFailed'; response: CatalogDiscoveryResponse; message: string }
+  /** The search has no answer to show: its first read, or a read from scratch, failed. */
   | { status: 'error'; message: string }
 
 /** Everything that decides which copies a discovery page lists, except the page number. */
@@ -90,7 +96,8 @@ export interface CatalogDiscovery {
   /**
    * Reads the same search again in the background (a copy just requested): the list on screen, and
    * any outcome open in it, stays until the answer replaces it. The key does not change, so the list
-   * never goes back to `loading` and its cards are not remounted.
+   * never goes back to `loading` and its cards are not remounted. A failed read leaves them on screen
+   * too, as `refreshFailed`.
    */
   refresh: () => Promise<void>
   /** Asks the same search again from scratch (a repeated «Знайти»): `loading` until it answers. */
@@ -139,7 +146,15 @@ function useCatalogDiscoveryState(
 
   if (!enabled) return { status: 'idle' }
   if (query.status === 'success') return { status: 'ready', response: query.data }
-  if (query.status === 'error') return { status: 'error', message: describeError(query.error) }
+  if (query.status === 'error') {
+    const message = describeError(query.error)
+
+    // A failed refetch keeps the data it was to replace; `searchAgain` resets it, so a read from
+    // scratch that fails has none and is the search's own error.
+    return query.data === undefined
+      ? { status: 'error', message }
+      : { status: 'refreshFailed', response: query.data, message }
+  }
 
   return { status: 'loading' }
 }

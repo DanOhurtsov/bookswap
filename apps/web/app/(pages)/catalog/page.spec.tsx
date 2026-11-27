@@ -443,6 +443,124 @@ describe('issue #87: the list read again after a request', () => {
     expect(screen.getByRole('link', { name: 'Тигролови', hidden: true })).toBeInTheDocument()
   })
 
+  describe('a failed read after «Запит надіслано»', () => {
+    /** From 48rem the form and its outcome sit under the copy, in the list itself. */
+    beforeAll(() => {
+      window.matchMedia = (media: string) =>
+        ({
+          matches: true,
+          media,
+          onchange: null,
+          addListener: () => undefined,
+          removeListener: () => undefined,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList
+    })
+
+    afterAll(() => {
+      Reflect.deleteProperty(window, 'matchMedia')
+    })
+
+    const another: CatalogDiscoveryResult = {
+      ...candidate,
+      work: { ...candidate.work, id: 'work-2', title: 'Сад Гетсиманський' },
+    }
+
+    const discoverCalls = () =>
+      apiRequest.mock.calls.filter(([path]: [string]) => path.startsWith('/catalog/discover'))
+    const posts = () => apiRequest.mock.calls.filter(([path]: [string]) => path === '/loans')
+
+    /** `/loans` creates `loan-1`; the reads after the first one fail until `recover`. */
+    function sentThenFailing() {
+      let failing = true
+
+      apiRequest.mockImplementation((path: string) => {
+        if (path === '/loans') return Promise.resolve({ loan: { id: 'loan-1' } })
+        if (discoverCalls().length === 1) return Promise.resolve(response())
+
+        return failing
+          ? Promise.reject(new Error('Мережа'))
+          : Promise.resolve(response({ results: [another] }))
+      })
+
+      return {
+        recover: () => {
+          failing = false
+        },
+      }
+    }
+
+    async function send() {
+      renderAt('q=Тигролови')
+      await userEvent.click(await screen.findByRole('button', { name: 'Попросити' }))
+      await userEvent.click(screen.getByRole('button', { name: 'Надіслати запит' }))
+    }
+
+    it('keeps the last results and the outcome with its link; «Повторити» reads again without a second POST', async () => {
+      const list = sentThenFailing()
+
+      await send()
+
+      const alert = await screen.findByRole('alert')
+
+      expect(discoverCalls()).toHaveLength(2)
+      expect(screen.getByRole('heading', { name: 'Запит надіслано' })).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Відкрити запит' })).toHaveAttribute(
+        'href',
+        '/loans?loanId=loan-1&role=borrower',
+      )
+      expect(screen.getByRole('link', { name: 'Тигролови' })).toBeInTheDocument()
+      expect(alert).toHaveTextContent('Не вдалося оновити список')
+      // Not the error screen of a search that never answered.
+      expect(screen.queryByRole('button', { name: 'Спробувати ще раз' })).not.toBeInTheDocument()
+
+      list.recover()
+      await userEvent.click(screen.getByRole('button', { name: 'Повторити' }))
+
+      // The fresh answer replaces the list: the card it no longer has is gone, with its outcome.
+      expect(await screen.findByRole('link', { name: 'Сад Гетсиманський' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Тигролови' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Запит надіслано' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(discoverCalls()).toHaveLength(3)
+      expect(posts()).toHaveLength(1)
+    })
+
+    it('a failed «Повторити» keeps the results and says so again', async () => {
+      sentThenFailing()
+
+      await send()
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByRole('button', { name: 'Повторити' }))
+
+      await waitFor(() => expect(discoverCalls()).toHaveLength(3))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Не вдалося оновити список')
+      expect(screen.getByRole('heading', { name: 'Запит надіслано' })).toBeVisible()
+      expect(posts()).toHaveLength(1)
+    })
+
+    it('«Знайти» after it still searches from scratch: the kept list goes, a failure is the search’s own', async () => {
+      const list = sentThenFailing()
+
+      await send()
+      await screen.findByRole('alert')
+      await userEvent.click(screen.getByRole('button', { name: 'Знайти' }))
+
+      expect(await screen.findByRole('button', { name: 'Спробувати ще раз' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Тигролови' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Повторити' })).not.toBeInTheDocument()
+
+      list.recover()
+      await userEvent.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
+
+      expect(await screen.findByRole('link', { name: 'Сад Гетсиманський' })).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(posts()).toHaveLength(1)
+    })
+  })
+
   it('a repeated «Знайти» still searches from scratch', async () => {
     const list = readAgainOnRelease(() => Promise.resolve({ loan: { id: 'loan-1' } }))
 
@@ -537,11 +655,113 @@ describe('issue #87: LOAN_COPY_UNAVAILABLE — the explanation first, the list a
     expect(screen.queryByRole('button', { name: 'Попросити' })).not.toBeInTheDocument()
 
     fail = false
-    await userEvent.click(screen.getByRole('button', { name: 'Спробувати ще раз' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Повторити' }))
 
     expect(await screen.findByText(empty)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(discoverCalls()).toHaveLength(3)
+  })
+
+  describe('the keyboard focus once the list is read', () => {
+    const results = () => screen.getByRole('region', { name: 'Результати пошуку' })
+    const copyLine = () => screen.getByText('Вдома, вільна')
+    const closeOutcome = () =>
+      userEvent.click(within(screen.getByRole('status')).getByRole('button', { name: 'Закрити' }))
+
+    it.each([
+      ['its «Закрити»', closeOutcome],
+      ['Escape', () => userEvent.keyboard('{Escape}')],
+      [
+        'the sheet’s ✕',
+        () =>
+          userEvent.click(
+            within(screen.getByRole('dialog'))
+              .getAllByRole('button', { name: 'Закрити' })
+              .find((button) => !screen.getByRole('status').contains(button))!,
+          ),
+      ],
+    ])(
+      'closed by %s: the card that held it is gone, and the focus moves to the results, not the page',
+      async (_, close) => {
+        refusedThenGone(() => Promise.resolve(response({ results: [], total: 0 })))
+        await refuse()
+        await close()
+
+        await screen.findByText(empty)
+        expect(document.body).not.toHaveFocus()
+        expect(results()).toHaveFocus()
+      },
+    )
+
+    it('the card is still listed: the focus stays at the copy', async () => {
+      const still = response({
+        results: [
+          {
+            ...candidate,
+            locations: candidate.locations.map((location) => ({
+              ...location,
+              copies: location.copies.map((copy) => ({
+                ...copy,
+                status: 'UNAVAILABLE' as const,
+                canRequest: false,
+              })),
+            })),
+          },
+        ],
+      })
+
+      refusedThenGone(() => Promise.resolve(still))
+      await refuse()
+      await closeOutcome()
+
+      expect(await screen.findByText('Тимчасово не даю')).toHaveFocus()
+      expect(discoverCalls()).toHaveLength(2)
+    })
+
+    it('the focus moved on before the read answered: it stays where it was moved', async () => {
+      let answer: (value: CatalogDiscoveryResponse) => void = () => undefined
+
+      refusedThenGone(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve
+          }),
+      )
+      await refuse()
+      await closeOutcome()
+
+      expect(copyLine()).toHaveFocus()
+
+      const field = screen.getByRole('textbox', { name: /Назва, автор або ISBN/ })
+
+      await userEvent.click(field)
+      answer(response({ results: [], total: 0 }))
+
+      await screen.findByText(empty)
+      expect(field).toHaveFocus()
+    })
+
+    it('a failed read keeps the card and the focus at the copy; once «Повторити» takes the card, the results get it', async () => {
+      let fail = true
+
+      refusedThenGone(() =>
+        fail
+          ? Promise.reject(new Error('Мережа'))
+          : Promise.resolve(response({ results: [], total: 0 })),
+      )
+      await refuse()
+      await closeOutcome()
+
+      await screen.findByRole('alert')
+      expect(copyLine()).toHaveFocus()
+
+      fail = false
+      await userEvent.click(screen.getByRole('button', { name: 'Повторити' }))
+
+      await screen.findByText(empty)
+      expect(document.body).not.toHaveFocus()
+      expect(results()).toHaveFocus()
+    })
   })
 })
 

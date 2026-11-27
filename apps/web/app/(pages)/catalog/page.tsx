@@ -2,7 +2,16 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import {
   CATALOG_DISCOVERY_AVAILABILITY,
   CATALOG_DISCOVERY_TRANSLATION,
@@ -95,6 +104,36 @@ function CatalogDiscovery() {
   return <CatalogSearch viewerId={session.user.id} />
 }
 
+/**
+ * The results keep the keyboard focus on the page. A list read again can take away the element that
+ * held it — the line of a copy no longer listed, «Повторити» once a read succeeds — and the browser then
+ * drops the focus to the top of the page; it goes to the results instead. Focus already moved elsewhere
+ * (to an element that is still on the page) stays where it was moved.
+ */
+function useFocusKeptInResults() {
+  const results = useRef<HTMLElement>(null)
+  const lastFocused = useRef<Element>(null)
+
+  // After every render of the search, since any of them may replace the list; before paint, so the
+  // focus is never seen on the body.
+  useLayoutEffect(() => {
+    const last = lastFocused.current
+
+    if (last === null || last.isConnected) return
+    lastFocused.current = null
+    if (document.activeElement === null || document.activeElement === document.body) {
+      results.current?.focus()
+    }
+  })
+
+  return {
+    ref: results,
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (event.target instanceof Element) lastFocused.current = event.target
+    },
+  }
+}
+
 type CatalogSearchProps = { viewerId: string }
 
 function CatalogSearch({ viewerId }: CatalogSearchProps) {
@@ -114,6 +153,7 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
     page,
   )
   const search = discovery.state
+  const keptFocus = useFocusKeptInResults()
 
   function hrefFor(
     target: SearchAddress,
@@ -171,7 +211,9 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
     if (outcome === 'unavailable') void discovery.refresh()
   }
 
-  const response = search.status === 'ready' ? search.response : undefined
+  // A failed background read still shows the answer it was to replace (and the outcomes in its cards).
+  const response =
+    search.status === 'ready' || search.status === 'refreshFailed' ? search.response : undefined
 
   return (
     <Shell>
@@ -269,36 +311,57 @@ function CatalogSearch({ viewerId }: CatalogSearchProps) {
         </>
       )}
 
-      {response !== undefined && response.results.length > 0 && (
-        <ResultCardGrid>
-          {response.results.map((result) => (
-            <LocalResultCard
-              key={result.work.id}
-              candidate={result}
-              href={`/works/${result.work.id}`}
-              note={MATCH_LABELS[result.matchedOn]}
-              locations={result.locations}
-              renderLocationActions={(location) => (
-                <NetworkOwnerCopies
-                  owner={location}
-                  bookTitle={result.work.title}
-                  onRequested={readAfterRequest}
-                  onOutcomeClosed={readAfterClosing}
-                />
-              )}
-            />
-          ))}
-        </ResultCardGrid>
-      )}
+      {/* Mounted for as long as the search has an answer, through every read of it in the background:
+          the place the focus goes when a read takes away the element that held it. */}
+      {response !== undefined && (
+        <section aria-label="Результати пошуку" tabIndex={-1} {...keptFocus}>
+          {search.status === 'refreshFailed' && (
+            <>
+              <FormStatus
+                error={
+                  new Error(
+                    `Не вдалося оновити список, показано попередні результати. ${search.message}`,
+                  )
+                }
+              />
+              <p className="form__aside">
+                <button type="button" onClick={() => void discovery.refresh()}>
+                  Повторити
+                </button>
+              </p>
+            </>
+          )}
 
-      {response !== undefined && response.results.length === 0 && (
-        <p className="empty">
-          {page > 1
-            ? 'На цій сторінці книжок немає.'
-            : scope === 'CIRCLE'
-              ? 'Серед ваших книжок і книжок друзів доступних примірників не знайшлося.'
-              : 'Серед доступних користувачам примірників нічого не знайшлося.'}
-        </p>
+          {response.results.length > 0 ? (
+            <ResultCardGrid>
+              {response.results.map((result) => (
+                <LocalResultCard
+                  key={result.work.id}
+                  candidate={result}
+                  href={`/works/${result.work.id}`}
+                  note={MATCH_LABELS[result.matchedOn]}
+                  locations={result.locations}
+                  renderLocationActions={(location) => (
+                    <NetworkOwnerCopies
+                      owner={location}
+                      bookTitle={result.work.title}
+                      onRequested={readAfterRequest}
+                      onOutcomeClosed={readAfterClosing}
+                    />
+                  )}
+                />
+              ))}
+            </ResultCardGrid>
+          ) : (
+            <p className="empty">
+              {page > 1
+                ? 'На цій сторінці книжок немає.'
+                : scope === 'CIRCLE'
+                  ? 'Серед ваших книжок і книжок друзів доступних примірників не знайшлося.'
+                  : 'Серед доступних користувачам примірників нічого не знайшлося.'}
+            </p>
+          )}
+        </section>
       )}
 
       {search.status !== 'idle' && (
